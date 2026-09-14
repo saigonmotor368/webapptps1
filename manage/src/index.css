@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+/* Đúng bảng màu + font thật của website TPS1 (xem app/globals.css :root ở
+   repo gốc) — trước đây sale-webapp tự đặt màu xanh generic không khớp
+   thương hiệu. Dùng cho các trang khách hàng (Đặt hàng, Đơn hàng của tôi);
+   trang nội bộ nhân viên vẫn giữ slate/green Tailwind mặc định như cũ. */
+@theme {
+  --color-brand-primary: #0f6f4b;
+  --color-brand-primary-dark: #0b5a3c;
+  --color-brand-cream: #f6f7f4;
+  --color-brand-ink: #14231c;
+  --color-brand-muted: #59665f;
+  --color-brand-gold: #f5c84c;
+  --color-brand-red: #c7372f;
+  --font-brand: "Be Vietnam Pro", "Segoe UI", Arial, sans-serif;
+}

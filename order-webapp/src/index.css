@@ -1,0 +1,103 @@
+@import "tailwindcss";
+
+:root {
+  --tps1-green: #0f6f4b;
+  --tps1-green-dark: #0b5a3c;
+  --tps1-green-deep: #0a3d29;
+  --tps1-amber: #e0742f;
+  --tps1-amber-dark: #c4601f;
+  --tps1-ink: #14231c;
+  --tps1-ink-2: #59665f;
+  --tps1-cream: #f6f7f4;
+  --tps1-paper: #fffdf8;
+}
+
+* {
+  font-family: "Be Vietnam Pro", "Segoe UI", system-ui, sans-serif;
+}
+
+html {
+  /* PWA fullscreen an toàn cho tai thỏ/notch khi cài lên màn hình chính */
+  padding-top: env(safe-area-inset-top);
+}
+
+body {
+  background: var(--tps1-cream);
+  color: var(--tps1-ink);
+  -webkit-tap-highlight-color: transparent;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--tps1-green) 30%, transparent);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@keyframes tps1-rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.tps1-rise {
+  animation: tps1-rise 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes tps1-drift {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(2%, -3%) scale(1.05);
+  }
+}
+.tps1-drift {
+  animation: tps1-drift 14s ease-in-out infinite;
+}
+
+@keyframes pulse-subtle {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(1.03); }
+}
+.animate-pulse-subtle {
+  animation: pulse-subtle 6s ease-in-out infinite;
+}
+
+/* Glassmorphism & High-end UI elements */
+.glass-panel {
+  background: rgba(12, 36, 25, 0.78);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.glass-input {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.glass-input:focus {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(52, 211, 153, 0.7);
+  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.15);
+}
+
