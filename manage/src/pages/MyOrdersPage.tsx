@@ -61,8 +61,11 @@ export default function MyOrdersPage() {
     setLoading(true);
     setError('');
     try {
-      const apiUrl = import.meta.env.VITE_API_BASE_URL || '/api';
-      const res = await fetch(`${apiUrl}/customer/orders`, {
+      const apiBase = (
+        import.meta.env.VITE_API_BASE_URL ||
+        (import.meta.env.DEV ? '' : 'https://thucphamsomot.vn')
+      ).replace(/\/$/, '');
+      const res = await fetch(`${apiBase}/api/customer/orders`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();

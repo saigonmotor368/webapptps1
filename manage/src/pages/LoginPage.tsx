@@ -21,9 +21,12 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      // In dev we proxy to http://localhost:3000, in prod Vercel rewrite or full URL
-      const apiUrl = import.meta.env.VITE_API_BASE_URL || '/api';
-      const res = await fetch(`${apiUrl}/sale-auth`, {
+      // In dev we proxy to http://localhost:3001, in prod full URL with fallback
+      const apiBase = (
+        import.meta.env.VITE_API_BASE_URL ||
+        (import.meta.env.DEV ? '' : 'https://thucphamsomot.vn')
+      ).replace(/\/$/, '');
+      const res = await fetch(`${apiBase}/api/sale-auth`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ identifier, password }),

@@ -5,7 +5,10 @@
 // chế Zalo Mini App đang dùng. Các route /api/customer/** hầu hết đã có sẵn
 // header CORS "Access-Control-Allow-Origin: *" nên gọi cross-origin được
 // ngay (xem README.md mục "Backend cần vá thêm" cho 2 route còn thiếu).
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+const API_BASE = (
+  import.meta.env.VITE_API_BASE_URL ||
+  (import.meta.env.DEV ? '' : 'https://thucphamsomot.vn')
+).replace(/\/$/, '');
 
 const TOKEN_KEY = 'tps1_order_session_token';
 
