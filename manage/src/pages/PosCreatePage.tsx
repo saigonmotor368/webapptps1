@@ -8,7 +8,7 @@ import ProductSearchBox, { type SearchProductItem } from '../components/ProductS
 import { getApiBase } from '../lib/apiBase';
 import {
   Search, Plus, Tag, Truck, RefreshCw, ShoppingCart, User, X, CheckCircle2, AlertTriangle, PlusCircle, ClipboardEdit,
-  Calendar, FileSpreadsheet, Clock, MapPin
+  Calendar, Clock, MapPin
 } from 'lucide-react';
 
 function money(v: number) { return new Intl.NumberFormat('vi-VN').format(Math.round(Number(v) || 0)) + 'đ'; }
@@ -45,7 +45,7 @@ export interface CutoffInfo {
   earliestDate?: string;
 }
 
-// Giai đoạn C & P2: Đơn hàng POS hỗ trợ ngày giao, điểm giao, mã KiotViet, ghi chú dòng
+// Đơn hàng POS hỗ trợ ngày giao, điểm giao và ghi chú dòng.
 interface OrderTab {
   id: string;
   idempotencyKey: string; // Khóa chống trùng lặp đơn (UUID sinh 1 lần/tab, gửi lên server)
@@ -58,7 +58,6 @@ interface OrderTab {
   deliveryPhone: string;
   deliveryAddress: string;
   saveNewAddress?: boolean;
-  externalRef: string; // Mã đơn KiotViet
   note: string;
   cart: CartItem[];
   deletedOriginalItems?: DeletedOriginalItem[]; // WP6: danh sách mặt hàng đã xóa khỏi đơn cũ
@@ -92,7 +91,6 @@ function newTab(defaultDeliveryDate = ''): OrderTab {
     deliveryAddressId: '',
     deliveryName: '', deliveryPhone: '', deliveryAddress: '',
     saveNewAddress: false,
-    externalRef: '',
     note: '',
     cart: [],
     deletedOriginalItems: [],
@@ -222,7 +220,7 @@ export default function PosCreatePage() {
 
   // "Xử lý đơn hàng" từ OrdersPage/OrderDetailPage (?processOrderId=...) — mở
   // đúng đơn phiếu tạm ngay trong màn Bán hàng, có mã đơn để dễ theo dõi,
-  // khớp luồng KiotViet thật (mục brief 2026-09-10). Chỉ chạy 1 lần khi có
+  // khớp luồng xử lý đơn của TPS1. Chỉ chạy 1 lần khi có
   // param, xoá param sau khi đã nạp xong để F5 không nạp lại tab trùng.
   const loadedProcessOrderRef = useRef<string | null>(null);
   useEffect(() => {
@@ -682,7 +680,7 @@ export default function PosCreatePage() {
     const {
       selectedCustomerId, cart, customerDebt,
       deliveryDate, deliveryAddressId, deliveryAddress, deliveryName, deliveryPhone, saveNewAddress,
-      externalRef, note, voucherCode, packageWeightG, packageDimensions, assignedDriver, codCollectAmount
+      note, voucherCode, packageWeightG, packageDimensions, assignedDriver, codCollectAmount
     } = activeTab;
 
     if (!selectedCustomerId) { alert('Vui lòng chọn khách hàng!'); return; }
@@ -732,7 +730,6 @@ export default function PosCreatePage() {
           deliveryAddress: deliveryAddress || null,
           deliveryAlias: 'Địa chỉ giao hàng',
           saveNewAddress: !!saveNewAddress,
-          externalRef: externalRef ? externalRef.trim() : null,
           note: note || null,
           voucherCode: voucherCode || null,
           packageWeightG: packageWeightG ? Number(packageWeightG) : null,
@@ -793,7 +790,7 @@ export default function PosCreatePage() {
         </div>
       )}
 
-      {/* Tabs — giống nguyên lý mở nhiều đơn của KiotViet */}
+      {/* Các tab để xử lý nhiều đơn đồng thời */}
       <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
         {tabs.map((t, idx) => {
           const cust = customers.find(c => c.id === t.selectedCustomerId);
@@ -818,8 +815,7 @@ export default function PosCreatePage() {
         </button>
       </div>
 
-      {/* Chuyển chế độ Bán nhanh/Bán thường/Bán giao hàng — khớp thanh dưới
-          cùng màn Sale/POS KiotViet thật (mục 14.3-6 KE_HOACH) */}
+      {/* Chuyển chế độ Bán nhanh/Bán thường/Bán giao hàng */}
       <div className="flex gap-1.5 bg-slate-100 rounded-xl p-1 w-fit">
         {SALE_MODES.map(m => (
           <button key={m.value} onClick={() => updateActiveTab({ mode: m.value })}
@@ -865,17 +861,6 @@ export default function PosCreatePage() {
                   </p>
                 ) : null}
               </div>
-            </div>
-
-            {/* Mã đơn KiotViet */}
-            <div>
-              <label className="text-xs font-semibold text-slate-500 mb-1.5 flex items-center gap-1">
-                <FileSpreadsheet size={13} className="text-blue-600" />
-                Mã đơn / Hóa đơn KiotViet (nếu có)
-              </label>
-              <input type="text" value={activeTab.externalRef} onChange={e => updateActiveTab({ externalRef: e.target.value })}
-                placeholder="VD: HDB00123, HD00456... để đối chiếu 10 đơn thử"
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20" />
             </div>
 
             {activeTab.selectedCustomerId && (() => {

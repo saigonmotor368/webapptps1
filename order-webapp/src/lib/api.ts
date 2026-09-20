@@ -32,9 +32,9 @@ export class ApiError extends Error {
 
 async function request<T = any>(
   path: string,
-  opts: { method?: string; body?: unknown; auth?: boolean; formData?: FormData } = {}
+  opts: { method?: string; body?: unknown; auth?: boolean; formData?: FormData; signal?: AbortSignal } = {}
 ): Promise<T> {
-  const { method = 'GET', body, auth = true, formData } = opts;
+  const { method = 'GET', body, auth = true, formData, signal } = opts;
   const headers: Record<string, string> = {};
   if (!formData) headers['Content-Type'] = 'application/json';
   if (auth) {
@@ -45,6 +45,7 @@ async function request<T = any>(
     method,
     headers,
     body: formData ? formData : body !== undefined ? JSON.stringify(body) : undefined,
+    signal,
   });
   let data: any = null;
   try {
@@ -103,13 +104,14 @@ export const api = {
 
   session: () => request<{ ok: true; session: CustomerSession }>('/api/customer/session'),
 
-  products: (params: { search?: string; category?: string; page?: number } = {}) => {
+  products: (params: { search?: string; category?: string; page?: number } = {}, signal?: AbortSignal) => {
     const qs = new URLSearchParams();
     if (params.search) qs.set('search', params.search);
     if (params.category) qs.set('category', params.category);
     qs.set('page', String(params.page || 0));
     return request<{ ok: true; total: number; page: number; pageSize: number; products: Product[] }>(
-      `/api/customer/products?${qs}`
+      `/api/customer/products?${qs}`,
+      { signal }
     );
   },
   productCategories: () =>
@@ -163,6 +165,7 @@ export interface Product {
   category: string | null;
   unit: string;
   imageUrl: string | null;
+  thumbUrl?: string | null;
   price: number;
   priceOnRequest?: boolean;
   available: boolean;

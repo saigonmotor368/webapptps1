@@ -1,6 +1,6 @@
 // Phiếu tạm / phiếu giao hàng — dùng chung cho PosCreatePage (in ngay sau khi
 // tạo đơn), OrderDetailPage và OrdersPage (nút "In phiếu"). Khớp cấu trúc file
-// export thật "ChiTietDatHang" của KiotViet: Mã hàng/Tên hàng/ĐVT/SL/Đơn giá/
+// Phiếu chi tiết đơn hàng: Mã hàng/Tên hàng/ĐVT/SL/Đơn giá/
 // Giảm giá/Thành tiền + tổng, cộng thêm tên sale lên đơn (mục brief 2026-09-10).
 export interface PrintableOrderItem {
   name: string;

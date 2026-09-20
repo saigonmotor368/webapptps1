@@ -338,7 +338,7 @@ const PRICEBOOK_PROBLEM_LABELS: Record<string, string> = {
 };
 
 // Modal "Nhập bảng giá từ Excel" (mục 14.2-3 KE_HOACH) — khớp file thật
-// MauFileBangGia.xlsx của KiotViet: Mã hàng + Giá vốn + Giá nhập cuối + N cột
+// File bảng giá: Mã hàng + Giá vốn + Giá nhập cuối + N cột
 // giá theo hạng khách. Có tùy chọn "% từ giá vốn" thay vì gõ số tiền tay,
 // đúng yêu cầu gốc trong brief. Cùng nguyên tắc dry-run trước khi ghi thật.
 function ImportPricebookModal({ apiBase, token, onClose, onDone }: { apiBase: string; token: string | null; onClose: () => void; onDone: () => void }) {

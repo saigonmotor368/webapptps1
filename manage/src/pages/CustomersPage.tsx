@@ -91,7 +91,6 @@ export default function CustomersPage() {
       c.phone,
       c.partner_code,
       c.company,
-      c.kiotviet_code,
       c.customer_group,
     ]
       .filter(Boolean)
@@ -192,11 +191,11 @@ export default function CustomersPage() {
         <div className="flex gap-2 flex-wrap items-center">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-            <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Tìm theo tên, SĐT, mã KV, nhóm..." className="pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500"
+            <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Tìm theo tên, SĐT, mã khách hàng, nhóm..." className="pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500"
             />
           </div>
 
-          {/* Lọc theo nhóm khách hàng KiotViet */}
+          {/* Lọc theo nhóm khách hàng */}
           {groups.length > 0 && (
             <select
               value={selectedGroup}
@@ -336,11 +335,6 @@ export default function CustomersPage() {
                   </td>
                   <td className="px-4 py-4">
                     <div className="font-mono text-xs font-semibold text-slate-700">{customer.partner_code}</div>
-                    {customer.kiotviet_code && (
-                      <div className="text-[11px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded inline-block mt-0.5 font-mono">
-                        KV: {customer.kiotviet_code}
-                      </div>
-                    )}
                   </td>
                   <td className="px-4 py-4">
                     <div className="flex items-center gap-1.5">
@@ -361,11 +355,6 @@ export default function CustomersPage() {
                       {!customer.address && (
                         <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 px-1 rounded">
                           Thiếu địa chỉ
-                        </span>
-                      )}
-                      {customer.kiotviet_opening_debt != null && Number(customer.kiotviet_opening_debt) !== 0 && (
-                        <span className="text-[10px] text-slate-500">
-                          Nợ KV: {money(customer.kiotviet_opening_debt)}
                         </span>
                       )}
                     </div>

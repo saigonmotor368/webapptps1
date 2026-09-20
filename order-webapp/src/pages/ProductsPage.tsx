@@ -18,6 +18,7 @@ import {
   ArrowRight,
   Printer,
   ChevronDown,
+  PackageOpen,
 } from 'lucide-react';
 import { api, type Product, ApiError } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -45,6 +46,26 @@ interface OrderTab {
 }
 
 const STORAGE_KEY = 'tps1_b2b_pos_tabs_v1';
+const PRODUCT_CACHE_TTL_MS = 2 * 60 * 1000;
+const productSearchCache = new Map<string, { expiresAt: number; products: Product[] }>();
+
+function productImage(product: Product) {
+  return product.thumbUrl || product.imageUrl || '';
+}
+
+function ProductThumbnail({ product, compact = false }: { product: Product; compact?: boolean }) {
+  const [failed, setFailed] = useState(false);
+  const src = productImage(product);
+  return (
+    <div className={`${compact ? 'w-11 h-11 rounded-lg' : 'w-12 h-12 rounded-xl'} border border-[#14231c]/10 bg-[#f6f7f4] overflow-hidden shrink-0 flex items-center justify-center text-[#59665f]/40`}>
+      {src && !failed ? (
+        <img src={src} alt={product.name} loading="lazy" decoding="async" onError={() => setFailed(true)} className="w-full h-full object-cover" />
+      ) : (
+        <PackageOpen size={compact ? 18 : 20} />
+      )}
+    </div>
+  );
+}
 
 function getTomorrowDateStr() {
   const d = new Date();
@@ -72,7 +93,7 @@ export default function ProductsPage() {
   const { session, logout } = useAuth();
   const navigate = useNavigate();
 
-  // Đa tab đặt hàng KiotViet style
+  // Nhiều tab giúp nhân viên lên đồng thời nhiều đơn đặt hàng.
   const [tabs, setTabs] = useState<OrderTab[]>(() => {
     try {
       const saved = sessionStorage.getItem(STORAGE_KEY);
@@ -111,6 +132,48 @@ export default function ProductsPage() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const searchTimeoutRef = useRef<any>(null);
+  const searchAbortRef = useRef<AbortController | null>(null);
+  const searchRequestRef = useRef(0);
+
+  const loadProducts = useCallback(async (rawQuery: string, openDropdown = true) => {
+    const query = rawQuery.trim();
+    const cacheKey = `${session?.id || 'anonymous'}:${query.toLocaleLowerCase('vi-VN')}`;
+    const cached = productSearchCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      setSearchResults(cached.products);
+      setIsDropdownOpen(openDropdown);
+      setSelectedResultIndex(0);
+      return;
+    }
+
+    searchAbortRef.current?.abort();
+    const controller = new AbortController();
+    searchAbortRef.current = controller;
+    const requestId = ++searchRequestRef.current;
+    setSearchLoading(true);
+    try {
+      const res = await api.products(query ? { search: query } : {}, controller.signal);
+      if (requestId !== searchRequestRef.current) return;
+      const products = res.products || [];
+      productSearchCache.set(cacheKey, { expiresAt: Date.now() + PRODUCT_CACHE_TTL_MS, products });
+      setSearchResults(products);
+      setIsDropdownOpen(openDropdown);
+      setSelectedResultIndex(0);
+    } catch (err) {
+      if (controller.signal.aborted) return;
+      if (err instanceof ApiError && err.status === 401) {
+        logout();
+        navigate('/dang-nhap');
+      }
+    } finally {
+      if (requestId === searchRequestRef.current) setSearchLoading(false);
+    }
+  }, [logout, navigate, session?.id]);
+
+  useEffect(() => {
+    void loadProducts('', false);
+    return () => searchAbortRef.current?.abort();
+  }, [loadProducts]);
 
   // Phím tắt F3 để focus ô tìm kiếm
   useEffect(() => {
@@ -125,35 +188,19 @@ export default function ProductsPage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Xử lý tìm kiếm autocomplete (Debounced 150ms)
+  // Tìm kiếm có debounce, hủy request cũ và dùng cache ngắn hạn để tránh chờ lặp lại.
   useEffect(() => {
     const q = searchQuery.trim();
     if (!q) {
-      setSearchResults([]);
       setIsDropdownOpen(false);
       return;
     }
 
     clearTimeout(searchTimeoutRef.current);
-    searchTimeoutRef.current = setTimeout(async () => {
-      setSearchLoading(true);
-      try {
-        const res = await api.products({ search: q });
-        setSearchResults(res.products || []);
-        setIsDropdownOpen(true);
-        setSelectedResultIndex(0);
-      } catch (err) {
-        if (err instanceof ApiError && err.status === 401) {
-          logout();
-          navigate('/dang-nhap');
-        }
-      } finally {
-        setSearchLoading(false);
-      }
-    }, 150);
+    searchTimeoutRef.current = setTimeout(() => void loadProducts(q), 320);
 
     return () => clearTimeout(searchTimeoutRef.current);
-  }, [searchQuery, logout, navigate]);
+  }, [searchQuery, loadProducts]);
 
   // Đóng dropdown khi click ra ngoài
   useEffect(() => {
@@ -323,7 +370,7 @@ export default function ProductsPage() {
   return (
     <div className="flex flex-col gap-3">
       {/* ========================================================================= */}
-      {/* THANH TOP BAR: Ô TÌM KIẾM HÀNG HÓA F3 & HỆ THỐNG ĐA TAB KIOTVIET */}
+      {/* THANH TOP BAR: TÌM KIẾM HÀNG HÓA & HỆ THỐNG ĐA TAB */}
       {/* ========================================================================= */}
       <div className="bg-white rounded-2xl border border-[#14231c]/10 shadow-sm p-3 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
         {/* Khối tìm kiếm F3 */}
@@ -338,6 +385,7 @@ export default function ProductsPage() {
               onKeyDown={handleSearchKeyDown}
               onFocus={() => {
                 if (searchResults.length > 0) setIsDropdownOpen(true);
+                else void loadProducts('');
               }}
               placeholder="Tìm hàng hóa theo tên hoặc mã SKU (F3)..."
               className="w-full pl-10 pr-8 py-2.5 bg-[#f8faf7] border border-[#14231c]/15 rounded-xl text-sm font-medium focus:outline-none focus:bg-white focus:ring-2 focus:ring-[#0070f3]/25 focus:border-[#0070f3] transition-all"
@@ -365,7 +413,7 @@ export default function ProductsPage() {
             />
           </div>
 
-          {/* DROPDOWN XỔ XUỐNG KHI TÌM KIẾM (KIOTVIET DROPOUT LIST) */}
+          {/* Danh sách gợi ý sản phẩm */}
           {isDropdownOpen && (
             <div
               ref={dropdownRef}
@@ -383,7 +431,7 @@ export default function ProductsPage() {
               ) : (
                 <div className="divide-y divide-[#14231c]/5">
                   <div className="bg-[#f8faf7] px-3.5 py-2 text-[11px] font-bold text-[#59665f] uppercase tracking-wider flex justify-between">
-                    <span>Mã / Tên sản phẩm</span>
+                    <span>Hình ảnh / Mã / Tên sản phẩm</span>
                     <span>ĐVT • Đơn giá</span>
                   </div>
                   {searchResults.map((p, idx) => (
@@ -397,6 +445,7 @@ export default function ProductsPage() {
                           : 'hover:bg-[#f6f7f4] text-[#14231c]'
                       }`}
                     >
+                      <ProductThumbnail product={p} />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-mono font-bold bg-[#14231c]/5 px-1.5 py-0.5 rounded text-[#59665f]">
@@ -485,7 +534,7 @@ export default function ProductsPage() {
       {/* ========================================================================= */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-start">
         {/* --------------------------------------------------------------------- */}
-        {/* CỘT TRÁI: BẢNG DANH SÁCH MẶT HÀNG DẠNG CỘT KIOTVIET (8/12) */}
+        {/* CỘT TRÁI: BẢNG DANH SÁCH MẶT HÀNG (8/12) */}
         {/* --------------------------------------------------------------------- */}
         <div className="lg:col-span-8 bg-white rounded-2xl border border-[#14231c]/10 shadow-sm flex flex-col min-h-[560px] overflow-hidden">
           {/* Header Bảng cột */}
@@ -494,6 +543,7 @@ export default function ProductsPage() {
               <thead>
                 <tr className="bg-[#f8faf7] border-b border-[#14231c]/10 text-[12px] font-bold text-[#59665f] uppercase tracking-wider">
                   <th className="py-3 px-3 w-12 text-center">#</th>
+                  <th className="py-3 px-3 w-16">Ảnh</th>
                   <th className="py-3 px-3 w-28">Mã hàng</th>
                   <th className="py-3 px-3">Tên hàng hóa</th>
                   <th className="py-3 px-3 w-20 text-center">ĐVT</th>
@@ -506,7 +556,7 @@ export default function ProductsPage() {
               <tbody className="divide-y divide-[#14231c]/5 text-sm font-medium">
                 {activeTab.items.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-20 text-center text-[#59665f]">
+                    <td colSpan={9} className="py-20 text-center text-[#59665f]">
                       <div className="w-16 h-16 rounded-full bg-[#f6f7f4] flex items-center justify-center mx-auto mb-3 text-[#59665f]/40">
                         <Search size={28} />
                       </div>
@@ -529,6 +579,10 @@ export default function ProductsPage() {
                         {/* STT */}
                         <td className="py-3 px-3 text-center text-xs text-[#59665f] font-mono">
                           {idx + 1}
+                        </td>
+
+                        <td className="py-2 px-3">
+                          <ProductThumbnail product={item.product} compact />
                         </td>
 
                         {/* Mã hàng SKU */}
@@ -776,7 +830,7 @@ export default function ProductsPage() {
               </div>
             )}
 
-            {/* NÚT ĐẶT HÀNG XANH DƯƠNG CHUẨN KIOTVIET */}
+            {/* Nút gửi đơn đặt hàng */}
             <button
               type="button"
               onClick={handleSubmitOrder}
@@ -800,7 +854,7 @@ export default function ProductsPage() {
       </div>
 
       {/* ========================================================================= */}
-      {/* THANH TRẠNG THÁI CHÂN TRANG (KIOTVIET BOTTOM BAR) */}
+      {/* Thanh trạng thái chân trang */}
       {/* ========================================================================= */}
       <div className="bg-white rounded-xl border border-[#14231c]/10 p-2.5 px-4 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-[#59665f]">
         <div className="flex items-center gap-3">

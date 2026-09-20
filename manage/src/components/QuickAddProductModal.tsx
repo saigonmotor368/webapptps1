@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { X, Upload } from 'lucide-react';
 
 // Thêm sản phẩm nhanh ngay trong lúc bán/xử lý đơn — khớp "+Thêm mới hàng
-// hóa" trong dropdown tìm hàng của Sale/POS KiotViet thật: điền tên + đơn vị +
+// hóa" trong dropdown tìm hàng của Sale/POS: điền tên + đơn vị +
 // giá, có thể up ảnh, mã hàng (SKU) tự sinh ở backend (POST /api/admin/products,
 // slugifySku()). Dùng chung cho PosCreatePage và OrderDetailPage.
 export interface QuickAddedProduct {

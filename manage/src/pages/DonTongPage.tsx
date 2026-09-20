@@ -773,7 +773,6 @@ export default function DonTongPage() {
                       />
                     </th>
                     <th className="py-3 px-3">Mã đơn</th>
-                    <th className="py-3 px-3">Mã KiotViet</th>
                     <th className="py-3 px-3">Khách hàng</th>
                     <th className="py-3 px-3">Điểm giao hàng</th>
                     <th className="py-3 px-3 text-center">Số món</th>
@@ -785,7 +784,7 @@ export default function DonTongPage() {
                 <tbody className="divide-y divide-slate-100">
                   {orders.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="py-12 text-center text-slate-400">
+                      <td colSpan={8} className="py-12 text-center text-slate-400">
                         Không có đơn hàng nào trong ngày {deliveryDate}
                       </td>
                     </tr>
@@ -818,7 +817,6 @@ export default function DonTongPage() {
                             )}
                           </td>
                           <td className="py-3 px-3 font-mono font-bold text-slate-800">{o.orderCode}</td>
-                          <td className="py-3 px-3 font-mono text-slate-500">{o.externalRef || '—'}</td>
                           <td className="py-3 px-3">
                             <p className="font-semibold text-slate-800">{o.customerName}</p>
                             <p className="text-[11px] text-slate-400">{o.customerCode}</p>

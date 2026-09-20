@@ -59,7 +59,7 @@ const PAYMENT_COLORS: Record<string, string> = {
   refunded: 'bg-pink-100 text-pink-700',
 };
 
-// Đổi từ dạng card sang list + filter đúng màn "Đặt hàng" của KiotViet thật
+// Dạng danh sách + bộ lọc phù hợp khi quản lý số lượng đơn lớn
 // (mục brief 2026-09-10: "quản lý đơn hàng sao ko làm dạng list + filter...
 // nhiều đơn để thế này e ko ổn") — bấm vào 1 dòng mới mở chi tiết, không
 // hiện hết thông tin từng đơn ngay trên danh sách như bản card cũ.
@@ -102,7 +102,7 @@ export default function OrdersPage() {
       let query = supabase
         .from('orders')
         .select(`
-          id, order_code, external_ref, status, payment_status, payment_method, source,
+          id, order_code, status, payment_status, payment_method, source,
           subtotal, discount_amount, discount_percent, shipping_amount, grand_total,
           paid_amount, debt_amount,
           voucher_code, voucher_discount, manual_discount_percent,
@@ -153,7 +153,7 @@ export default function OrdersPage() {
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
 
   const filteredOrders = orders.filter(order => {
-    const hay = [order.order_code, order.external_ref, order.customer_code, order.customer_name, order.customer_phone, order.customer_company, order.delivery_address].filter(Boolean).join(' ').toLowerCase();
+    const hay = [order.order_code, order.customer_code, order.customer_name, order.customer_phone, order.customer_company, order.delivery_address].filter(Boolean).join(' ').toLowerCase();
     return (!searchTerm || hay.includes(searchTerm.toLowerCase()))
       && (!filterStatus || order.status === filterStatus)
       && (!filterPayment || order.payment_status === filterPayment)
@@ -372,11 +372,6 @@ export default function OrdersPage() {
                       <span className="text-[10px] font-semibold uppercase tracking-wider bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">
                         {SOURCE_LABELS[order.source] || order.source || 'Admin'}
                       </span>
-                      {order.external_ref && (
-                        <span className="text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded" title="Mã đơn KiotViet">
-                          KV: {order.external_ref}
-                        </span>
-                      )}
                     </div>
                   </td>
                   <td className="px-4 py-3 text-slate-500">{dt(order.created_at)}</td>

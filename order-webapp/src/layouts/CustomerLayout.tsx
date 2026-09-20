@@ -72,7 +72,7 @@ export default function CustomerLayout() {
               <UserCircle2 size={16} /> Tài khoản
             </NavLink>
 
-            {/* Hotline hiển thị ngay góc phải giống KiotViet */}
+            {/* Hotline hiển thị cố định để khách dễ liên hệ */}
             <a
               href="tel:0898902222"
               className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-400/30 text-xs font-semibold tracking-wide ml-2"

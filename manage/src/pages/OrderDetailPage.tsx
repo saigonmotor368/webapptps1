@@ -422,7 +422,7 @@ export default function OrderDetailPage() {
     finally { setSearchingProducts(false); }
   };
 
-  // Dropdown gợi ý tự tìm khi gõ, giống màn Sale/POS KiotViet thật — không
+  // Dropdown gợi ý tự tìm khi gõ để thêm hàng nhanh — không
   // cần bấm "Tìm" hay Enter nữa (mục brief 2026-09-10).
   useEffect(() => {
     if (productSearch.trim().length < 2) { setProductResults([]); return; }

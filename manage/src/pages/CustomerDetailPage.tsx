@@ -225,17 +225,16 @@ export default function CustomerDetailPage() {
           p_tier_expiry_date: form.discount_tier === 'CUSTOM' ? form.tier_expiry_date || null : null,
         });
         if (error) throw error;
-        // Cập nhật các trường KiotViet trực tiếp trên bảng vip_accounts
+        // Nhóm khách hàng là dữ liệu vận hành nội bộ của TPS1.
         try {
           await supabase
             .from('vip_accounts')
             .update({
-              kiotviet_code: form.kiotviet_code?.trim() || null,
               customer_group: form.customer_group?.trim() || null,
             })
             .eq('id', id);
-        } catch (kvErr) {
-          console.warn('Chưa cập nhật cột KiotViet (có thể chưa chạy migration):', kvErr);
+        } catch (groupErr) {
+          console.warn('Chưa cập nhật nhóm khách hàng:', groupErr);
         }
         alert('✅ Đã lưu thông tin khách hàng');
         await loadCustomer();
@@ -401,11 +400,6 @@ export default function CustomerDetailPage() {
             {!isNew && (
               <div className="flex items-center gap-2 mt-0.5">
                 <span className="text-xs text-slate-500 font-mono font-medium">{form.partner_code}</span>
-                {form.kiotviet_code && (
-                  <span className="text-[11px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 font-mono font-medium">
-                    KV: {form.kiotviet_code}
-                  </span>
-                )}
                 {['admin', 'truong_phong'].includes(user?.role || '') && (
                   <button
                     type="button"
@@ -493,23 +487,11 @@ export default function CustomerDetailPage() {
                   className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm disabled:bg-slate-50" />
               </div>
               <div>
-                <label className="text-xs font-semibold text-slate-500 uppercase block mb-1">Mã KiotViet (nếu có)</label>
-                <input disabled={!canEdit} type="text" value={form.kiotviet_code || ''} onChange={(e) => setField('kiotviet_code', e.target.value)}
-                  placeholder="VD: KH00123"
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm disabled:bg-slate-50 font-mono" />
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-slate-500 uppercase block mb-1">Nhóm khách hàng (KiotViet)</label>
+                <label className="text-xs font-semibold text-slate-500 uppercase block mb-1">Nhóm khách hàng</label>
                 <input disabled={!canEdit} type="text" value={form.customer_group || ''} onChange={(e) => setField('customer_group', e.target.value)}
-                  placeholder="VD: HIEPPHATFOOD"
+                  placeholder="VD: Nhà hàng, trường học, bếp công nghiệp..."
                   className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm disabled:bg-slate-50" />
               </div>
-              {form.kiotviet_opening_debt != null && Number(form.kiotviet_opening_debt) !== 0 && (
-                <div className="col-span-2 bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800 flex items-center justify-between">
-                  <span>Nợ đầu kỳ KiotViet (tham chiếu, không tính vào hạn mức):</span>
-                  <span className="font-bold text-sm">{money(form.kiotviet_opening_debt)}</span>
-                </div>
-              )}
             </div>
             <p className="text-xs text-slate-400 italic">
               Xuất hóa đơn điện tử (VAT) chưa được tích hợp — cần thêm nhà cung cấp hóa đơn điện tử (MISA/VNPT/Viettel...) mới xuất được hóa đơn thật. Mã số thuế ở đây lưu sẵn để dùng khi tích hợp.
