@@ -116,6 +116,8 @@ export const api = {
   },
   productCategories: () =>
     request<{ ok: true; categories: string[] }>('/api/customer/products?meta=1'),
+  productCatalog: (signal?: AbortSignal) =>
+    request<ProductCatalogResponse>('/api/customer/products?catalog=1', { signal }),
 
   orders: () => request<{ ok: true; orders: Order[] }>('/api/customer/orders'),
 
@@ -170,6 +172,24 @@ export interface Product {
   priceOnRequest?: boolean;
   available: boolean;
   stockQty?: number;
+}
+
+export type ProductCatalogTuple = [
+  id: string,
+  sku: string,
+  name: string,
+  category: string | null,
+  unit: string,
+  price: number,
+  priceOnRequest: boolean,
+  hasImage: boolean,
+];
+
+export interface ProductCatalogResponse {
+  ok: true;
+  count: number;
+  imageBaseUrl: string;
+  items: ProductCatalogTuple[];
 }
 
 export interface Order {

@@ -20,7 +20,7 @@ import {
   ChevronDown,
   PackageOpen,
 } from 'lucide-react';
-import { api, type Product, ApiError } from '../lib/api';
+import { api, type Product, type ProductCatalogResponse, ApiError } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 
 function money(v: number) {
@@ -48,6 +48,49 @@ interface OrderTab {
 const STORAGE_KEY = 'tps1_b2b_pos_tabs_v1';
 const PRODUCT_CACHE_TTL_MS = 2 * 60 * 1000;
 const productSearchCache = new Map<string, { expiresAt: number; products: Product[] }>();
+const PRODUCT_CATALOG_TTL_MS = 5 * 60 * 1000;
+const productCatalogMemoryCache = new Map<string, { expiresAt: number; products: Product[] }>();
+const productSearchKeys = new Map<string, string>();
+
+function normalizeSearch(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
+    .toLocaleLowerCase('vi-VN')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function decodeCatalog(catalog: ProductCatalogResponse) {
+  const imageBaseUrl = catalog.imageBaseUrl.replace(/\/$/, '');
+  return catalog.items.map(([id, sku, name, category, unit, price, priceOnRequest, hasImage]) => {
+    const imageUrl = hasImage && imageBaseUrl ? `${imageBaseUrl}/${id}.webp` : null;
+    const product: Product = { id, sku, name, category, unit, price: Number(price) || 0, priceOnRequest, imageUrl, thumbUrl: imageUrl, available: true };
+    productSearchKeys.set(id, normalizeSearch(`${sku} ${name} ${category || ''}`));
+    return product;
+  });
+}
+
+function searchLocalCatalog(products: Product[], rawQuery: string) {
+  const query = normalizeSearch(rawQuery);
+  if (!query) return products.slice(0, 24);
+  const words = query.split(' ').filter(Boolean);
+  const ranked: Array<{ product: Product; score: number }> = [];
+  for (const product of products) {
+    const key = productSearchKeys.get(product.id) || normalizeSearch(`${product.sku} ${product.name}`);
+    if (!words.every((word) => key.includes(word))) continue;
+    const sku = normalizeSearch(product.sku || '');
+    const name = normalizeSearch(product.name);
+    const score = sku === query ? 0 : sku.startsWith(query) ? 1 : name === query ? 2 : name.startsWith(query) ? 3 : 4;
+    ranked.push({ product, score });
+  }
+  return ranked
+    .sort((a, b) => a.score - b.score || Number(Boolean(productImage(b.product))) - Number(Boolean(productImage(a.product))) || a.product.name.localeCompare(b.product.name, 'vi'))
+    .slice(0, 60)
+    .map(({ product }) => product);
+}
 
 function productImage(product: Product) {
   return product.thumbUrl || product.imageUrl || '';
@@ -123,6 +166,7 @@ export default function ProductsPage() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [selectedResultIndex, setSelectedResultIndex] = useState(0);
+  const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
 
   // Submit & Modal state
   const [submitting, setSubmitting] = useState(false);
@@ -134,6 +178,7 @@ export default function ProductsPage() {
   const searchTimeoutRef = useRef<any>(null);
   const searchAbortRef = useRef<AbortController | null>(null);
   const searchRequestRef = useRef(0);
+  const catalogAbortRef = useRef<AbortController | null>(null);
 
   const loadProducts = useCallback(async (rawQuery: string, openDropdown = true) => {
     const query = rawQuery.trim();
@@ -175,6 +220,55 @@ export default function ProductsPage() {
     return () => searchAbortRef.current?.abort();
   }, [loadProducts]);
 
+  useEffect(() => {
+    const customerId = session?.id;
+    if (!customerId) return;
+    const now = Date.now();
+    const memory = productCatalogMemoryCache.get(customerId);
+    if (memory && memory.expiresAt > now) {
+      setCatalogProducts(memory.products);
+      setSearchResults(memory.products.slice(0, 24));
+      return;
+    }
+
+    const storageKey = `tps1_product_catalog_v1_${customerId}`;
+    try {
+      const saved = sessionStorage.getItem(storageKey);
+      if (saved) {
+        const parsed = JSON.parse(saved) as { expiresAt: number; catalog: ProductCatalogResponse };
+        if (parsed.expiresAt > now && Array.isArray(parsed.catalog?.items)) {
+          const products = decodeCatalog(parsed.catalog);
+          productCatalogMemoryCache.set(customerId, { expiresAt: parsed.expiresAt, products });
+          setCatalogProducts(products);
+          setSearchResults(products.slice(0, 24));
+          return;
+        }
+        sessionStorage.removeItem(storageKey);
+      }
+    } catch {
+      sessionStorage.removeItem(storageKey);
+    }
+
+    const controller = new AbortController();
+    catalogAbortRef.current = controller;
+    void api.productCatalog(controller.signal).then((catalog) => {
+      if (controller.signal.aborted) return;
+      const products = decodeCatalog(catalog);
+      const expiresAt = Date.now() + PRODUCT_CATALOG_TTL_MS;
+      productCatalogMemoryCache.set(customerId, { expiresAt, products });
+      setCatalogProducts(products);
+      setSearchResults((current) => searchQuery.trim() ? current : products.slice(0, 24));
+      try {
+        sessionStorage.setItem(storageKey, JSON.stringify({ expiresAt, catalog }));
+      } catch {
+        // Nếu trình duyệt giới hạn bộ nhớ, vẫn giữ catalog trong RAM cho phiên hiện tại.
+      }
+    }).catch((error) => {
+      if (!controller.signal.aborted) console.warn('Không tải được catalog nền:', error);
+    });
+    return () => controller.abort();
+  }, [session?.id]);
+
   // Phím tắt F3 để focus ô tìm kiếm
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -196,11 +290,20 @@ export default function ProductsPage() {
       return;
     }
 
+    if (catalogProducts.length > 0) {
+      searchAbortRef.current?.abort();
+      setSearchLoading(false);
+      setSearchResults(searchLocalCatalog(catalogProducts, q));
+      setIsDropdownOpen(true);
+      setSelectedResultIndex(0);
+      return;
+    }
+
     clearTimeout(searchTimeoutRef.current);
-    searchTimeoutRef.current = setTimeout(() => void loadProducts(q), 320);
+    searchTimeoutRef.current = setTimeout(() => void loadProducts(q), 120);
 
     return () => clearTimeout(searchTimeoutRef.current);
-  }, [searchQuery, loadProducts]);
+  }, [searchQuery, loadProducts, catalogProducts]);
 
   // Đóng dropdown khi click ra ngoài
   useEffect(() => {
