@@ -159,9 +159,13 @@ export default function ProductSearchBox({
     const params = new URLSearchParams({ catalog: '1' });
     if (customerId) params.set('customerId', customerId);
     fetch(`${apiBase}/api/admin/products?${params}`, { headers: { Authorization: `Bearer ${token}` } })
-      .then((res) => res.json())
-      .then((data) => {
-        if (!active || !data.ok || !Array.isArray(data.products)) return;
+      .then(async (res) => ({ status: res.status, data: await res.json() }))
+      .then(({ status, data }) => {
+        if (!active) return;
+        if (!data.ok || !Array.isArray(data.products)) {
+          console.warn(`[TPS1 catalog] HTTP ${status}: ${data.error || 'Dữ liệu catalog không hợp lệ'}`);
+          return;
+        }
         const expiresAt = Date.now() + PRODUCT_SEARCH_CACHE_TTL;
         const products = decodeCatalog(data.products as CompactCatalogRow[]);
         productCatalogCache.set(catalogKey, { products, expiresAt });
@@ -174,7 +178,7 @@ export default function ProductSearchBox({
           sessionStorage.setItem(`${CATALOG_STORAGE_PREFIX}${customerId || 'base'}`, JSON.stringify({ expiresAt, rows: data.products }));
         } catch { /* sessionStorage đầy vẫn dùng cache RAM */ }
       })
-      .catch(() => { /* API search sẽ fallback */ });
+      .catch((error) => { console.warn('[TPS1 catalog] Không tải được catalog, dùng tìm kiếm API dự phòng:', error); });
     return () => { active = false; };
   }, [apiBase, token, customerId]);
 
