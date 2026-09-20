@@ -509,14 +509,15 @@ export default function CustomerDetailPage() {
             </div>
             <label className="block text-xs font-semibold text-slate-500 mt-5 mb-1.5">Mật khẩu tạm thời</label>
             <div className="flex flex-col sm:flex-row gap-2">
-              <input data-customer-detail-password value={temporaryPassword} readOnly onFocus={(e) => e.currentTarget.select()}
+              <input data-customer-detail-password type="text" value={temporaryPassword} readOnly autoCapitalize="off" autoCorrect="off" spellCheck={false} onFocus={(e) => e.currentTarget.select()}
+                style={{ textTransform: 'none' }}
                 className="min-w-0 flex-1 rounded-xl border border-slate-300 bg-slate-50 px-3 py-3 font-mono text-base font-bold tracking-wide text-slate-800 focus:outline-none focus:ring-2 focus:ring-green-500/30" />
               <button onClick={copyTemporaryPassword} title="Copy cả mã khách hàng và mật khẩu tạm" className={`shrink-0 inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-sm font-semibold ${passwordCopied ? 'bg-green-100 text-green-700' : 'bg-green-600 text-white hover:bg-green-700'}`}>
                 {passwordCopied ? <CheckCircle2 size={17} /> : <Copy size={17} />} {passwordCopied ? 'Đã copy' : 'Copy thông tin đăng nhập'}
               </button>
             </div>
             <p className="mt-4 rounded-xl bg-amber-50 border border-amber-200 px-3 py-2.5 text-xs leading-relaxed text-amber-800">
-              Nút copy sẽ lấy cả mã khách hàng và mật khẩu tạm. Khách bắt buộc đổi mật khẩu ở lần đăng nhập tiếp theo.
+              Mật khẩu có phân biệt chữ hoa/chữ thường, hệ thống không tự đổi ký tự. Nút copy sẽ lấy cả mã khách hàng và mật khẩu tạm. Khách bắt buộc đổi mật khẩu ở lần đăng nhập tiếp theo.
             </p>
             <button onClick={() => setTemporaryPassword(null)} className="mt-4 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50">Đóng</button>
           </div>
