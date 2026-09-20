@@ -1,6 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Search, RefreshCw, X, Package, Plus } from 'lucide-react';
 
+type ProductSearchCacheEntry = { expiresAt: number; products: SearchProductItem[] };
+const PRODUCT_SEARCH_CACHE_TTL = 5 * 60 * 1000;
+const productSearchCache = new Map<string, ProductSearchCacheEntry>();
+
 export interface SearchProductItem {
   id: string;
   sku: string;
@@ -160,6 +164,16 @@ export default function ProductSearchBox({
         if (customerId) params.set('customerId', customerId);
         params.set('pageSize', '50');
 
+        const cacheKey = `${apiBase}|${customerId || ''}|${cat}|${q.trim().toLocaleLowerCase('vi-VN')}`;
+        const cached = productSearchCache.get(cacheKey);
+        if (cached && cached.expiresAt > Date.now()) {
+          setResults(cached.products);
+          setSelectedIndex(0);
+          setIsOpen(true);
+          setLoading(false);
+          return;
+        }
+
         const res = await fetch(`${apiBase}/api/admin/products?${params.toString()}`, {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
           signal: controller.signal,
@@ -184,6 +198,7 @@ export default function ProductSearchBox({
             lowStock: !!p.lowStock,
             categoryLabel: p.category || '',
           }));
+          productSearchCache.set(cacheKey, { products: items, expiresAt: Date.now() + PRODUCT_SEARCH_CACHE_TTL });
           setResults(items);
           setSelectedIndex(0);
           setIsOpen(true);
@@ -205,7 +220,7 @@ export default function ProductSearchBox({
   useEffect(() => {
     const timer = setTimeout(() => {
       performSearch(searchTerm, selectedCategory);
-    }, 250);
+    }, 120);
     return () => clearTimeout(timer);
   }, [searchTerm, selectedCategory, performSearch]);
 

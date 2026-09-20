@@ -110,8 +110,7 @@ export default function OrdersPage() {
           customer_id, customer_code, customer_name, customer_phone, customer_company,
           customer_tier, pricing_status, price_revision, confirmation_document_status,
           delivery_type, delivery_address, delivery_name, delivery_phone, delivery_alias,
-          sales_rep_id, item_count,
-          order_items ( id, product_id, name, sku, unit, quantity, base_unit_price, unit_price, discount_percent, line_total, pricing_note )
+          sales_rep_id, item_count
         `)
         .order('created_at', { ascending: false })
         .limit(500);
@@ -142,7 +141,9 @@ export default function OrdersPage() {
         : { data: [] as { id: string; name: string }[] };
       const repMap = new Map((reps || []).map((r: any) => [r.id, r.name]));
 
-      setOrders((data || []).map((o: any) => ({ ...o, order_items: o.order_items || [], sales_rep_name: repMap.get(o.sales_rep_id) || null })));
+      // Màn danh sách chỉ cần item_count. Chi tiết sản phẩm được tải khi mở
+      // OrderDetailPage; không kéo toàn bộ order_items của 500 đơn mỗi lần vào trang.
+      setOrders((data || []).map((o: any) => ({ ...o, sales_rep_name: repMap.get(o.sales_rep_id) || null })));
     } catch (err) {
       console.error('Lỗi tải đơn hàng:', err);
     } finally {
@@ -380,7 +381,7 @@ export default function OrdersPage() {
                     <p className="text-xs text-slate-400">{order.customer_code}{order.customer_company ? ` · ${order.customer_company}` : ''}</p>
                   </td>
                   <td className="px-4 py-3 text-slate-500">{order.sales_rep_name || '—'}</td>
-                  <td className="px-4 py-3 text-center text-slate-600">{order.item_count || (order.order_items || []).length}</td>
+                  <td className="px-4 py-3 text-center text-slate-600">{order.item_count || 0}</td>
                   <td className="px-4 py-3 text-right font-semibold text-red-600">{money(order.grand_total)}</td>
                   <td className="px-4 py-3 text-right text-slate-600">{money(order.paid_amount || 0)}</td>
                   <td className="px-4 py-3 text-center" onClick={e => e.stopPropagation()}>

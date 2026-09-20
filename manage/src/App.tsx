@@ -1,25 +1,26 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { can } from './lib/permissions';
 import SaleLayout from './layouts/SaleLayout';
 import LoginPage from './pages/LoginPage';
-import DashboardPage from './pages/DashboardPage';
-import OrdersPage from './pages/OrdersPage';
-import OrderDetailPage from './pages/OrderDetailPage';
-import PosCreatePage from './pages/PosCreatePage';
-import CustomersPage from './pages/CustomersPage';
-import CustomerDetailPage from './pages/CustomerDetailPage';
-import SoanHangPage from './pages/SoanHangPage';
-import BulkPricingPage from './pages/BulkPricingPage';
-import MyOrdersPage from './pages/MyOrdersPage';
-import MyOrderDetailPage from './pages/MyOrderDetailPage';
-import ProductsPage from './pages/ProductsPage';
-import ProductDetailPage from './pages/ProductDetailPage';
-import CongNoPage from './pages/CongNoPage';
-import BaoCaoPage from './pages/BaoCaoPage';
-import DatHangPage from './pages/DatHangPage';
-import DatHangExcelPage from './pages/DatHangExcelPage';
-import DonTongPage from './pages/DonTongPage';
+const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const OrdersPage = lazy(() => import('./pages/OrdersPage'));
+const OrderDetailPage = lazy(() => import('./pages/OrderDetailPage'));
+const PosCreatePage = lazy(() => import('./pages/PosCreatePage'));
+const CustomersPage = lazy(() => import('./pages/CustomersPage'));
+const CustomerDetailPage = lazy(() => import('./pages/CustomerDetailPage'));
+const SoanHangPage = lazy(() => import('./pages/SoanHangPage'));
+const BulkPricingPage = lazy(() => import('./pages/BulkPricingPage'));
+const MyOrdersPage = lazy(() => import('./pages/MyOrdersPage'));
+const MyOrderDetailPage = lazy(() => import('./pages/MyOrderDetailPage'));
+const ProductsPage = lazy(() => import('./pages/ProductsPage'));
+const ProductDetailPage = lazy(() => import('./pages/ProductDetailPage'));
+const CongNoPage = lazy(() => import('./pages/CongNoPage'));
+const BaoCaoPage = lazy(() => import('./pages/BaoCaoPage'));
+const DatHangPage = lazy(() => import('./pages/DatHangPage'));
+const DatHangExcelPage = lazy(() => import('./pages/DatHangExcelPage'));
+const DonTongPage = lazy(() => import('./pages/DonTongPage'));
 
 const LoadingScreen = () => (
   <div className="min-h-screen flex items-center justify-center bg-[#0B130E] text-white">Đang tải...</div>
@@ -69,7 +70,8 @@ function App() {
   return (
     <AuthProvider>
       <Router>
-        <Routes>
+        <Suspense fallback={<LoadingScreen />}>
+          <Routes>
           <Route path="/dang-nhap" element={<LoginPage />} />
           <Route path="/" element={<ProtectedRoute><SaleLayout /></ProtectedRoute>}>
             <Route index element={<HomeRoute />} />
@@ -91,7 +93,8 @@ function App() {
             <Route path="don-hang-cua-toi/:id" element={<CustomerOnlyRoute><MyOrderDetailPage /></CustomerOnlyRoute>} />
             <Route path="dat-hang/excel" element={<CustomerOnlyRoute><DatHangExcelPage /></CustomerOnlyRoute>} />
           </Route>
-        </Routes>
+          </Routes>
+        </Suspense>
       </Router>
     </AuthProvider>
   );
