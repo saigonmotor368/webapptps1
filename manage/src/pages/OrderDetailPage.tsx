@@ -404,6 +404,7 @@ export default function OrderDetailPage() {
   const totals = calcTotals();
 
   const isLocked = order && (['shipping', 'completed', 'canceled'].includes(order.status) || ['paid', 'refunded'].includes(order.payment_status) || !!order.delivery_confirmed_at);
+  const isTerminalStatus = !!order && ['completed', 'canceled'].includes(order.status);
   // Cột delivery_confirmed_at chỉ có sau migration 20260920g — chưa chạy thì giữ luồng cũ.
   const reconcileAvailable = !!order && 'delivery_confirmed_at' in order && ['confirmed', 'preparing', 'shipping'].includes(order.status) && order.pricing_status === 'finalized';
 
@@ -664,7 +665,8 @@ export default function OrderDetailPage() {
           <select
             value={order.status}
             onChange={e => changeStatus(e.target.value)}
-            disabled={saving}
+            disabled={saving || isTerminalStatus}
+            title={isTerminalStatus ? 'Đơn đã ở trạng thái kết thúc, không thể chuyển ngược' : 'Cập nhật trạng thái đơn hàng'}
             className="px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500/20">
             {Object.entries(STATUS_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           </select>
