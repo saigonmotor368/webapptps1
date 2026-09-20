@@ -67,6 +67,7 @@ interface PackingOrder {
 function OrderPackingWorkflow() {
   const { user, token } = useAuth();
   const apiBase = import.meta.env.VITE_API_BASE_URL || '';
+  const [deliveryDate, setDeliveryDate] = useState<string>('');
   const [orders, setOrders] = useState<PackingOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<PackingFilter>('active');
@@ -80,9 +81,10 @@ function OrderPackingWorkflow() {
     try {
       let query = supabase
         .from('orders')
-        .select('id, order_code, customer_name, customer_company, status, confirmed_at, item_count, packing_status, packed_by')
+        .select('id, order_code, customer_name, customer_company, status, confirmed_at, item_count, packing_status, packed_by, delivery_date')
         .in('status', PACKING_STATUSES)
         .order('confirmed_at', { ascending: true });
+      if (deliveryDate) query = query.eq('delivery_date', deliveryDate);
       if (filter === 'active') query = query.in('packing_status', ['not_started', 'in_progress']);
       else query = query.eq('packing_status', filter);
 
@@ -102,7 +104,7 @@ function OrderPackingWorkflow() {
     } finally {
       setLoading(false);
     }
-  }, [filter]);
+  }, [filter, deliveryDate]);
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
 
@@ -174,20 +176,42 @@ function OrderPackingWorkflow() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap justify-between gap-2 items-center">
-        <div className="flex rounded-lg border border-slate-200 overflow-hidden text-sm">
-          {([
-            ['active', 'Cần xử lý'],
-            ['not_started', 'Chưa soạn'],
-            ['in_progress', 'Đang soạn'],
-            ['done', 'Đã soạn'],
-          ] as [PackingFilter, string][]).map(([v, l]) => (
-            <button key={v} onClick={() => setFilter(v)}
-              className={`px-3 py-2 border-l border-slate-200 first:border-l-0 ${filter === v ? 'bg-slate-800 text-white' : 'bg-white text-slate-600'}`}>
-              {l}
-            </button>
-          ))}
+      <div className="flex flex-wrap justify-between gap-3 items-center bg-white p-3 rounded-2xl border border-slate-100 shadow-sm">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex rounded-lg border border-slate-200 overflow-hidden text-sm">
+            {([
+              ['active', 'Cần xử lý'],
+              ['not_started', 'Chưa soạn'],
+              ['in_progress', 'Đang soạn'],
+              ['done', 'Đã soạn'],
+            ] as [PackingFilter, string][]).map(([v, l]) => (
+              <button key={v} onClick={() => setFilter(v)}
+                className={`px-3 py-2 border-l border-slate-200 first:border-l-0 ${filter === v ? 'bg-slate-800 text-white font-medium' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>
+                {l}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-1.5 pl-2 border-l border-slate-200 text-sm">
+            <span className="text-xs font-semibold text-slate-500">Ngày giao:</span>
+            <input
+              type="date"
+              value={deliveryDate}
+              onChange={(e) => setDeliveryDate(e.target.value)}
+              className="border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-green-500/20"
+            />
+            {deliveryDate && (
+              <button
+                type="button"
+                onClick={() => setDeliveryDate('')}
+                className="text-xs text-slate-400 hover:text-slate-600 underline"
+              >
+                Tất cả ngày
+              </button>
+            )}
+          </div>
         </div>
+
         <button onClick={fetchOrders} className="p-2 border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50" title="Tải lại">
           <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
         </button>

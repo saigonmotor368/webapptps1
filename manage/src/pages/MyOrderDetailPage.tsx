@@ -56,6 +56,56 @@ export default function MyOrderDetailPage() {
 
   useEffect(() => { if (token) fetchOrder(); }, [token, fetchOrder]);
 
+  // Hủy / yêu cầu điều chỉnh (WP6b, D9): đơn chờ xác nhận trước giờ chốt tự hủy được; các trường hợp còn lại gửi yêu cầu cho Vận hành.
+  const [requestModal, setRequestModal] = useState<null | 'adjust' | 'cancel'>(null);
+  const [requestText, setRequestText] = useState('');
+  const [sendingRequest, setSendingRequest] = useState(false);
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '';
+
+  const sendRequest = async () => {
+    if (!order || !requestModal) return;
+    if (requestText.trim().length < 3) { alert('Vui lòng nhập nội dung/lý do yêu cầu'); return; }
+    setSendingRequest(true);
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/customer/orders/request-change`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ orderId: order.id, type: requestModal, message: requestText.trim() }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Không gửi được yêu cầu');
+      setRequestModal(null);
+      setRequestText('');
+      alert('Đã gửi yêu cầu. Nhân viên Vận hành sẽ xử lý và thông báo cho bạn.');
+      await fetchOrder();
+    } catch (err: any) {
+      alert('Lỗi: ' + (err.message || 'Không gửi được yêu cầu'));
+    } finally { setSendingRequest(false); }
+  };
+
+  const cancelPendingOrder = async () => {
+    if (!order) return;
+    const reason = prompt('Lý do hủy đơn:', '');
+    if (reason === null) return;
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/customer/orders/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ orderId: order.id, cancelReason: reason || 'Khách hàng tự hủy đơn' }),
+      });
+      const data = await res.json();
+      if (data.ok) { alert('Đã hủy đơn hàng.'); await fetchOrder(); return; }
+      if (res.status === 409) {
+        // Quá giờ chốt hoặc đơn đã được xác nhận -> chuyển sang gửi yêu cầu cho Vận hành
+        if (confirm(`${data.error}\n\nBạn có muốn gửi YÊU CẦU HỦY cho Vận hành không?`)) { setRequestText(reason || ''); setRequestModal('cancel'); }
+        return;
+      }
+      throw new Error(data.error || 'Không hủy được đơn');
+    } catch (err: any) {
+      alert('Lỗi: ' + (err.message || 'Không hủy được đơn'));
+    }
+  };
+
   const downloadDocument = async (type: 'confirmation' | 'invoice') => {
     setDownloading(type);
     try {
@@ -134,6 +184,64 @@ export default function MyOrderDetailPage() {
           </button>
         </div>
       </header>
+
+      {order.change_request && (
+        <div className={`rounded-2xl border p-4 text-sm ${
+          ['open', 'approved'].includes(order.change_request.status) ? 'bg-amber-50 border-amber-200 text-amber-900'
+            : order.change_request.status === 'rejected' ? 'bg-red-50 border-red-200 text-red-800'
+              : 'bg-green-50 border-green-200 text-green-800'}`}>
+          <p className="font-semibold">
+            {order.change_request.type === 'cancel' ? 'Yêu cầu hủy đơn' : 'Yêu cầu điều chỉnh đơn'} — {
+              order.change_request.status === 'open' ? 'đang chờ Vận hành xử lý'
+                : order.change_request.status === 'approved' ? 'đã được chấp nhận, đang xử lý'
+                  : order.change_request.status === 'rejected' ? 'chưa được chấp nhận'
+                    : 'đã hoàn tất'}
+          </p>
+          <p className="mt-1 text-xs opacity-80">Nội dung bạn gửi ({dt(order.change_request.requested_at)}): “{order.change_request.message}”</p>
+          {order.change_request.handled_note && <p className="mt-1 text-xs">Phản hồi của Vận hành: {order.change_request.handled_note}</p>}
+        </div>
+      )}
+
+      {['pending', 'confirmed', 'preparing'].includes(order.status) && !['open', 'approved'].includes(order.change_request?.status) && (
+        <div className="flex gap-2 flex-wrap">
+          {order.status === 'pending' && (
+            <button onClick={cancelPendingOrder}
+              className="px-3 py-2 bg-white border border-red-200 text-red-600 rounded-xl text-sm font-medium hover:bg-red-50">
+              Hủy đơn
+            </button>
+          )}
+          <button onClick={() => { setRequestText(''); setRequestModal('adjust'); }}
+            className="px-3 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl text-sm font-medium hover:bg-slate-50">
+            Yêu cầu điều chỉnh
+          </button>
+          {order.status !== 'pending' && (
+            <button onClick={() => { setRequestText(''); setRequestModal('cancel'); }}
+              className="px-3 py-2 bg-white border border-red-200 text-red-600 rounded-xl text-sm font-medium hover:bg-red-50">
+              Yêu cầu hủy
+            </button>
+          )}
+        </div>
+      )}
+
+      {requestModal && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setRequestModal(null)}>
+          <div className="bg-white rounded-2xl p-5 w-full max-w-md space-y-3" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-bold text-slate-800">{requestModal === 'cancel' ? 'Yêu cầu hủy đơn' : 'Yêu cầu điều chỉnh đơn'} {order.order_code}</h3>
+            <p className="text-xs text-slate-500">
+              {requestModal === 'cancel' ? 'Nhập lý do hủy.' : 'Nhập nội dung cần điều chỉnh (đổi mặt hàng, số lượng, địa chỉ, giờ giao…).'} Nhân viên Vận hành sẽ xem và phản hồi cho bạn.
+            </p>
+            <textarea value={requestText} onChange={(e) => setRequestText(e.target.value)} rows={4} maxLength={500}
+              className="w-full border border-slate-200 rounded-lg p-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20" placeholder="Nội dung yêu cầu…" />
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setRequestModal(null)} className="px-3 py-2 text-sm text-slate-500">Đóng</button>
+              <button onClick={sendRequest} disabled={sendingRequest}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 disabled:opacity-50">
+                {sendingRequest ? 'Đang gửi...' : 'Gửi yêu cầu'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Items */}

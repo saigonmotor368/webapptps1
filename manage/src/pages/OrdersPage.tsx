@@ -5,7 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { printOrderSlip } from '../lib/printOrder';
 import {
   RefreshCw, Search, Eye, Printer, Clock, Truck, CheckCircle,
-  ShoppingBag, TrendingUp, ClipboardEdit, FileSpreadsheet
+  ShoppingBag, TrendingUp, ClipboardEdit, FileSpreadsheet, AlertCircle
 } from 'lucide-react';
 
 const STATUS_LABELS: Record<string, string> = {
@@ -76,14 +76,33 @@ export default function OrdersPage() {
   const [dateTo, setDateTo] = useState('');
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [changeRequests, setChangeRequests] = useState<any[]>([]);
+  const [changeRequestsMap, setChangeRequestsMap] = useState<Map<string, any>>(new Map());
+  const [filterHasRequest, setFilterHasRequest] = useState(false);
 
   const fetchOrders = useCallback(async () => {
     setLoading(true);
     try {
+      // Tải yêu cầu điều chỉnh/hủy mở (WP6b)
+      if (token) {
+        fetch(`${apiBase}/api/admin/order-change-requests?status=open`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+          .then((r) => r.json())
+          .then((d) => {
+            if (d.ok && Array.isArray(d.requests)) {
+              setChangeRequests(d.requests);
+              const m = new Map<string, any>();
+              d.requests.forEach((r: any) => m.set(r.orderId, r));
+              setChangeRequestsMap(m);
+            }
+          })
+          .catch((e) => console.warn('Lỗi tải order-change-requests:', e));
+      }
       let query = supabase
         .from('orders')
         .select(`
-          id, order_code, status, payment_status, payment_method, source,
+          id, order_code, external_ref, status, payment_status, payment_method, source,
           subtotal, discount_amount, discount_percent, shipping_amount, grand_total,
           paid_amount, debt_amount,
           voucher_code, voucher_discount, manual_discount_percent,
@@ -129,15 +148,16 @@ export default function OrdersPage() {
     } finally {
       setLoading(false);
     }
-  }, [user, dateFrom, dateTo]);
+  }, [user, dateFrom, dateTo, token, apiBase]);
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
 
   const filteredOrders = orders.filter(order => {
-    const hay = [order.order_code, order.customer_code, order.customer_name, order.customer_phone, order.customer_company, order.delivery_address].join(' ').toLowerCase();
+    const hay = [order.order_code, order.external_ref, order.customer_code, order.customer_name, order.customer_phone, order.customer_company, order.delivery_address].filter(Boolean).join(' ').toLowerCase();
     return (!searchTerm || hay.includes(searchTerm.toLowerCase()))
       && (!filterStatus || order.status === filterStatus)
-      && (!filterPayment || order.payment_status === filterPayment);
+      && (!filterPayment || order.payment_status === filterPayment)
+      && (!filterHasRequest || changeRequestsMap.has(order.id));
   });
 
   // Stats
@@ -279,6 +299,20 @@ export default function OrdersPage() {
         <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-600" />
         <span className="text-slate-400 text-sm">đến</span>
         <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-600" />
+        <button
+          onClick={() => setFilterHasRequest(!filterHasRequest)}
+          className={`px-3 py-2 rounded-lg text-sm font-semibold flex items-center gap-1.5 transition-colors ${
+            filterHasRequest
+              ? 'bg-amber-600 text-white shadow-sm'
+              : changeRequests.length > 0
+              ? 'bg-amber-50 text-amber-800 border border-amber-300 hover:bg-amber-100'
+              : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+          }`}
+          title={changeRequests.length > 0 ? `Có ${changeRequests.length} đơn có yêu cầu điều chỉnh / hủy đang chờ xử lý` : 'Lọc đơn có yêu cầu'}
+        >
+          <AlertCircle size={15} className={changeRequests.length > 0 && !filterHasRequest ? 'text-amber-600 animate-pulse' : ''} />
+          Có yêu cầu {changeRequests.length > 0 ? `(${changeRequests.length})` : '(0)'}
+        </button>
       </div>
 
       {/* Table */}
@@ -319,10 +353,31 @@ export default function OrdersPage() {
                 <tr key={order.id} onClick={() => navigate(`/don-hang/${order.id}`)}
                   className={`hover:bg-slate-50/70 cursor-pointer transition-colors ${updatingId === order.id ? 'opacity-60 pointer-events-none' : ''}`}>
                   <td className="px-4 py-3">
-                    <p className="font-semibold text-slate-800">{order.order_code}</p>
-                    <span className="text-[10px] font-semibold uppercase tracking-wider bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">
-                      {SOURCE_LABELS[order.source] || order.source || 'Admin'}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <p className="font-semibold text-slate-800">{order.order_code}</p>
+                      {changeRequestsMap.has(order.id) && (
+                        <span
+                          className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border shadow-2xs ${
+                            changeRequestsMap.get(order.id)?.type === 'cancel'
+                              ? 'bg-red-50 text-red-700 border-red-300 animate-pulse'
+                              : 'bg-amber-50 text-amber-800 border-amber-300'
+                          }`}
+                          title={`Yêu cầu của khách: "${changeRequestsMap.get(order.id)?.message || ''}"`}
+                        >
+                          {changeRequestsMap.get(order.id)?.type === 'cancel' ? '❌ Yêu cầu hủy' : '✏️ Yêu cầu sửa'}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">
+                        {SOURCE_LABELS[order.source] || order.source || 'Admin'}
+                      </span>
+                      {order.external_ref && (
+                        <span className="text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded" title="Mã đơn KiotViet">
+                          KV: {order.external_ref}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-slate-500">{dt(order.created_at)}</td>
                   <td className="px-4 py-3">

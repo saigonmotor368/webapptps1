@@ -102,6 +102,54 @@ export default function OrderDetailPage() {
   const [paymentNote, setPaymentNote] = useState('');
   const [submittingPayment, setSubmittingPayment] = useState(false);
 
+  // Yêu cầu điều chỉnh/hủy của khách (WP6b) — khách gửi, nhân viên duyệt tại đây.
+  const [changeRequests, setChangeRequests] = useState<any[]>([]);
+  const [resolvingRequest, setResolvingRequest] = useState(false);
+  const fetchChangeRequests = useCallback(async () => {
+    if (!id) return;
+    try {
+      const apiBase = import.meta.env.VITE_API_BASE_URL || '';
+      const res = await fetch(`${apiBase}/api/admin/order-change-requests?orderId=${id}&status=all`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (data.ok) setChangeRequests(data.requests || []);
+    } catch { /* bảng chưa có — bỏ qua */ }
+  }, [id, token]);
+  useEffect(() => { fetchChangeRequests(); }, [fetchChangeRequests]);
+
+  const resolveRequest = async (requestId: string, action: 'approve' | 'reject' | 'done', type: string) => {
+    let note = '';
+    if (action === 'reject') {
+      note = prompt('Lý do từ chối (khách sẽ nhận được nội dung này):', '') || '';
+      if (note.trim().length < 3) return;
+    } else if (action === 'approve' && type === 'cancel') {
+      if (!confirm('Duyệt HỦY đơn này? Đơn sẽ chuyển "Đã hủy", tồn kho (nếu có) được hoàn lại và khách nhận thông báo.')) return;
+    } else if (action === 'done') {
+      note = prompt('Ghi chú cho khách (không bắt buộc):', '') || '';
+    }
+    setResolvingRequest(true);
+    try {
+      const apiBase = import.meta.env.VITE_API_BASE_URL || '';
+      const res = await fetch(`${apiBase}/api/admin/order-change-requests/resolve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ requestId, action, note }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error);
+      if (data.next === 'process_order') { navigate(`/tao-don-hang?processOrderId=${data.orderId}`); return; }
+      if (data.canceled && data.zaloText) {
+        try { await navigator.clipboard.writeText(data.zaloText); } catch { /* bỏ qua */ }
+        const packingWarn = data.warnings?.includes('already_packing') ? '\n⚠️ Đơn đã/đang được soạn — nhớ báo Kho/Thu mua.' : '';
+        alert(`✅ Đã hủy đơn.${packingWarn}\n\nĐã sao chép thông báo Zalo để dán vào nhóm:\n${data.zaloText}`);
+      }
+      await Promise.all([fetchChangeRequests(), fetchOrder()]);
+    } catch (err: any) {
+      alert('Lỗi: ' + (err.message || 'Không xử lý được yêu cầu'));
+    } finally { setResolvingRequest(false); }
+  };
+
   const fetchPayments = useCallback(async () => {
     if (!id) return;
     try {
@@ -306,7 +354,8 @@ export default function OrderDetailPage() {
         assignedDriver: data.assigned_driver || '',
         codCollectAmount: data.cod_collect_amount != null ? String(data.cod_collect_amount) : '',
       });
-      setItemDelivered(Object.fromEntries((data.order_items || []).map((it: any) => [it.id, it.quantity_delivered != null ? String(it.quantity_delivered) : '0'])));
+      // Chưa xác nhận thực giao: mặc định = số đã chốt (giao đủ); đã xác nhận: hiện số thực giao đã lưu.
+      setItemDelivered(Object.fromEntries((data.order_items || []).map((it: any) => [it.id, String(data.delivery_confirmed_at ? (it.quantity_delivered ?? it.quantity) : it.quantity)])));
 
       const { data: tiersData } = await supabase.from('customer_tiers').select('*').order('code');
       setTiers(tiersData || []);
@@ -354,7 +403,9 @@ export default function OrderDetailPage() {
 
   const totals = calcTotals();
 
-  const isLocked = order && (['shipping', 'completed', 'canceled'].includes(order.status) || ['paid', 'refunded'].includes(order.payment_status));
+  const isLocked = order && (['shipping', 'completed', 'canceled'].includes(order.status) || ['paid', 'refunded'].includes(order.payment_status) || !!order.delivery_confirmed_at);
+  // Cột delivery_confirmed_at chỉ có sau migration 20260920g — chưa chạy thì giữ luồng cũ.
+  const reconcileAvailable = !!order && 'delivery_confirmed_at' in order && ['confirmed', 'preparing', 'shipping'].includes(order.status) && order.pricing_status === 'finalized';
 
   // Search products
   const searchProducts = async () => {
@@ -436,6 +487,12 @@ export default function OrderDetailPage() {
   };
 
   const changeStatus = async (newStatus: string) => {
+    let confirmFullDelivery = false;
+    // Hoàn thành phải qua bước xác nhận thực giao (hóa đơn tính theo số thực giao).
+    if (newStatus === 'completed' && order && 'delivery_confirmed_at' in order && !order.delivery_confirmed_at) {
+      if (!confirm('Xác nhận khách đã nhận ĐỦ 100% số lượng đã chốt?\n\nOK = giao đủ, tính hóa đơn theo số đã chốt.\nHủy = quay lại nhập số lượng thực giao từng dòng (cột "Đã giao") rồi bấm "Xác nhận thực giao".')) return;
+      confirmFullDelivery = true;
+    }
     const note = prompt(`Chuyển sang "${STATUS_LABELS[newStatus]}". Ghi chú:`, '') ?? null;
     if (note === null) return;
     setSaving(true);
@@ -444,7 +501,7 @@ export default function OrderDetailPage() {
       const res = await fetch(`${apiBase}/api/admin/orders`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ orderId: order.id, status: newStatus, note }),
+        body: JSON.stringify({ orderId: order.id, status: newStatus, note, ...(confirmFullDelivery ? { confirmFullDelivery: true } : {}) }),
       });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error);
@@ -477,6 +534,32 @@ export default function OrderDetailPage() {
     } catch (err: any) {
       alert('Lỗi: ' + (err.message || 'Không lưu được thông tin giao hàng'));
     } finally { setSavingDelivery(false); }
+  };
+
+  // Xác nhận THỰC GIAO → tính lại tiền theo số thực giao (API /reconcile-delivery). full=true: giao đủ 100%.
+  const [reconciling, setReconciling] = useState(false);
+  const reconcile = async (full: boolean) => {
+    if (!order) return;
+    if (!full && !confirm('Xác nhận số lượng thực giao đã nhập và TÍNH LẠI tiền đơn hàng?')) return;
+    setReconciling(true);
+    try {
+      const apiBase = import.meta.env.VITE_API_BASE_URL || '';
+      const res = await fetch(`${apiBase}/api/admin/orders/reconcile-delivery`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(full
+          ? { orderId: order.id, full: true }
+          : { orderId: order.id, items: Object.entries(itemDelivered).map(([itemId, qty]) => ({ itemId, quantityDelivered: Number(qty) })) }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error);
+      const diffNote = data.changes?.length ? `\n${data.changes.length} dòng lệch so với số đã chốt.` : '';
+      const overpaidNote = data.warnings?.includes('overpaid') ? '\n⚠️ Đã thu nhiều hơn tổng mới — cần hoàn/đối trừ.' : '';
+      alert(`✅ Đã xác nhận thực giao. Tổng tiền: ${money(data.preTotal)} → ${money(data.newTotal)}${diffNote}${overpaidNote}`);
+      await fetchOrder();
+    } catch (err: any) {
+      alert('Lỗi: ' + (err.message || 'Không xác nhận được thực giao'));
+    } finally { setReconciling(false); }
   };
 
   const saveFulfillment = async () => {
@@ -610,6 +693,50 @@ export default function OrderDetailPage() {
         </div>
       </header>
 
+      {changeRequests.filter((r) => ['open', 'approved'].includes(r.status)).map((r) => (
+        <div key={r.id} className="bg-amber-50 border border-amber-200 rounded-2xl p-4 space-y-2">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <p className="font-bold text-amber-900 text-sm">
+              {r.type === 'cancel' ? '🚫 Khách yêu cầu HỦY đơn' : '✏️ Khách yêu cầu ĐIỀU CHỈNH đơn'}
+              {r.afterCutoff && <span className="ml-2 text-[11px] font-semibold text-red-700 bg-red-100 px-2 py-0.5 rounded-full">Sau giờ chốt</span>}
+              {r.status === 'approved' && <span className="ml-2 text-[11px] font-semibold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full">Đã duyệt — đang điều chỉnh</span>}
+            </p>
+            <span className="text-xs text-amber-700">Gửi {dt(r.requestedAt)} · chờ {r.waitingMinutes} phút</span>
+          </div>
+          <p className="text-sm text-slate-800 bg-white border border-amber-100 rounded-lg px-3 py-2">“{r.message}”</p>
+          {(r.packingStatus && r.packingStatus !== 'not_started') && (
+            <p className="text-xs font-semibold text-red-700">⚠️ Đơn {r.packingStatus === 'done' ? 'đã soạn xong' : 'đang được soạn'} — nếu duyệt nhớ báo Kho/Thu mua.</p>
+          )}
+          {r.possiblyExported && <p className="text-xs text-amber-800">Đơn có thể đã nằm trong file tổng gửi Thu mua lúc {dt(r.lastExportedAt)} — cần báo lại.</p>}
+          <div className="flex gap-2 flex-wrap pt-1">
+            {r.status === 'open' && (
+              <>
+                <button disabled={resolvingRequest} onClick={() => resolveRequest(r.id, 'approve', r.type)}
+                  className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-semibold hover:bg-green-700 disabled:opacity-50">
+                  {r.type === 'cancel' ? 'Duyệt hủy đơn' : 'Duyệt điều chỉnh (mở Xử lý đơn hàng)'}
+                </button>
+                <button disabled={resolvingRequest} onClick={() => resolveRequest(r.id, 'reject', r.type)}
+                  className="px-3 py-1.5 bg-white border border-red-200 text-red-600 rounded-lg text-xs font-semibold hover:bg-red-50 disabled:opacity-50">
+                  Từ chối
+                </button>
+              </>
+            )}
+            {r.status === 'approved' && r.type === 'adjust' && (
+              <>
+                <button disabled={resolvingRequest} onClick={() => navigate(`/tao-don-hang?processOrderId=${r.orderId}`)}
+                  className="px-3 py-1.5 bg-white border border-slate-300 text-slate-700 rounded-lg text-xs font-semibold hover:bg-slate-50">
+                  Mở Xử lý đơn hàng
+                </button>
+                <button disabled={resolvingRequest} onClick={() => resolveRequest(r.id, 'done', r.type)}
+                  className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-semibold hover:bg-green-700 disabled:opacity-50">
+                  Đã điều chỉnh xong (báo khách)
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      ))}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Products + Pricing Editor */}
         <div className="lg:col-span-2 space-y-6">
@@ -721,12 +848,38 @@ export default function OrderDetailPage() {
                 </tbody>
               </table>
             </div>
+            {order.delivery_confirmed_at && (
+              <div className="px-4 py-3 border-t border-green-100 bg-green-50 text-xs text-green-800">
+                ✓ Đã xác nhận thực giao lúc {dt(order.delivery_confirmed_at)} bởi {order.delivery_confirmed_by || '—'}.
+                {order.pre_delivery_grand_total != null && Number(order.pre_delivery_grand_total) !== Number(order.grand_total) && (
+                  <> Tổng tiền: <b>{money(order.pre_delivery_grand_total)}</b> → <b>{money(order.grand_total)}</b>.</>
+                )}
+                {order.delivery_note ? ` Ghi chú: ${order.delivery_note}` : ''}
+              </div>
+            )}
+            {reconcileAvailable && (
+              <div className="px-4 py-3 border-t border-amber-100 bg-amber-50 flex items-center justify-between gap-3 flex-wrap">
+                <p className="text-xs text-amber-800">Nhập <b>số lượng thực giao</b> ở cột "Đã giao" rồi bấm xác nhận — hóa đơn sẽ tính theo số thực giao.</p>
+                <div className="flex gap-2">
+                  <button onClick={() => reconcile(true)} disabled={reconciling}
+                    className="px-3 py-1.5 bg-white border border-green-300 text-green-700 rounded-lg text-xs font-semibold hover:bg-green-50 disabled:opacity-50">
+                    Giao đủ 100%
+                  </button>
+                  <button onClick={() => reconcile(false)} disabled={reconciling}
+                    className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-semibold hover:bg-green-700 disabled:opacity-50">
+                    {reconciling ? 'Đang xử lý...' : 'Xác nhận thực giao & tính lại tiền'}
+                  </button>
+                </div>
+              </div>
+            )}
+            {!('delivery_confirmed_at' in order) && (
             <div className="px-4 py-2 border-t border-slate-100 flex justify-end">
               <button onClick={saveFulfillment} disabled={savingFulfillment}
                 className="px-3 py-1.5 bg-slate-100 text-slate-700 rounded-lg text-xs font-medium hover:bg-slate-200 disabled:opacity-50">
                 {savingFulfillment ? 'Đang lưu...' : 'Lưu số lượng đã giao'}
               </button>
             </div>
+            )}
 
             {/* Add Product */}
             {!isLocked && (

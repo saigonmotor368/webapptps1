@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { ArrowLeft, Download, Upload, CheckCircle2, AlertTriangle, HelpCircle, XCircle, RefreshCw } from 'lucide-react';
@@ -28,11 +28,70 @@ export default function DatHangExcelPage() {
   const [skippedRows, setSkippedRows] = useState<Record<number, boolean>>({});
   const [error, setError] = useState('');
 
+  const [deliveryDate, setDeliveryDate] = useState<string>('');
+  const [addressId, setAddressId] = useState<string>('');
+  const [addresses, setAddresses] = useState<Array<{ id: string; label: string; address: string; contact_name?: string; contact_phone?: string; is_default?: boolean }>>([]);
   const [deliveryName, setDeliveryName] = useState('');
   const [deliveryPhone, setDeliveryPhone] = useState('');
   const [deliveryAddress, setDeliveryAddress] = useState('');
+  const [cutoffWarning, setCutoffWarning] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [successCode, setSuccessCode] = useState('');
+  const [showSkippedModal, setShowSkippedModal] = useState(false);
+  const [idempotencyKey] = useState(() => `exc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
+
+  // Load cấu hình đặt hàng (giờ chốt, địa chỉ khách)
+  useEffect(() => {
+    if (!token) return;
+    const fetchConfig = async () => {
+      try {
+        const res = await fetch(`${apiBase}/api/customer/order-config`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json();
+        if (data.ok) {
+          const earliest = data.config?.earliestDate || '';
+          setDeliveryDate((prev) => prev || earliest);
+          const addrs = data.addresses || [];
+          setAddresses(addrs);
+          const def = addrs.find((a: any) => a.is_default) || addrs[0];
+          if (def) {
+            setAddressId(def.id);
+            setDeliveryName(def.contact_name || '');
+            setDeliveryPhone(def.contact_phone || '');
+            setDeliveryAddress(def.address || '');
+          }
+        }
+      } catch (err) {
+        console.error('Không tải được cấu hình đặt hàng', err);
+      }
+    };
+    fetchConfig();
+  }, [token, apiBase]);
+
+  // Kiểm tra giờ chốt khi đổi ngày giao
+  useEffect(() => {
+    if (!deliveryDate || !token) return;
+    const checkCutoff = async () => {
+      try {
+        const res = await fetch(`${apiBase}/api/customer/order-config?deliveryDate=${deliveryDate}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json();
+        if (data.ok && data.cutoff) {
+          if (data.cutoff.isLate) {
+            setCutoffWarning(`Đã qua giờ chốt (${data.cutoff.cutoffTime}) cho ngày ${deliveryDate}. Đơn sẽ được xếp ca tiếp theo.`);
+          } else {
+            setCutoffWarning('');
+          }
+        }
+      } catch {
+        // ignore
+      }
+    };
+    const timer = setTimeout(checkCutoff, 300);
+    return () => clearTimeout(timer);
+  }, [deliveryDate, token, apiBase]);
 
   const downloadTemplate = async () => {
     const res = await fetch(`${apiBase}/api/customer/order/import-excel`, { headers: { Authorization: `Bearer ${token}` } });
@@ -66,17 +125,56 @@ export default function DatHangExcelPage() {
     return false;
   }).length;
 
-  const submitOrder = async () => {
-    if (!deliveryName.trim() || !deliveryPhone.trim() || !deliveryAddress.trim()) {
-      alert('Vui lòng nhập đầy đủ tên, số điện thoại và địa chỉ giao hàng'); return;
+  // Lọc các dòng bị bỏ qua hoặc chưa xử lý
+  const skippedOrUnresolvedRows = (results || []).filter((r) => {
+    if (r.status === 'not_found' || r.status === 'invalid_quantity') return true;
+    if (r.status === 'ambiguous' && !chosenSuggestion[r.row]) return true;
+    if (r.status === 'matched' && skippedRows[r.row]) return true;
+    return false;
+  });
+
+  const handlePreSubmit = () => {
+    if (!deliveryDate) {
+      alert('Vui lòng chọn ngày giao hàng');
+      return;
     }
-    const items: { productId: string; name: string; quantity: number }[] = [];
+    if (!addressId && (!deliveryAddress.trim() || !deliveryPhone.trim() || !deliveryName.trim())) {
+      alert('Vui lòng chọn hoặc nhập đầy đủ địa chỉ giao hàng, tên và số điện thoại');
+      return;
+    }
+    if (confirmableCount === 0) {
+      alert('Chưa có sản phẩm nào hợp lệ để đặt');
+      return;
+    }
+
+    if (skippedOrUnresolvedRows.length > 0) {
+      setShowSkippedModal(true);
+    } else {
+      submitOrder();
+    }
+  };
+
+  const submitOrder = async () => {
+    setShowSkippedModal(false);
+    const items: { productId: string; name: string; quantity: number; note?: string }[] = [];
     for (const r of results || []) {
       if (r.status === 'matched' && r.product && !skippedRows[r.row]) {
-        items.push({ productId: r.product.id, name: r.product.name, quantity: r.quantity });
+        items.push({
+          productId: r.product.id,
+          name: r.product.name,
+          quantity: r.quantity,
+          note: r.note ? String(r.note).trim() : '',
+        });
       } else if (r.status === 'ambiguous' && chosenSuggestion[r.row]) {
         const chosen = r.suggestions?.find((s) => s.id === chosenSuggestion[r.row]);
-        if (chosen) items.push({ productId: chosen.id, name: chosen.name, quantity: r.quantity });
+        if (chosen) {
+          items.push({
+            productId: chosen.id,
+            name: chosen.name,
+            quantity: r.quantity,
+            note: r.note ? String(r.note).trim() : '',
+          });
+        }
       }
     }
     if (items.length === 0) { alert('Chưa có sản phẩm nào để đặt'); return; }
@@ -89,10 +187,15 @@ export default function DatHangExcelPage() {
         body: JSON.stringify({
           source: 'zalo_mini_app',
           orderSessionToken: token,
-          items,
+          deliveryDate,
+          addressId: addressId || undefined,
+          deliveryName: deliveryName || undefined,
+          deliveryPhone: deliveryPhone || undefined,
+          deliveryAddress: deliveryAddress || undefined,
           deliveryType: 'shipping',
           deliveryAlias: 'Địa chỉ giao hàng',
-          deliveryName, deliveryPhone, deliveryAddress,
+          idempotencyKey,
+          items,
           note: `Đặt hàng từ file Excel: ${file?.name || ''}`,
         }),
       });
@@ -227,18 +330,130 @@ export default function DatHangExcelPage() {
           ))}
 
           {confirmableCount > 0 && (
-            <div className="bg-white rounded-2xl border border-[#14231c]/8 shadow-sm p-5 space-y-3">
+            <div className="bg-white rounded-2xl border border-[#14231c]/8 shadow-sm p-5 space-y-4">
               <p className="text-sm font-semibold text-[#14231c]">Thông tin giao hàng ({confirmableCount} mặt hàng sẽ đặt)</p>
-              <input type="text" value={deliveryName} onChange={(e) => setDeliveryName(e.target.value)} placeholder="Tên người nhận *"
-                className="w-full border border-[#14231c]/10 rounded-lg px-3 py-2 text-sm" />
-              <input type="text" value={deliveryPhone} onChange={(e) => setDeliveryPhone(e.target.value)} placeholder="Số điện thoại *"
-                className="w-full border border-[#14231c]/10 rounded-lg px-3 py-2 text-sm" />
-              <textarea value={deliveryAddress} onChange={(e) => setDeliveryAddress(e.target.value)} placeholder="Địa chỉ giao hàng *" rows={2}
-                className="w-full border border-[#14231c]/10 rounded-lg px-3 py-2 text-sm resize-none" />
-              <button onClick={submitOrder} disabled={submitting}
-                className="w-full py-3 rounded-xl bg-[#0f6f4b] text-white font-semibold hover:bg-[#0b5a3c] disabled:opacity-60">
+              
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-[#14231c]">Ngày giao hàng *</label>
+                <input
+                  type="date"
+                  value={deliveryDate}
+                  onChange={(e) => setDeliveryDate(e.target.value)}
+                  className="w-full border border-[#14231c]/10 rounded-lg px-3 py-2 text-sm bg-white"
+                />
+                {cutoffWarning && (
+                  <p className="text-xs text-amber-700 bg-amber-50 p-2 rounded-lg border border-amber-200">
+                    ⚠️ {cutoffWarning}
+                  </p>
+                )}
+              </div>
+
+              {addresses.length > 0 && (
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-semibold text-[#14231c]">Chọn sổ địa chỉ</label>
+                  <select
+                    value={addressId}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      setAddressId(id);
+                      const chosen = addresses.find((a) => a.id === id);
+                      if (chosen) {
+                        setDeliveryName(chosen.contact_name || '');
+                        setDeliveryPhone(chosen.contact_phone || '');
+                        setDeliveryAddress(chosen.address || '');
+                      }
+                    }}
+                    className="w-full border border-[#14231c]/10 rounded-lg px-3 py-2 text-sm bg-white"
+                  >
+                    {addresses.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.label} — {a.address} {a.contact_name ? `(${a.contact_name})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  value={deliveryName}
+                  onChange={(e) => setDeliveryName(e.target.value)}
+                  placeholder="Tên người nhận *"
+                  className="w-full border border-[#14231c]/10 rounded-lg px-3 py-2 text-sm"
+                />
+                <input
+                  type="text"
+                  value={deliveryPhone}
+                  onChange={(e) => setDeliveryPhone(e.target.value)}
+                  placeholder="Số điện thoại *"
+                  className="w-full border border-[#14231c]/10 rounded-lg px-3 py-2 text-sm"
+                />
+                <textarea
+                  value={deliveryAddress}
+                  onChange={(e) => setDeliveryAddress(e.target.value)}
+                  placeholder="Địa chỉ giao hàng *"
+                  rows={2}
+                  className="w-full border border-[#14231c]/10 rounded-lg px-3 py-2 text-sm resize-none"
+                />
+              </div>
+
+              <button
+                onClick={handlePreSubmit}
+                disabled={submitting}
+                className="w-full py-3 rounded-xl bg-[#0f6f4b] text-white font-semibold hover:bg-[#0b5a3c] disabled:opacity-60 transition-colors"
+              >
                 {submitting ? 'Đang gửi đơn...' : `Xác nhận đặt ${confirmableCount} mặt hàng`}
               </button>
+            </div>
+          )}
+
+          {showSkippedModal && (
+            <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl space-y-4">
+                <div className="flex items-center gap-2.5 text-amber-600">
+                  <AlertTriangle size={22} className="shrink-0" />
+                  <h3 className="font-bold text-base text-slate-800">Còn dòng chưa được đặt</h3>
+                </div>
+                <p className="text-sm text-slate-600">
+                  File có <strong>{skippedOrUnresolvedRows.length}</strong> dòng chưa được xử lý hoặc bị bỏ qua:
+                </p>
+                <div className="max-h-48 overflow-y-auto space-y-2 border border-slate-100 rounded-xl p-3 bg-slate-50 text-xs">
+                  {skippedOrUnresolvedRows.map((r) => (
+                    <div key={r.row} className="flex items-start justify-between gap-2 pb-1.5 border-b border-slate-200 last:border-0 last:pb-0">
+                      <div>
+                        <span className="font-semibold text-slate-700">Dòng {r.row}:</span> "{r.input}" ({r.quantity})
+                      </div>
+                      <span className="text-amber-700 font-medium shrink-0">
+                        {r.status === 'not_found' && 'Không tìm thấy'}
+                        {r.status === 'invalid_quantity' && 'Sai số lượng'}
+                        {r.status === 'ambiguous' && !chosenSuggestion[r.row] && 'Chưa chọn'}
+                        {r.status === 'matched' && skippedRows[r.row] && 'Bỏ qua'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-sm text-slate-600">
+                  Bạn có muốn tiếp tục đặt <strong>{confirmableCount}</strong> mặt hàng đã khớp không?
+                </p>
+                <div className="flex items-center justify-end gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowSkippedModal(false)}
+                    className="px-4 py-2 text-sm rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-100 font-medium"
+                  >
+                    Hủy để kiểm tra lại
+                  </button>
+                  <button
+                    type="button"
+                    onClick={submitOrder}
+                    disabled={submitting}
+                    className="px-4 py-2 text-sm rounded-xl bg-[#0f6f4b] text-white hover:bg-[#0b5a3c] font-semibold"
+                  >
+                    Tiếp tục đặt {confirmableCount} mặt hàng
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>

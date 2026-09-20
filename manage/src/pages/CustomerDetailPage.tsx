@@ -225,6 +225,18 @@ export default function CustomerDetailPage() {
           p_tier_expiry_date: form.discount_tier === 'CUSTOM' ? form.tier_expiry_date || null : null,
         });
         if (error) throw error;
+        // Cập nhật các trường KiotViet trực tiếp trên bảng vip_accounts
+        try {
+          await supabase
+            .from('vip_accounts')
+            .update({
+              kiotviet_code: form.kiotviet_code?.trim() || null,
+              customer_group: form.customer_group?.trim() || null,
+            })
+            .eq('id', id);
+        } catch (kvErr) {
+          console.warn('Chưa cập nhật cột KiotViet (có thể chưa chạy migration):', kvErr);
+        }
         alert('✅ Đã lưu thông tin khách hàng');
         await loadCustomer();
       }
@@ -251,6 +263,57 @@ export default function CustomerDetailPage() {
       if (error) throw error;
       alert(`✅ Mật khẩu tạm mới cho ${form.partner_code}: ${data}\n\nGửi lại cho khách hàng, khách bắt buộc đổi mật khẩu ở lần đăng nhập tiếp theo.`);
     } catch (err: any) { alert('Lỗi: ' + err.message); }
+  };
+
+  const changePartnerCode = async () => {
+    if (!['admin', 'truong_phong'].includes(user?.role || '')) {
+      alert('Chỉ Admin hoặc Trưởng phòng mới được phép đổi mã khách hàng.');
+      return;
+    }
+    const currentCode = form.partner_code || '';
+    const input = prompt(
+      `Đổi mã khách hàng cho "${form.name}":\n(Mã nên có dạng TPS1-<VIẾTTẮT>, ví dụ: TPS1-TANVAN)\n\nNhập mã mới:`,
+      currentCode
+    );
+    if (!input) return;
+    const clean = input.trim().toUpperCase();
+    if (!clean || clean === currentCode) return;
+
+    if (!clean.startsWith('TPS1-')) {
+      alert('Mã khách hàng phải bắt đầu bằng "TPS1-", ví dụ: TPS1-TANVAN');
+      return;
+    }
+
+    if (
+      !confirm(
+        `⚠️ CẢNH BÁO QUAN TRỌNG:\nĐổi mã từ "${currentCode}" thành "${clean}"?\n\nKhách hàng sẽ phải dùng mã mới "${clean}" để đăng nhập vào hệ thống!`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      const res = await fetch(`${apiBase}/api/admin/customers/change-code`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          customerId: id,
+          newCode: clean,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || 'Không thể đổi mã khách hàng');
+      }
+
+      setField('partner_code', data.newCode || clean);
+      alert(`✅ Đã đổi mã khách hàng thành công: ${data.newCode || clean}`);
+    } catch (err: any) {
+      alert('Lỗi: ' + (err.message || 'Không thể đổi mã khách hàng'));
+    }
   };
 
   const searchProducts = async () => {
@@ -335,7 +398,26 @@ export default function CustomerDetailPage() {
                 </span>
               )}
             </div>
-            {!isNew && <p className="text-xs text-slate-400 font-mono">{form.partner_code}</p>}
+            {!isNew && (
+              <div className="flex items-center gap-2 mt-0.5">
+                <span className="text-xs text-slate-500 font-mono font-medium">{form.partner_code}</span>
+                {form.kiotviet_code && (
+                  <span className="text-[11px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 font-mono font-medium">
+                    KV: {form.kiotviet_code}
+                  </span>
+                )}
+                {['admin', 'truong_phong'].includes(user?.role || '') && (
+                  <button
+                    type="button"
+                    onClick={changePartnerCode}
+                    className="text-[11px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded font-medium transition-colors"
+                    title="Đổi mã khách hàng (TPS1-<VIẾTTẮT>)"
+                  >
+                    Đổi mã
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
         {!isNew && (
@@ -410,8 +492,26 @@ export default function CustomerDetailPage() {
                 <input disabled={!canEdit} type="text" value={form.address || ''} onChange={(e) => setField('address', e.target.value)}
                   className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm disabled:bg-slate-50" />
               </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-500 uppercase block mb-1">Mã KiotViet (nếu có)</label>
+                <input disabled={!canEdit} type="text" value={form.kiotviet_code || ''} onChange={(e) => setField('kiotviet_code', e.target.value)}
+                  placeholder="VD: KH00123"
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm disabled:bg-slate-50 font-mono" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-500 uppercase block mb-1">Nhóm khách hàng (KiotViet)</label>
+                <input disabled={!canEdit} type="text" value={form.customer_group || ''} onChange={(e) => setField('customer_group', e.target.value)}
+                  placeholder="VD: HIEPPHATFOOD"
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm disabled:bg-slate-50" />
+              </div>
+              {form.kiotviet_opening_debt != null && Number(form.kiotviet_opening_debt) !== 0 && (
+                <div className="col-span-2 bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800 flex items-center justify-between">
+                  <span>Nợ đầu kỳ KiotViet (tham chiếu, không tính vào hạn mức):</span>
+                  <span className="font-bold text-sm">{money(form.kiotviet_opening_debt)}</span>
+                </div>
+              )}
             </div>
-            <p className="text-xs text-amber-600 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+            <p className="text-xs text-slate-400 italic">
               Xuất hóa đơn điện tử (VAT) chưa được tích hợp — cần thêm nhà cung cấp hóa đơn điện tử (MISA/VNPT/Viettel...) mới xuất được hóa đơn thật. Mã số thuế ở đây lưu sẵn để dùng khi tích hợp.
             </p>
           </div>

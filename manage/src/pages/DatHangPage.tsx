@@ -1,38 +1,80 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import ProductSearchBox, { resolveThumbnailUrl } from '../components/ProductSearchBox';
 import {
-  Search, ShoppingCart, Plus, Minus, X, Upload, ImageOff, CheckCircle2, Trash2, ChevronRight, PlusCircle, Truck,
+  ShoppingCart, Plus, Minus, X, Upload, CheckCircle2, PlusCircle, Package, Trash2, ChevronRight, Truck,
+  Clock, AlertTriangle, Calendar, Star, FileText
 } from 'lucide-react';
 
 function money(v: number) { return new Intl.NumberFormat('vi-VN').format(Math.round(Number(v) || 0)) + 'đ'; }
 
+function formatMinutesLeft(mins: number) {
+  if (mins <= 0) return 'đã qua giờ chốt';
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return h > 0 ? `còn ${h}h${m > 0 ? m + 'p' : ''}` : `còn ${m} phút`;
+}
+
 interface Product {
   id: string; sku: string; name: string; category: string | null;
-  unit: string; imageUrl: string | null; price: number; priceOnRequest?: boolean; available: boolean;
+  unit: string; imageUrl: string | null; thumb_url?: string | null; price: number; priceOnRequest?: boolean; available: boolean;
 }
-interface CartLine { product: Product; quantity: number }
+interface CartLine {
+  product: Product;
+  quantity: number;
+  note?: string; // Ghi chú / quy cách từng dòng (WP3)
+}
+
+export interface CustomerAddress {
+  id: string;
+  label: string;
+  address: string;
+  contactName: string;
+  contactPhone: string;
+  isDefault: boolean;
+}
+
+export interface OrderConfigInfo {
+  serverNow: string;
+  earliestDate: string;
+  cutoffAt: string;
+  cutoffTimeStr: string;
+  minutesLeft: number;
+  isLate: boolean;
+}
 
 // Nhiều khách (đặc biệt tổ bếp/nhà máy) cần đặt NHIỀU đơn riêng biệt cùng
-// lúc (VD: đơn cho bếp sáng, đơn cho bếp trưa...) — trước đây chỉ có 1 giỏ
-// hàng duy nhất. Giờ dùng đúng khái niệm "tab đơn hàng" như màn Bán hàng của
-// nhân viên (PosCreatePage) để khách tự quản lý nhiều đơn cùng lúc.
+// lúc (VD: đơn cho bếp sáng, đơn cho bếp trưa...) — mỗi tab là 1 đơn riêng.
 interface OrderTab {
   id: string;
+  idempotencyKey: string; // Khóa chống trùng lặp đơn (WP3/F1)
   cart: Record<string, CartLine>;
+  deliveryDate: string; // Ngày giao (D1-D4)
+  deliveryAddressId: string; // ID điểm giao từ customer_addresses (D3)
   deliveryName: string;
   deliveryPhone: string;
   deliveryAddress: string;
+  isLate?: boolean;
+  minutesLeft?: number;
+  cutoffTimeStr?: string;
   note: string;
 }
 
-// Khách B2B chỉ giao tới địa chỉ đã ký hợp đồng — nạp sẵn tên/SĐT người nhận
-// + địa chỉ mặc định của khách vào mỗi tab đơn mới, không để trống bắt gõ
-// tay như trước (yêu cầu 2026-09-11).
-function newTab(defaultName: string, defaultPhone: string, defaultAddress = ''): OrderTab {
+function generateUuid(): string {
+  if (typeof crypto !== 'undefined' && typeof (crypto as any).randomUUID === 'function') {
+    return (crypto as any).randomUUID();
+  }
+  return `tab-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
+
+function newTab(defaultName = '', defaultPhone = '', defaultAddress = '', defaultDate = '', defaultAddressId = ''): OrderTab {
   return {
-    id: (crypto as any).randomUUID ? crypto.randomUUID() : `tab-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    id: generateUuid(),
+    idempotencyKey: generateUuid(),
     cart: {},
+    deliveryDate: defaultDate,
+    deliveryAddressId: defaultAddressId,
     deliveryName: defaultName,
     deliveryPhone: defaultPhone,
     deliveryAddress: defaultAddress,
@@ -51,11 +93,11 @@ const TABS_STORAGE_KEY = 'tps1_customer_order_tabs';
 export default function DatHangPage() {
   const { user, token, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const apiBase = import.meta.env.VITE_API_BASE_URL || '';
 
   const [categories, setCategories] = useState<string[]>([]);
   const [category, setCategory] = useState('');
-  const [search, setSearch] = useState('');
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -63,19 +105,36 @@ export default function DatHangPage() {
   const [page, setPage] = useState(0);
   const pageSize = 24;
 
+  const [addresses, setAddresses] = useState<CustomerAddress[]>([]);
+  const [orderConfig, setOrderConfig] = useState<OrderConfigInfo | null>(null);
+  const [frequentItems, setFrequentItems] = useState<any[]>([]);
+  const [reorderMessage, setReorderMessage] = useState('');
+
   const defaultShipping = user?.defaultShippingAddress;
   const newTabForUser = useCallback(
-    () => newTab(defaultShipping?.name || user?.name || '', defaultShipping?.phone || user?.phone || '', defaultShipping?.address || ''),
-    [defaultShipping, user?.name, user?.phone]
+    () => newTab(
+      defaultShipping?.name || user?.name || '',
+      defaultShipping?.phone || user?.phone || '',
+      defaultShipping?.address || '',
+      orderConfig?.earliestDate || '',
+      addresses.find(a => a.isDefault)?.id || addresses[0]?.id || ''
+    ),
+    [defaultShipping, user?.name, user?.phone, orderConfig?.earliestDate, addresses]
   );
 
   const [tabs, setTabs] = useState<OrderTab[]>(() => {
     try {
       const saved = sessionStorage.getItem(TABS_STORAGE_KEY);
       const parsed = saved ? JSON.parse(saved) : null;
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed.map((t: Partial<OrderTab>) => ({ ...newTabForUser(), ...t }));
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.map((t: Partial<OrderTab>) => ({
+          ...newTab(),
+          ...t,
+          idempotencyKey: t.idempotencyKey || generateUuid(),
+        }));
+      }
     } catch { /* ignore */ }
-    return [newTabForUser()];
+    return [newTab()];
   });
   const [activeTabId, setActiveTabId] = useState(() => tabs[0].id);
   const activeTab = tabs.find((t) => t.id === activeTabId) || tabs[0];
@@ -87,6 +146,119 @@ export default function DatHangPage() {
   const updateActiveTab = useCallback((patch: Partial<OrderTab> | ((t: OrderTab) => Partial<OrderTab>)) => {
     setTabs((prev) => prev.map((t) => (t.id !== activeTabId ? t : { ...t, ...(typeof patch === 'function' ? patch(t) : patch) })));
   }, [activeTabId]);
+
+  // 1. Tải order-config (nguồn giờ chốt và địa chỉ khách)
+  useEffect(() => {
+    if (!token) return;
+    fetch(`${apiBase}/api/customer/order-config`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.ok) {
+          setOrderConfig({
+            serverNow: data.serverNow,
+            earliestDate: data.earliestDate,
+            cutoffAt: data.cutoffAt,
+            cutoffTimeStr: data.cutoffTimeStr || '16:30',
+            minutesLeft: Number(data.minutesLeft) || 0,
+            isLate: Boolean(data.isLate),
+          });
+          const addrs: CustomerAddress[] = data.addresses || [];
+          setAddresses(addrs);
+          const defaultAddr = addrs.find((a) => a.isDefault) || addrs[0];
+
+          setTabs((prev) =>
+            prev.map((t) => ({
+              ...t,
+              deliveryDate: t.deliveryDate || data.earliestDate,
+              deliveryAddressId: t.deliveryAddressId || defaultAddr?.id || '',
+              deliveryAddress: t.deliveryAddress || defaultAddr?.address || '',
+              deliveryName: t.deliveryName || defaultAddr?.contactName || user?.name || '',
+              deliveryPhone: t.deliveryPhone || defaultAddr?.contactPhone || user?.phone || '',
+              cutoffTimeStr: data.cutoffTimeStr || '16:30',
+              minutesLeft: Number(data.minutesLeft) || 0,
+              isLate: Boolean(data.isLate),
+            }))
+          );
+        }
+      })
+      .catch((err) => console.warn('Lỗi lấy order-config:', err));
+  }, [apiBase, token, user]);
+
+  // 2. Cập nhật giờ chốt khi đổi ngày giao ở tab hiện tại
+  useEffect(() => {
+    if (!token || !activeTab.deliveryDate) return;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `${apiBase}/api/customer/order-config?deliveryDate=${encodeURIComponent(activeTab.deliveryDate)}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        const data = await res.json();
+        if (data.ok) {
+          updateActiveTab({
+            isLate: Boolean(data.isLate),
+            minutesLeft: Number(data.minutesLeft) || 0,
+            cutoffTimeStr: data.cutoffTimeStr || '16:30',
+          });
+        }
+      } catch { /* ignore */ }
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [activeTab.deliveryDate, apiBase, token, updateActiveTab]);
+
+  // 3. Tải danh sách mặt hàng hay đặt (WP3)
+  useEffect(() => {
+    if (!token) return;
+    fetch(`${apiBase}/api/customer/frequent-items`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.ok && Array.isArray(data.items)) {
+          setFrequentItems(data.items);
+        }
+      })
+      .catch((err) => console.warn('Lỗi lấy frequent-items:', err));
+  }, [apiBase, token]);
+
+  // 4. Nhận đơn đặt lại từ MyOrdersPage (WP3)
+  const reorderHandledRef = useRef(false);
+  useEffect(() => {
+    if (reorderHandledRef.current) return;
+    const reorder = (location.state as any)?.reorderItems;
+    if (Array.isArray(reorder) && reorder.length > 0) {
+      reorderHandledRef.current = true;
+      const reorderCart: Record<string, CartLine> = {};
+      for (const item of reorder) {
+        if (!item.productId) continue;
+        reorderCart[item.productId] = {
+          product: {
+            id: item.productId,
+            sku: item.sku || '',
+            name: item.name,
+            category: null,
+            unit: item.unit || 'Kg',
+            imageUrl: item.imageUrl || null,
+            thumb_url: item.thumb_url || null,
+            price: Number(item.price) || 0,
+            priceOnRequest: false,
+            available: true,
+          },
+          quantity: Number(item.quantity) || 1,
+          note: item.note || item.customerNote || '',
+        };
+      }
+      const t = {
+        ...newTabForUser(),
+        cart: reorderCart,
+      };
+      setTabs((prev) => [...prev, t]);
+      setActiveTabId(t.id);
+      setReorderMessage(`Đã nạp ${Object.keys(reorderCart).length} mặt hàng từ đơn cũ vào tab mới! Vui lòng chọn ngày giao.`);
+    }
+  }, [location.state, newTabForUser]);
 
   const addTab = () => {
     const t = newTabForUser();
@@ -117,20 +289,28 @@ export default function DatHangPage() {
       .then((data) => { if (data.ok) setCategories(data.categories || []); });
   }, [apiBase, token]);
 
-  // Trước đây lỗi (vd phiên hết hạn) bị nuốt âm thầm, chỉ hiện "không có sản
-  // phẩm nào" khiến khách tưởng hệ thống trống hàng — giờ hiện rõ lỗi thật,
-  // và tự đăng xuất nếu phiên hết hạn để khách đăng nhập lại ngay.
   const fetchProducts = useCallback(async () => {
     setLoading(true);
     setLoadError('');
     try {
       const params = new URLSearchParams({ page: String(page) });
-      if (search.trim()) params.set('search', search.trim());
       if (category) params.set('category', category);
       const res = await fetch(`${apiBase}/api/customer/products?${params}`, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
       if (data.ok) {
-        setProducts(data.products || []);
+        const mapped = (data.products || []).map((p: any) => ({
+          id: p.id,
+          sku: p.sku || '',
+          name: p.name,
+          category: p.category || null,
+          unit: p.unit || 'Kg',
+          imageUrl: p.imageUrl || p.image_url || null,
+          thumb_url: p.thumb_url || null,
+          price: Number(p.price || 0),
+          priceOnRequest: Boolean(p.priceOnRequest || p.price === 0),
+          available: p.available !== false,
+        }));
+        setProducts(mapped);
         setTotal(data.total || 0);
       } else if (res.status === 401) {
         alert(data.error || 'Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại');
@@ -141,60 +321,120 @@ export default function DatHangPage() {
     } catch {
       setLoadError('Không kết nối được tới máy chủ, vui lòng thử lại');
     } finally { setLoading(false); }
-  }, [apiBase, token, page, search, category, logout]);
+  }, [apiBase, token, page, category, logout]);
 
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
 
-  // B2B thường đặt số lượng lớn ngay từ đầu (vd 50kg) — cho gõ số lượng
-  // TRƯỚC khi thêm thay vì bấm + từng đơn vị một (yêu cầu 2026-09-11).
+  // B2B: số lượng thập phân (hàng kg), cho nhập trước khi thêm
   const [pendingQty, setPendingQty] = useState<Record<string, number>>({});
   const getPendingQty = (productId: string) => pendingQty[productId] ?? 1;
-  const setPendingQtyFor = (productId: string, qty: number) => setPendingQty((prev) => ({ ...prev, [productId]: Math.max(1, qty) }));
+  const setPendingQtyFor = (productId: string, qty: number) =>
+    setPendingQty((prev) => ({ ...prev, [productId]: Math.max(0.1, Math.round(qty * 100) / 100) }));
 
-  const addToCart = (p: Product, qty = 1) => {
+  const addToCart = (p: Product, qty = 1, note = '') => {
     updateActiveTab((t) => {
       const existing = t.cart[p.id];
-      return { cart: { ...t.cart, [p.id]: { product: p, quantity: (existing?.quantity || 0) + qty } } };
+      const newQty = (existing?.quantity || 0) + qty;
+      return {
+        cart: {
+          ...t.cart,
+          [p.id]: {
+            product: p,
+            quantity: Math.round(newQty * 100) / 100,
+            note: note || existing?.note || '',
+          },
+        },
+      };
     });
     setPendingQty((prev) => ({ ...prev, [p.id]: 1 }));
   };
+
   const setQty = (productId: string, qty: number) => {
     updateActiveTab((t) => {
-      if (qty <= 0) { const next = { ...t.cart }; delete next[productId]; return { cart: next }; }
-      return { cart: { ...t.cart, [productId]: { ...t.cart[productId], quantity: qty } } };
+      if (qty <= 0.001) {
+        const next = { ...t.cart };
+        delete next[productId];
+        return { cart: next };
+      }
+      return {
+        cart: {
+          ...t.cart,
+          [productId]: {
+            ...t.cart[productId],
+            quantity: Math.round(qty * 100) / 100,
+          },
+        },
+      };
+    });
+  };
+
+  const updateItemNote = (productId: string, note: string) => {
+    updateActiveTab((t) => {
+      const existing = t.cart[productId];
+      if (!existing) return t;
+      return { cart: { ...t.cart, [productId]: { ...existing, note } } };
+    });
+  };
+
+  const handleSelectAddress = (addressId: string) => {
+    const sel = addresses.find((a) => a.id === addressId);
+    if (!sel) return;
+    updateActiveTab({
+      deliveryAddressId: sel.id,
+      deliveryAddress: sel.address,
+      deliveryName: sel.contactName || activeTab.deliveryName,
+      deliveryPhone: sel.contactPhone || activeTab.deliveryPhone,
     });
   };
 
   const cartLines = Object.values(activeTab.cart);
-    // const cartCount = cart.reduce((acc, item) => acc + item.quantity, 0);
   const cartTotal = useMemo(() => cartLines.reduce((s, l) => s + l.quantity * l.product.price, 0), [cartLines]);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   const submitOrder = async () => {
-    const { deliveryName, deliveryPhone, deliveryAddress, note } = activeTab;
-    if (!deliveryAddress.trim() || !deliveryName.trim() || !deliveryPhone.trim()) {
-      alert('Vui lòng nhập đầy đủ tên, số điện thoại và địa chỉ giao hàng'); return;
+    const { deliveryDate, deliveryAddressId, deliveryName, deliveryPhone, deliveryAddress, note, idempotencyKey } = activeTab;
+    if (addresses.length === 0) {
+      alert('Tài khoản của bạn chưa có địa chỉ giao hàng. Vui lòng liên hệ TPS1 để bổ sung địa chỉ giao hàng trước khi đặt.');
+      return;
+    }
+    if (!deliveryAddressId) {
+      alert('Vui lòng chọn điểm giao hàng');
+      return;
+    }
+    if (!deliveryDate) {
+      alert('Vui lòng chọn ngày giao hàng');
+      return;
     }
     if (cartLines.length === 0) { alert('Vui lòng chọn sản phẩm'); return; }
+
     setSubmitting(true);
     try {
       const res = await fetch(`${apiBase}/api/customer/order`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          source: 'zalo_mini_app', // dùng chung đường token-trong-body, xem app/api/customer/order/route.ts
+          source: 'website',
           orderSessionToken: token,
-          items: cartLines.map((l) => ({ productId: l.product.id, name: l.product.name, quantity: l.quantity })),
+          deliveryDate,
+          addressId: deliveryAddressId,
+          idempotencyKey: idempotencyKey || generateUuid(),
+          items: cartLines.map((l) => ({
+            productId: l.product.id,
+            name: l.product.name,
+            quantity: l.quantity,
+            note: l.note || '',
+          })),
           deliveryType: 'shipping',
-          deliveryAlias: 'Địa chỉ giao hàng',
-          deliveryName, deliveryPhone, deliveryAddress,
+          deliveryAlias: addresses.find((a) => a.id === deliveryAddressId)?.label || 'Địa chỉ giao hàng',
+          deliveryName,
+          deliveryPhone,
+          deliveryAddress,
           note,
         }),
       });
       const data = await res.json();
-      if (!data.ok) throw new Error(data.error);
+      if (!data.ok) throw new Error(data.error || 'Lỗi đặt hàng');
       setSuccessCode(data.orderCode);
-      // Đơn xong -> đóng tab này (giống nhân viên đóng tab khi hoàn tất).
       closeTab(activeTab.id);
     } catch (err: any) {
       alert('Lỗi: ' + (err.message || 'Không đặt được đơn hàng'));
@@ -238,6 +478,19 @@ export default function DatHangPage() {
         </button>
       </header>
 
+      {/* Thông báo nạp đơn cũ */}
+      {reorderMessage && (
+        <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-800 text-sm flex items-center justify-between shadow-xs">
+          <div className="flex items-center gap-2">
+            <FileText size={18} className="text-emerald-600 shrink-0" />
+            <span>{reorderMessage}</span>
+          </div>
+          <button onClick={() => setReorderMessage('')} className="text-emerald-600 hover:text-emerald-900 p-1 rounded-lg">
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
       {/* Tabs — mở nhiều đơn cùng lúc, giống màn Bán hàng của nhân viên */}
       <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
         {tabs.map((t, idx) => {
@@ -267,15 +520,26 @@ export default function DatHangPage() {
         <div className="lg:col-span-2 space-y-4">
           {/* Search + categories */}
           <div className="space-y-3">
-            <div className="relative">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-[#59665f]" size={18} />
-              <input
-                type="text" value={search}
-                onChange={(e) => { setSearch(e.target.value); setPage(0); }}
-                placeholder="Tìm sản phẩm..."
-                className="w-full pl-11 pr-4 py-3 rounded-2xl border border-[#14231c]/10 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-[#0f6f4b]/20 focus:border-[#0f6f4b]"
-              />
-            </div>
+            <ProductSearchBox
+              apiBase={apiBase}
+              token={token}
+              showCategoryFilter={false}
+              placeholder="Tìm nhanh sản phẩm (thumbnail 64px, tô đậm từ khoá, Enter để chọn)..."
+              onSelectProduct={(sp) => {
+                addToCart({
+                  id: sp.id,
+                  sku: sp.sku,
+                  name: sp.name,
+                  category: sp.category,
+                  unit: sp.unit,
+                  imageUrl: sp.image_url || null,
+                  thumb_url: sp.thumb_url || null,
+                  price: sp.price,
+                  priceOnRequest: sp.price === 0,
+                  available: true,
+                }, 1);
+              }}
+            />
             <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
               <button onClick={() => { setCategory(''); setPage(0); }}
                 className={`shrink-0 px-4 py-1.5 rounded-full text-xs font-semibold border transition-colors ${category === '' ? 'bg-[#0f6f4b] text-white border-[#0f6f4b]' : 'bg-white text-[#59665f] border-[#14231c]/10 hover:border-[#0f6f4b]/40'}`}>
@@ -290,9 +554,60 @@ export default function DatHangPage() {
             </div>
           </div>
 
-          {/* Danh sách sản phẩm dạng list (không phải lưới ảnh) — dễ nhìn/dễ
-              quét hơn khi cần chọn nhiều mặt hàng, giống đúng kiểu tìm & thêm
-              sản phẩm bên màn Bán hàng của nhân viên (mục brief 2026-09-11). */}
+          {/* Section Mặt hàng hay đặt (WP3) */}
+          {category === '' && frequentItems.length > 0 && (
+            <div className="bg-white rounded-2xl border border-[#14231c]/8 p-4 space-y-3 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold text-[#14231c] flex items-center gap-1.5">
+                  <Star size={16} className="text-amber-500 fill-amber-500" />
+                  Sản phẩm hay đặt ({frequentItems.length})
+                </h3>
+                <span className="text-xs text-[#59665f]">Bấm để thêm nhanh</span>
+              </div>
+              <div className="flex gap-2.5 overflow-x-auto pb-1 -mx-1 px-1">
+                {frequentItems.map((fi: any) => {
+                  const thumb = resolveThumbnailUrl(fi.thumb_url, fi.imageUrl);
+                  return (
+                    <div
+                      key={fi.id}
+                      className="shrink-0 w-36 bg-[#f6f7f4]/80 rounded-xl p-2.5 border border-[#14231c]/8 flex flex-col justify-between"
+                    >
+                      <div className="w-full h-20 rounded-lg overflow-hidden bg-white relative flex items-center justify-center mb-1.5">
+                        {thumb ? (
+                          <img src={thumb} alt={fi.name} className="w-full h-full object-cover" />
+                        ) : (
+                          <Package size={24} className="text-[#0f6f4b]/40" />
+                        )}
+                      </div>
+                      <p className="text-xs font-semibold text-[#14231c] line-clamp-1" title={fi.name}>{fi.name}</p>
+                      <p className="text-[11px] text-[#0f6f4b] font-bold mt-0.5">
+                        {fi.priceOnRequest ? 'Liên hệ' : money(fi.price)}/{fi.unit || 'Kg'}
+                      </p>
+                      <button
+                        onClick={() => addToCart({
+                          id: fi.id,
+                          sku: fi.sku || '',
+                          name: fi.name,
+                          category: fi.category || null,
+                          unit: fi.unit || 'Kg',
+                          imageUrl: fi.imageUrl || null,
+                          thumb_url: fi.thumb_url || null,
+                          price: Number(fi.price) || 0,
+                          priceOnRequest: Boolean(fi.priceOnRequest),
+                          available: true,
+                        }, 1)}
+                        className="mt-2 w-full py-1 bg-[#0f6f4b] text-white rounded-lg text-xs font-medium hover:bg-[#0b5a3c] flex items-center justify-center gap-1"
+                      >
+                        <Plus size={12} /> Thêm
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Danh sách sản phẩm */}
           {loading ? (
             <div className="bg-white rounded-2xl border border-[#14231c]/8 divide-y divide-[#14231c]/5">
               {Array.from({ length: 6 }).map((_, i) => (
@@ -311,13 +626,31 @@ export default function DatHangPage() {
               <div className="bg-white rounded-2xl border border-[#14231c]/8 divide-y divide-[#14231c]/5 overflow-hidden">
                 {products.map((p) => {
                   const inCart = activeTab.cart[p.id]?.quantity || 0;
+                  const thumb = resolveThumbnailUrl(p.thumb_url, p.imageUrl);
+                  const isKg = p.unit?.toLowerCase() === 'kg';
+                  const step = isKg ? 0.5 : 1;
                   return (
-                    <div key={p.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#f6f7f4]/60 transition-colors">
-                      {p.imageUrl ? (
-                        <img src={p.imageUrl} alt={p.name} className="w-11 h-11 rounded-lg object-cover shrink-0 border border-[#14231c]/8" />
-                      ) : (
-                        <div className="w-11 h-11 rounded-lg bg-[#f6f7f4] shrink-0 flex items-center justify-center text-[#59665f]/40"><ImageOff size={18} /></div>
-                      )}
+                    <div key={p.id} className="flex items-center gap-3.5 px-4 py-3 hover:bg-[#f6f7f4]/60 transition-colors">
+                      {/* Thumbnail 64px x 64px với Fallback TPS1 Placeholder */}
+                      <div className="w-16 h-16 rounded-xl overflow-hidden shrink-0 border border-[#14231c]/8 bg-[#f6f7f4] relative flex items-center justify-center">
+                        {thumb ? (
+                          <img
+                            src={thumb}
+                            alt={p.name}
+                            loading="lazy"
+                            onError={(e) => {
+                              (e.target as HTMLElement).style.display = 'none';
+                              const fb = (e.target as HTMLElement).nextElementSibling;
+                              if (fb) (fb as HTMLElement).style.display = 'flex';
+                            }}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : null}
+                        <div className={`w-full h-full flex flex-col items-center justify-center text-[#0f6f4b] bg-[#0f6f4b]/5 ${thumb ? 'hidden' : 'flex'}`}>
+                          <Package size={22} className="opacity-50" />
+                          <span className="text-[8px] font-bold tracking-wider uppercase opacity-50 mt-0.5">TPS1</span>
+                        </div>
+                      </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-[#14231c] truncate">{p.name}</p>
                         <p className="text-xs text-[#59665f]">{p.unit}</p>
@@ -331,25 +664,36 @@ export default function DatHangPage() {
                       </div>
                       <div className="shrink-0 flex justify-end">
                         {inCart > 0 ? (
-                          <div className="flex items-center gap-1.5 bg-[#f6f7f4] rounded-lg p-1">
-                            <button onClick={() => setQty(p.id, inCart - 1)} className="w-6 h-6 rounded-md bg-white flex items-center justify-center text-[#0f6f4b] shadow-sm"><Minus size={12} /></button>
-                            <span className="w-6 text-center text-sm font-semibold text-[#14231c]">{inCart}</span>
-                            <button onClick={() => setQty(p.id, inCart + 1)} className="w-6 h-6 rounded-md bg-white flex items-center justify-center text-[#0f6f4b] shadow-sm"><Plus size={12} /></button>
+                          <div className="flex items-center gap-1 bg-[#f6f7f4] rounded-lg p-1">
+                            <button
+                              onClick={() => setQty(p.id, inCart - step)}
+                              className="w-6 h-6 rounded-md bg-white flex items-center justify-center text-[#0f6f4b] shadow-xs"
+                            >
+                              <Minus size={12} />
+                            </button>
+                            <span className="w-10 text-center text-xs font-semibold text-[#14231c]">{inCart}</span>
+                            <button
+                              onClick={() => setQty(p.id, inCart + step)}
+                              className="w-6 h-6 rounded-md bg-white flex items-center justify-center text-[#0f6f4b] shadow-xs"
+                            >
+                              <Plus size={12} />
+                            </button>
                           </div>
                         ) : (
-                          // Không chặn theo tồn kho: khách cứ đặt bình thường
-                          // kể cả hết hàng, sale sẽ thấy cảnh báo + nhập hàng
-                          // ngay khi xử lý đơn (yêu cầu 2026-09-11). Có ô nhập
-                          // SL trước khi thêm vì là khách B2B, hay đặt số
-                          // lượng lớn ngay từ đầu, không muốn bấm + nhiều lần.
                           <div className="flex items-center gap-1.5">
                             <input
-                              type="number" min="1" step="1" value={getPendingQty(p.id)}
-                              onChange={(e) => setPendingQtyFor(p.id, Math.round(Number(e.target.value)) || 1)}
+                              type="number"
+                              min="0.1"
+                              step={isKg ? '0.1' : '1'}
+                              value={getPendingQty(p.id)}
+                              onChange={(e) => setPendingQtyFor(p.id, Number(e.target.value) || 1)}
                               onClick={(e) => e.stopPropagation()}
-                              className="w-14 border border-[#14231c]/15 rounded-lg px-1.5 py-1.5 text-xs text-center focus:outline-none focus:ring-2 focus:ring-[#0f6f4b]/20" />
-                            <button onClick={() => addToCart(p, getPendingQty(p.id))}
-                              className="px-3 py-1.5 rounded-lg bg-[#0f6f4b] text-white text-xs font-medium hover:bg-[#0b5a3c] flex items-center justify-center gap-1">
+                              className="w-16 border border-[#14231c]/15 rounded-lg px-1.5 py-1.5 text-xs text-center focus:outline-none focus:ring-2 focus:ring-[#0f6f4b]/20"
+                            />
+                            <button
+                              onClick={() => addToCart(p, getPendingQty(p.id))}
+                              className="px-3 py-1.5 rounded-lg bg-[#0f6f4b] text-white text-xs font-medium hover:bg-[#0b5a3c] flex items-center justify-center gap-1"
+                            >
                               <Plus size={13} /> Thêm
                             </button>
                           </div>
@@ -373,7 +717,7 @@ export default function DatHangPage() {
           )}
         </div>
 
-        {/* Cột giỏ hàng + giao hàng — luôn hiện, không phải drawer trượt ra nữa */}
+        {/* Cột giỏ hàng + giao hàng */}
         <div className="space-y-4">
           <div className="bg-white rounded-2xl shadow-sm border border-[#14231c]/8 overflow-hidden sticky top-4">
             <div className="p-4 border-b border-[#14231c]/8 flex items-center justify-between">
@@ -386,42 +730,126 @@ export default function DatHangPage() {
                 <div className="py-10 text-center text-[#59665f]/60 text-sm">
                   <ShoppingCart size={32} className="mx-auto mb-2 opacity-30" />Giỏ hàng đang trống
                 </div>
-              ) : cartLines.map((l) => (
-                <div key={l.product.id} className="p-3 flex items-center gap-3">
-                  {l.product.imageUrl ? (
-                    <img src={l.product.imageUrl} alt="" className="w-11 h-11 rounded-lg object-cover shrink-0" />
-                  ) : (
-                    <div className="w-11 h-11 rounded-lg bg-[#f6f7f4] shrink-0" />
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-[#14231c] truncate">{l.product.name}</p>
-                    {l.product.priceOnRequest ? (
-                      <p className="text-xs text-[#f5c84c] font-semibold">Liên hệ báo giá</p>
-                    ) : (
-                      <p className="text-xs text-[#0f6f4b] font-semibold">{money(l.product.price)}</p>
-                    )}
+              ) : cartLines.map((l) => {
+                const isKg = l.product.unit?.toLowerCase() === 'kg';
+                const step = isKg ? 0.5 : 1;
+                return (
+                  <div key={l.product.id} className="p-3 space-y-1.5">
+                    <div className="flex items-center gap-3">
+                      {l.product.imageUrl ? (
+                        <img src={l.product.imageUrl} alt="" className="w-10 h-10 rounded-lg object-cover shrink-0" />
+                      ) : (
+                        <div className="w-10 h-10 rounded-lg bg-[#f6f7f4] shrink-0 flex items-center justify-center text-[#0f6f4b]/40">
+                          <Package size={18} />
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-[#14231c] truncate">{l.product.name}</p>
+                        {l.product.priceOnRequest ? (
+                          <p className="text-xs text-[#f5c84c] font-semibold">Liên hệ báo giá</p>
+                        ) : (
+                          <p className="text-xs text-[#0f6f4b] font-semibold">{money(l.product.price)}/{l.product.unit}</p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button onClick={() => setQty(l.product.id, l.quantity - step)} className="w-6 h-6 rounded-md bg-[#f6f7f4] flex items-center justify-center text-[#0f6f4b]"><Minus size={12} /></button>
+                        <span className="w-8 text-center text-xs font-semibold">{l.quantity}</span>
+                        <button onClick={() => setQty(l.product.id, l.quantity + step)} className="w-6 h-6 rounded-md bg-[#f6f7f4] flex items-center justify-center text-[#0f6f4b]"><Plus size={12} /></button>
+                      </div>
+                      <button onClick={() => setQty(l.product.id, 0)} className="text-[#c7372f]/60 hover:text-[#c7372f] shrink-0" title="Xóa"><Trash2 size={15} /></button>
+                    </div>
+                    <div>
+                      <input
+                        type="text"
+                        value={l.note || ''}
+                        onChange={(e) => updateItemNote(l.product.id, e.target.value)}
+                        placeholder="Ghi chú quy cách: thái mỏng, chia túi..."
+                        className="w-full text-[11px] px-2.5 py-1 bg-[#f6f7f4]/80 border border-[#14231c]/10 rounded-lg text-slate-700 placeholder:text-slate-400 focus:bg-white focus:outline-none"
+                      />
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button onClick={() => setQty(l.product.id, l.quantity - 1)} className="w-6 h-6 rounded-md bg-[#f6f7f4] flex items-center justify-center text-[#0f6f4b]"><Minus size={12} /></button>
-                    <span className="w-6 text-center text-sm">{l.quantity}</span>
-                    <button onClick={() => setQty(l.product.id, l.quantity + 1)} className="w-6 h-6 rounded-md bg-[#f6f7f4] flex items-center justify-center text-[#0f6f4b]"><Plus size={12} /></button>
-                  </div>
-                  <button onClick={() => setQty(l.product.id, 0)} className="text-[#c7372f]/60 hover:text-[#c7372f] shrink-0"><Trash2 size={15} /></button>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
-            {/* Thông tin giao hàng */}
+            {/* Thông tin giao hàng (WP3/D3/D4) */}
             <div className="p-4 border-t border-[#14231c]/8 space-y-3">
               <p className="text-xs font-semibold text-[#59665f] uppercase flex items-center gap-1.5"><Truck size={13} /> Thông tin giao hàng</p>
-              <input type="text" value={activeTab.deliveryName} onChange={(e) => updateActiveTab({ deliveryName: e.target.value })} placeholder="Tên người nhận *"
-                className="w-full border border-[#14231c]/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0f6f4b]/20" />
-              <input type="text" value={activeTab.deliveryPhone} onChange={(e) => updateActiveTab({ deliveryPhone: e.target.value })} placeholder="Số điện thoại *"
-                className="w-full border border-[#14231c]/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0f6f4b]/20" />
-              <textarea value={activeTab.deliveryAddress} onChange={(e) => updateActiveTab({ deliveryAddress: e.target.value })} placeholder="Địa chỉ giao hàng *" rows={2}
-                className="w-full border border-[#14231c]/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0f6f4b]/20 resize-none" />
-              <textarea value={activeTab.note} onChange={(e) => updateActiveTab({ note: e.target.value })} placeholder="Ghi chú (không bắt buộc)" rows={2}
-                className="w-full border border-[#14231c]/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0f6f4b]/20 resize-none" />
+
+              {/* Ngày giao hàng */}
+              <div>
+                <label className="text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1">
+                  <Calendar size={13} className="text-[#0f6f4b]" />
+                  Ngày giao hàng *
+                </label>
+                <input
+                  type="date"
+                  value={activeTab.deliveryDate}
+                  min={orderConfig?.earliestDate || new Date().toISOString().slice(0, 10)}
+                  onChange={(e) => updateActiveTab({ deliveryDate: e.target.value })}
+                  className="w-full border border-[#14231c]/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0f6f4b]/20"
+                />
+                {activeTab.isLate ? (
+                  <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mt-1.5 flex items-center gap-1.5 font-medium">
+                    <Clock size={13} className="shrink-0 text-amber-600" />
+                    <span>Đơn trễ giờ chốt — Vận hành sẽ xác nhận lại, có thể không kịp giao</span>
+                  </p>
+                ) : activeTab.minutesLeft != null ? (
+                  <p className="text-[11px] text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5 mt-1.5 flex items-center gap-1.5 font-medium">
+                    <Clock size={13} className="shrink-0 text-emerald-600" />
+                    <span>Còn {formatMinutesLeft(activeTab.minutesLeft)} để chốt đơn (trước {activeTab.cutoffTimeStr || '16:30'})</span>
+                  </p>
+                ) : null}
+              </div>
+
+              {/* Điểm giao hàng chọn từ customer_addresses (D3) */}
+              <div>
+                <label className="text-xs font-semibold text-slate-700 mb-1 block">
+                  Điểm giao hàng *
+                </label>
+                {addresses.length === 0 ? (
+                  <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 space-y-1">
+                    <p className="font-bold flex items-center gap-1">
+                      <AlertTriangle size={13} /> Chưa có địa chỉ giao hàng
+                    </p>
+                    <p>Vui lòng liên hệ TPS1 để bổ sung địa chỉ giao hàng trước khi đặt.</p>
+                  </div>
+                ) : (
+                  <>
+                    <select
+                      value={activeTab.deliveryAddressId}
+                      onChange={(e) => handleSelectAddress(e.target.value)}
+                      className="w-full border border-[#14231c]/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0f6f4b]/20 bg-white"
+                    >
+                      <option value="">-- Chọn điểm giao --</option>
+                      {addresses.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.label ? `${a.label} — ` : ''}{a.address} {a.isDefault ? '(Mặc định)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                    {activeTab.deliveryAddress && (
+                      <div className="mt-2 p-2.5 bg-[#f6f7f4] rounded-lg text-xs space-y-0.5 text-slate-600 border border-[#14231c]/5">
+                        <p><span className="font-medium text-slate-700">Người nhận:</span> {activeTab.deliveryName} - {activeTab.deliveryPhone}</p>
+                        <p><span className="font-medium text-slate-700">Địa chỉ:</span> {activeTab.deliveryAddress}</p>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-700 mb-1 block">
+                  Ghi chú đơn hàng
+                </label>
+                <textarea
+                  value={activeTab.note}
+                  onChange={(e) => updateActiveTab({ note: e.target.value })}
+                  placeholder="Ghi chú chung cho toàn bộ đơn hàng..."
+                  rows={2}
+                  className="w-full border border-[#14231c]/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0f6f4b]/20 resize-none"
+                />
+              </div>
             </div>
 
             {/* Summary + submit */}
@@ -430,11 +858,18 @@ export default function DatHangPage() {
                 <span className="text-sm text-[#59665f]">Tạm tính</span>
                 <span className="text-lg font-bold text-[#0f6f4b]">{money(cartTotal)}</span>
               </div>
-              <button onClick={submitOrder} disabled={submitting || cartLines.length === 0}
-                className="w-full py-3.5 rounded-xl bg-[#0f6f4b] text-white font-semibold hover:bg-[#0b5a3c] disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-sm">
+              <button
+                onClick={submitOrder}
+                disabled={submitting || cartLines.length === 0 || addresses.length === 0}
+                className="w-full py-3.5 rounded-xl bg-[#0f6f4b] text-white font-semibold hover:bg-[#0b5a3c] disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-sm"
+              >
                 {submitting ? 'Đang gửi đơn...' : 'Đặt hàng'} <ChevronRight size={18} />
               </button>
-              <p className="text-[10px] text-[#59665f] text-center">Giá tạm tính, sale sẽ xác nhận lại sau khi đặt hàng.</p>
+              {addresses.length === 0 ? (
+                <p className="text-[11px] text-red-600 text-center font-medium">Cần bổ sung địa chỉ giao hàng trước khi đặt.</p>
+              ) : (
+                <p className="text-[10px] text-[#59665f] text-center">Giá tạm tính, sale sẽ xác nhận lại sau khi đặt hàng.</p>
+              )}
             </div>
           </div>
         </div>

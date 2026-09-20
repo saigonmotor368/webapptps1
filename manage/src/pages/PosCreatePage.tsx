@@ -4,17 +4,13 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { printOrderSlip } from '../lib/printOrder';
 import QuickAddProductModal from '../components/QuickAddProductModal';
+import ProductSearchBox, { type SearchProductItem } from '../components/ProductSearchBox';
 import {
-  Search, Plus, Tag, Truck, RefreshCw, ShoppingCart, User, X, CheckCircle2, AlertTriangle, PlusCircle, ClipboardEdit
+  Search, Plus, Tag, Truck, RefreshCw, ShoppingCart, User, X, CheckCircle2, AlertTriangle, PlusCircle, ClipboardEdit,
+  Calendar, FileSpreadsheet, Clock, MapPin
 } from 'lucide-react';
 
 function money(v: number) { return new Intl.NumberFormat('vi-VN').format(Math.round(Number(v) || 0)) + 'đ'; }
-
-function getImgUrl(url?: string) {
-  if (!url) return null;
-  if (url.startsWith('http')) return url;
-  return `https://yntgxollwjemyidizhnn.supabase.co/storage/v1/object/public/products/${url}`;
-}
 
 interface CartItem {
   productId: string | null;
@@ -22,58 +18,94 @@ interface CartItem {
   unit: string;
   quantity: number;
   price: number;
+  note?: string; // Ghi chú từng dòng (quy cách, thái mỏng, đóng gói...)
+  orderedQty?: number | null; // Số lượng khách đặt ban đầu (WP6)
+  changeReason?: string; // Lý do điều chỉnh (Hết hàng / Khách yêu cầu...) (WP6)
+  agreedWithCustomer?: boolean; // Đã thống nhất với khách (WP6)
   image_url?: string;
-  // Tồn kho tại thời điểm thêm vào giỏ/tải đơn — dùng để cảnh báo + cho nhập
-  // hàng ngay khi xử lý đơn, KHÔNG còn chặn khách đặt hàng hết tồn nữa (yêu
-  // cầu 2026-09-11: sale mới là người xử lý hết hàng, không phải khách).
   trackInventory?: boolean;
   stockQty?: number | null;
   lowStock?: boolean;
 }
 
-// Giai đoạn C (bổ sung 2026-09-10) — "mở nhiều đơn cùng lúc" như màn Bán
-// Hàng KiotViet thật: sale phục vụ nhiều khách/đơn song song bằng các tab
-// riêng, chuyển qua lại không mất dữ liệu. Mỗi tab là 1 OrderTab độc lập,
-// lưu tạm vào sessionStorage để không mất trắng nếu lỡ F5.
+export interface DeletedOriginalItem {
+  productId: string | null;
+  name: string;
+  unit: string;
+  orderedQty: number;
+  reason: string;
+  agreedWithCustomer?: boolean;
+}
+
+export interface CutoffInfo {
+  isLate: boolean;
+  minutesLeft: number;
+  cutoffTimeStr: string;
+  earliestDate?: string;
+}
+
+// Giai đoạn C & P2: Đơn hàng POS hỗ trợ ngày giao, điểm giao, mã KiotViet, ghi chú dòng
 interface OrderTab {
   id: string;
+  idempotencyKey: string; // Khóa chống trùng lặp đơn (UUID sinh 1 lần/tab, gửi lên server)
   selectedCustomerId: string;
   customerDebt: number | null;
+  deliveryDate: string; // Ngày giao (lấy từ order-cutoff endpoint)
+  cutoffInfo: CutoffInfo | null;
+  deliveryAddressId: string; // ID điểm giao từ customer_addresses
   deliveryName: string;
   deliveryPhone: string;
   deliveryAddress: string;
+  saveNewAddress?: boolean;
+  externalRef: string; // Mã đơn KiotViet
   note: string;
   cart: CartItem[];
+  deletedOriginalItems?: DeletedOriginalItem[]; // WP6: danh sách mặt hàng đã xóa khỏi đơn cũ
   discountAmount: number;
   voucherCode: string;
   voucherDiscount: number;
   shippingAmount: number;
-  // Giao hàng tự vận chuyển (mục 14.2-1 KE_HOACH) — khớp field "Bán giao
-  // hàng" của Sale/POS KiotViet thật. Để dạng string cho form, số hoá lúc gửi.
   packageWeightG: string;
   packageDimensions: string;
   assignedDriver: string;
   codCollectAmount: string;
-  // 3 chế độ hiển thị của Sale/POS KiotViet thật (mục 14.3-6 KE_HOACH) — cùng
-  // 1 OrderTab, chỉ khác mật độ field hiển thị, không phải luồng dữ liệu khác.
   mode: 'quick' | 'normal' | 'delivery';
-  // "Xử lý đơn hàng" từ trang Quản lý đơn hàng (2026-09-10) — khớp luồng
-  // KiotViet thật: bấm 1 phiếu tạm sẽ mở đúng màn Bán hàng này với đầy đủ dữ
-  // liệu đơn, có mã đơn để dễ theo dõi. Có giá trị = đang SỬA đơn có sẵn
-  // (submit sẽ chốt lại đơn đó thay vì tạo đơn nháp mới).
   processingOrderId?: string;
   orderCode?: string;
 }
 
-function newTab(): OrderTab {
+function generateUuid(): string {
+  if (typeof crypto !== 'undefined' && typeof (crypto as any).randomUUID === 'function') {
+    return (crypto as any).randomUUID();
+  }
+  return `tab-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
+
+function newTab(defaultDeliveryDate = ''): OrderTab {
   return {
-    id: (crypto as any).randomUUID ? crypto.randomUUID() : `tab-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    id: generateUuid(),
+    idempotencyKey: generateUuid(),
     selectedCustomerId: '', customerDebt: null,
-    deliveryName: '', deliveryPhone: '', deliveryAddress: '', note: '',
-    cart: [], discountAmount: 0, voucherCode: '', voucherDiscount: 0, shippingAmount: 0,
+    deliveryDate: defaultDeliveryDate,
+    cutoffInfo: null,
+    deliveryAddressId: '',
+    deliveryName: '', deliveryPhone: '', deliveryAddress: '',
+    saveNewAddress: false,
+    externalRef: '',
+    note: '',
+    cart: [],
+    deletedOriginalItems: [],
+    discountAmount: 0, voucherCode: '', voucherDiscount: 0, shippingAmount: 0,
     packageWeightG: '', packageDimensions: '', assignedDriver: '', codCollectAmount: '',
     mode: 'normal',
   };
+}
+
+function formatMinutesLeft(mins: number) {
+  if (mins <= 0) return 'đã qua giờ chốt';
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return h > 0 ? `còn ${h}h${m > 0 ? m + 'p' : ''} để chốt` : `còn ${m} phút để chốt`;
 }
 
 const SALE_MODES: { value: OrderTab['mode']; label: string; icon: string }[] = [
@@ -93,13 +125,19 @@ export default function PosCreatePage() {
   const [loadingDebt, setLoadingDebt] = useState(false);
   const [loadingProcessOrder, setLoadingProcessOrder] = useState(false);
 
+  const [earliestDeliveryDate, setEarliestDeliveryDate] = useState<string>('');
+
   const [tabs, setTabs] = useState<OrderTab[]>(() => {
     try {
       const saved = sessionStorage.getItem(TABS_STORAGE_KEY);
       const parsed = saved ? JSON.parse(saved) : null;
-      // Tab cũ lưu từ trước khi có field mode/kiện hàng — điền giá trị mặc định
-      // để không vỡ giao diện khi đọc lại sessionStorage cũ.
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed.map((t: Partial<OrderTab>) => ({ ...newTab(), ...t }));
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.map((t: Partial<OrderTab>) => ({
+          ...newTab(),
+          ...t,
+          idempotencyKey: t.idempotencyKey || generateUuid(),
+        }));
+      }
     } catch { /* ignore */ }
     return [newTab()];
   });
@@ -114,8 +152,55 @@ export default function PosCreatePage() {
     setTabs(prev => prev.map(t => t.id !== activeTabId ? t : { ...t, ...(typeof patch === 'function' ? patch(t) : patch) }));
   }, [activeTabId]);
 
+  // 1. Lấy thông tin cutoff và earliestDate từ server ngay khi mount
+  useEffect(() => {
+    if (!token) return;
+    const apiBase = import.meta.env.VITE_API_BASE_URL || '';
+    fetch(`${apiBase}/api/admin/order-cutoff`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.ok && data.earliestDate) {
+          setEarliestDeliveryDate(data.earliestDate);
+          setTabs(prev =>
+            prev.map(t => (!t.deliveryDate ? { ...t, deliveryDate: data.earliestDate } : t))
+          );
+        }
+      })
+      .catch(err => console.warn('Lỗi lấy thông tin cutoff:', err));
+  }, [token]);
+
+  // 2. Cập nhật thông tin cutoff khi deliveryDate của activeTab thay đổi (debounce 250ms)
+  useEffect(() => {
+    if (!token || !activeTab.deliveryDate) return;
+    const timer = setTimeout(async () => {
+      try {
+        const apiBase = import.meta.env.VITE_API_BASE_URL || '';
+        const res = await fetch(
+          `${apiBase}/api/admin/order-cutoff?deliveryDate=${encodeURIComponent(activeTab.deliveryDate)}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        const data = await res.json();
+        if (data.ok) {
+          updateActiveTab({
+            cutoffInfo: {
+              isLate: Boolean(data.isLate),
+              minutesLeft: Number(data.minutesLeft) || 0,
+              cutoffTimeStr: data.cutoffTimeStr || '16:30',
+              earliestDate: data.earliestDate,
+            },
+          });
+        }
+      } catch (err) {
+        console.warn('Lỗi kiểm tra giờ chốt:', err);
+      }
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [activeTab.deliveryDate, token, updateActiveTab]);
+
   const addTab = () => {
-    const t = newTab();
+    const t = newTab(earliestDeliveryDate);
     setTabs(prev => [...prev, t]);
     setActiveTabId(t.id);
   };
@@ -124,7 +209,7 @@ export default function PosCreatePage() {
     if (tab && (tab.cart.length > 0 || tab.selectedCustomerId) && !confirm('Đóng đơn này? Dữ liệu chưa gửi sẽ bị mất.')) return;
     setTabs(prev => {
       const next = prev.filter(t => t.id !== id);
-      if (next.length === 0) { const t = newTab(); return [t]; }
+      if (next.length === 0) { const t = newTab(earliestDeliveryDate); return [t]; }
       return next;
     });
     setActiveTabId(prev => {
@@ -170,9 +255,16 @@ export default function PosCreatePage() {
           assignedDriver: o.assigned_driver || '',
           codCollectAmount: o.cod_collect_amount ? String(o.cod_collect_amount) : '',
           mode: o.delivery_address ? 'delivery' : 'normal',
+          deletedOriginalItems: [],
           cart: (o.order_items || []).map((it: any) => ({
-            productId: it.product_id, name: it.name, unit: it.unit || 'Kg',
-            quantity: Number(it.quantity), price: Number(it.unit_price), image_url: undefined,
+            productId: it.product_id,
+            name: it.name,
+            unit: it.unit || 'Kg',
+            quantity: Number(it.quantity),
+            price: Number(it.unit_price),
+            orderedQty: it.ordered_quantity != null ? Number(it.ordered_quantity) : Number(it.quantity),
+            note: it.customer_note || it.pricing_note || '',
+            image_url: undefined,
             trackInventory: !!it.track_inventory,
             stockQty: it.stock_qty != null ? Number(it.stock_qty) : null,
             lowStock: !!it.low_stock,
@@ -203,8 +295,6 @@ export default function PosCreatePage() {
 
   // Search
   const [searchTerm, setSearchTerm] = useState('');
-  const [searchResults, setSearchResults] = useState<any[]>([]);
-  const [searching, setSearching] = useState(false);
   const [applyingVoucher, setApplyingVoucher] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [showQuickAddProduct, setShowQuickAddProduct] = useState(false);
@@ -244,18 +334,33 @@ export default function PosCreatePage() {
         deliveryName: cust.name || cust.default_shipping_name || '',
         deliveryPhone: cust.phone || cust.default_shipping_phone || '',
         deliveryAddress: cust.default_shipping_address || '',
+        deliveryAddressId: '',
         customerDebt: null,
       });
       fetchCustomerDebt(id);
       supabase.from('customer_addresses').select('*').eq('customer_id', id).order('is_default', { ascending: false })
-        .then(({ data }) => setSavedAddresses(data || []));
+        .then(({ data }) => {
+          const list = data || [];
+          setSavedAddresses(list);
+          const def = list.find((a: any) => a.is_default) || list[0];
+          if (def) {
+            updateActiveTab(t => ({
+              ...t,
+              deliveryAddressId: def.id,
+              deliveryAddress: def.address || t.deliveryAddress,
+              deliveryName: def.contact_name || t.deliveryName,
+              deliveryPhone: def.contact_phone || t.deliveryPhone,
+            }));
+          }
+        });
     } else {
-      updateActiveTab({ selectedCustomerId: '', deliveryName: '', deliveryPhone: '', deliveryAddress: '', customerDebt: null });
+      updateActiveTab({ selectedCustomerId: '', deliveryName: '', deliveryPhone: '', deliveryAddress: '', deliveryAddressId: '', customerDebt: null });
     }
   };
 
   const applySavedAddress = (addr: any) => {
     updateActiveTab({
+      deliveryAddressId: addr.id,
       deliveryAddress: addr.address,
       deliveryName: addr.contact_name || activeTab.deliveryName,
       deliveryPhone: addr.contact_phone || activeTab.deliveryPhone,
@@ -287,42 +392,23 @@ export default function PosCreatePage() {
     }
   };
 
-  const searchProducts = async () => {
-    if (searchTerm.length < 2) return;
-    setSearching(true);
-    try {
-      const apiBase = import.meta.env.VITE_API_BASE_URL || '';
-      const customerParam = activeTab.selectedCustomerId ? `&customerId=${encodeURIComponent(activeTab.selectedCustomerId)}` : '';
-      const res = await fetch(`${apiBase}/api/admin/orders?productSearch=${encodeURIComponent(searchTerm)}${customerParam}`, {
-        headers: { 'Authorization': `Bearer ${token}` },
-      });
-      const data = await res.json();
-      setSearchResults(data.products || []);
-    } catch { setSearchResults([]); }
-    finally { setSearching(false); }
-  };
-
-  // Dropdown gợi ý tự tìm khi gõ, giống màn Sale/POS KiotViet thật — không
-  // cần bấm "Tìm" nữa (mục brief 2026-09-10).
-  useEffect(() => {
-    if (searchTerm.trim().length < 2) { setSearchResults([]); return; }
-    const timer = setTimeout(() => { searchProducts(); }, 300);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchTerm, activeTab.selectedCustomerId]);
-
-  const addFromSearch = (p: any) => {
+  const addFromSearch = (p: SearchProductItem) => {
     if (activeTab.cart.some(i => i.productId === p.id)) {
       alert('Sản phẩm đã có trong giỏ, hãy tăng số lượng!'); return;
     }
     updateActiveTab(t => ({
       cart: [...t.cart, {
-        productId: p.id, name: p.name, unit: p.unit || 'Kg', quantity: 1, price: Number(p.price), image_url: p.image_url,
-        trackInventory: !!p.trackInventory, stockQty: p.stockQty ?? null, lowStock: !!p.lowStock,
+        productId: p.id,
+        name: p.name,
+        unit: p.unit || 'Kg',
+        quantity: 1,
+        price: Number(p.price),
+        image_url: p.thumb_url || p.image_url || undefined,
+        trackInventory: !!p.trackInventory,
+        stockQty: p.stockQty ?? null,
+        lowStock: !!p.lowStock,
       }],
     }));
-    setSearchResults([]);
-    setSearchTerm('');
   };
 
   // Nhập hàng vẫn chỉ dành cho thu mua/admin — sale KHÔNG được nhập (một số
@@ -368,7 +454,54 @@ export default function PosCreatePage() {
 
   const updateQty = (idx: number, qty: number) => updateActiveTab(t => ({ cart: t.cart.map((i, n) => n === idx ? { ...i, quantity: Math.max(0.001, qty) } : i) }));
   const updatePrice = (idx: number, price: number) => updateActiveTab(t => ({ cart: t.cart.map((i, n) => n === idx ? { ...i, price: Math.max(0, price) } : i) }));
-  const removeItem = (idx: number) => updateActiveTab(t => ({ cart: t.cart.filter((_, n) => n !== idx) }));
+  const updateItemNote = (idx: number, note: string) => updateActiveTab(t => ({ cart: t.cart.map((i, n) => n === idx ? { ...i, note } : i) }));
+  const updateItemChangeReason = (idx: number, changeReason: string) => updateActiveTab(t => ({ cart: t.cart.map((i, n) => n === idx ? { ...i, changeReason } : i) }));
+  const updateItemAgreed = (idx: number, agreedWithCustomer: boolean) => updateActiveTab(t => ({ cart: t.cart.map((i, n) => n === idx ? { ...i, agreedWithCustomer } : i) }));
+
+  const removeItem = (idx: number) => {
+    const item = activeTab.cart[idx];
+    if (activeTab.processingOrderId && item && item.orderedQty != null) {
+      const reason = prompt(`Xóa mặt hàng "${item.name}" (khách đặt ${item.orderedQty} ${item.unit}). Nhập lý do xóa:`, 'Hết hàng');
+      if (reason === null) return;
+      updateActiveTab(t => ({
+        cart: t.cart.filter((_, n) => n !== idx),
+        deletedOriginalItems: [
+          ...(t.deletedOriginalItems || []),
+          {
+            productId: item.productId,
+            name: item.name,
+            unit: item.unit,
+            orderedQty: item.orderedQty!,
+            reason: reason.trim() || 'Xóa theo yêu cầu',
+            agreedWithCustomer: true,
+          }
+        ]
+      }));
+      return;
+    }
+    updateActiveTab(t => ({ cart: t.cart.filter((_, n) => n !== idx) }));
+  };
+
+  const restoreDeletedItem = (delIdx: number) => {
+    const del = (activeTab.deletedOriginalItems || [])[delIdx];
+    if (!del) return;
+    updateActiveTab(t => ({
+      deletedOriginalItems: (t.deletedOriginalItems || []).filter((_, i) => i !== delIdx),
+      cart: [
+        ...t.cart,
+        {
+          productId: del.productId,
+          name: del.name,
+          unit: del.unit,
+          quantity: del.orderedQty,
+          price: 0,
+          orderedQty: del.orderedQty,
+          note: '',
+          changeReason: '',
+        }
+      ]
+    }));
+  };
 
   const subtotal = activeTab.cart.reduce((s, i) => s + i.quantity * i.price, 0);
   const total = Math.max(0, subtotal - activeTab.voucherDiscount - activeTab.discountAmount + activeTab.shippingAmount);
@@ -414,10 +547,77 @@ export default function PosCreatePage() {
       packageWeightG, packageDimensions, assignedDriver, codCollectAmount, discountAmount, shippingAmount } = activeTab;
     if (!processingOrderId) return;
     if (cart.length === 0) { alert('Giỏ hàng đang trống!'); return; }
+
+    // WP6: Kiểm tra lý do điều chỉnh cho các mặt hàng bị đổi SL hoặc thêm mới
+    for (const it of cart) {
+      if (it.orderedQty != null && Math.abs(it.quantity - it.orderedQty) > 0.0001 && !it.changeReason) {
+        alert(`Vui lòng chọn lý do điều chỉnh số lượng cho "${it.name}" (khách đặt: ${it.orderedQty}, số lượng mới: ${it.quantity})`);
+        return;
+      }
+      if (it.orderedQty == null) {
+        if (!it.changeReason) {
+          alert(`Vui lòng chọn lý do thêm mặt hàng "${it.name}" vào đơn`);
+          return;
+        }
+        if (!it.agreedWithCustomer) {
+          alert(`Vui lòng xác nhận "Đã thống nhất với khách" cho mặt hàng thêm mới "${it.name}"`);
+          return;
+        }
+      }
+    }
+
     if (!confirm(`Xác nhận cập nhật & chốt đơn ${orderCode}?`)) return;
     setSubmitting(true);
     try {
       const apiBase = import.meta.env.VITE_API_BASE_URL || '';
+
+      // WP6: Ghi vết thay đổi vào order_history trước khi finalize
+      const itemChanges: any[] = [];
+      for (const it of cart) {
+        if (it.orderedQty == null) {
+          itemChanges.push({
+            type: 'added',
+            productName: it.name,
+            newQty: it.quantity,
+            reason: it.changeReason || 'Thêm mặt hàng mới',
+            agreedWithCustomer: !!it.agreedWithCustomer,
+          });
+        } else if (Math.abs(it.quantity - it.orderedQty) > 0.0001) {
+          itemChanges.push({
+            type: 'qty',
+            productName: it.name,
+            orderedQty: it.orderedQty,
+            oldQty: it.orderedQty,
+            newQty: it.quantity,
+            reason: it.changeReason || 'Điều chỉnh số lượng',
+            agreedWithCustomer: !!it.agreedWithCustomer,
+          });
+        }
+      }
+      for (const del of (activeTab.deletedOriginalItems || [])) {
+        itemChanges.push({
+          type: 'removed',
+          productName: del.name,
+          orderedQty: del.orderedQty,
+          oldQty: del.orderedQty,
+          newQty: 0,
+          reason: del.reason || 'Xóa mặt hàng',
+          agreedWithCustomer: !!del.agreedWithCustomer,
+        });
+      }
+
+      if (itemChanges.length > 0) {
+        await fetch(`${apiBase}/api/admin/orders/track-adjustment`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            orderId: processingOrderId,
+            itemChanges,
+            actor: user?.name || 'Nhân viên Vận hành',
+          }),
+        }).catch(err => console.warn('Lỗi ghi track-adjustment:', err));
+      }
+
       const res = await fetch(`${apiBase}/api/admin/orders`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -427,7 +627,7 @@ export default function PosCreatePage() {
           pricingMode: 'manual_item_price',
           orderDiscountPercent: 0,
           shippingAmount,
-          items: cart.map(i => ({ productId: i.productId, quantity: i.quantity, finalUnitPrice: i.price, note: '' })),
+          items: cart.map(i => ({ productId: i.productId, quantity: i.quantity, finalUnitPrice: i.price, note: i.note || '' })),
           verificationNote: '',
           pricingNote: `Xử lý qua màn Bán hàng${discountAmount ? ` — chiết khấu thêm ${money(discountAmount)}` : ''}`,
           actor: user?.name || 'TPS1 Sale App',
@@ -473,12 +673,15 @@ export default function PosCreatePage() {
 
   const submitOrder = async () => {
     if (activeTab.processingOrderId) return submitProcessOrder();
-    const { selectedCustomerId, cart, customerDebt, deliveryAddress, deliveryName, deliveryPhone, note, voucherCode, packageWeightG, packageDimensions, assignedDriver, codCollectAmount } = activeTab;
+    const {
+      selectedCustomerId, cart, customerDebt,
+      deliveryDate, deliveryAddressId, deliveryAddress, deliveryName, deliveryPhone, saveNewAddress,
+      externalRef, note, voucherCode, packageWeightG, packageDimensions, assignedDriver, codCollectAmount
+    } = activeTab;
+
     if (!selectedCustomerId) { alert('Vui lòng chọn khách hàng!'); return; }
     if (cart.length === 0) { alert('Giỏ hàng đang trống!'); return; }
 
-    // Giai đoạn C: chặn vượt hạn mức công nợ, trừ khi Trưởng phòng/Admin
-    // duyệt (ghi log vào order_history sau khi tạo đơn thành công).
     const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
     const creditLimit = Number(selectedCustomer?.credit_limit) || 0;
     const projectedDebt = (customerDebt || 0) + total;
@@ -498,94 +701,68 @@ export default function PosCreatePage() {
     if (!confirm(`Xác nhận tạo đơn nháp cho ${selectedCustomer?.name || 'khách hàng'}?`)) return;
     setSubmitting(true);
     try {
-      const { data, error } = await supabase.rpc('admin_create_order', {
-        p_customer_id: selectedCustomerId,
-        p_items: cart.map(i => ({
-          product_id: i.productId,
-          name: i.name,
-          unit: i.unit || 'kg',
-          quantity: i.quantity,
-          base_unit_price: i.price,
-        })),
-        p_delivery_type: deliveryAddress ? 'shipping' : 'pickup',
-        p_delivery_alias: 'Địa chỉ giao hàng',
-        p_delivery_name: deliveryName || null,
-        p_delivery_phone: deliveryPhone || null,
-        p_delivery_address: deliveryAddress || null,
-        p_note: note || null,
-        p_idempotency_key: `sale-${Date.now()}-${selectedCustomerId}`,
-        p_voucher_code: voucherCode || null,
-        p_admin_id: user?.id !== 'legacy-admin' ? user?.id : null,
+      const apiBase = import.meta.env.VITE_API_BASE_URL || '';
+      const res = await fetch(`${apiBase}/api/admin/orders/create`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          customerId: selectedCustomerId,
+          idempotencyKey: activeTab.idempotencyKey,
+          items: cart.map(i => ({
+            productId: i.productId,
+            name: i.name,
+            unit: i.unit || 'Kg',
+            quantity: i.quantity,
+            price: i.price,
+            note: i.note || null,
+          })),
+          deliveryDate: deliveryDate || earliestDeliveryDate || '',
+          deliveryAddressId: deliveryAddressId || null,
+          deliveryName: deliveryName || null,
+          deliveryPhone: deliveryPhone || null,
+          deliveryAddress: deliveryAddress || null,
+          deliveryAlias: 'Địa chỉ giao hàng',
+          saveNewAddress: !!saveNewAddress,
+          externalRef: externalRef ? externalRef.trim() : null,
+          note: note || null,
+          voucherCode: voucherCode || null,
+          packageWeightG: packageWeightG ? Number(packageWeightG) : null,
+          packageDimensions: packageDimensions || null,
+          assignedDriver: assignedDriver || null,
+          codCollectAmount: codCollectAmount ? Number(codCollectAmount) : null,
+          creditOverrideNote: overrideNote || null,
+        }),
       });
-      if (error) throw error;
-      const createdOrder = Array.isArray(data) ? data[0] : data;
-      const orderCode = createdOrder?.order_code || '';
 
-      // Ghi kèm dữ liệu kiện hàng/người giao nếu sale có nhập (mục 14.2-1) —
-      // gọi PATCH riêng sau khi tạo đơn thành công, không sửa admin_create_order
-      // vì hàm RPC đó tạo trực tiếp qua Dashboard trước đây, không có migration
-      // định nghĩa lại để biết chắc sửa signature có an toàn không.
-      if (createdOrder?.id && (packageWeightG || packageDimensions || assignedDriver || codCollectAmount)) {
-        try {
-          const apiBase = import.meta.env.VITE_API_BASE_URL || '';
-          await fetch(`${apiBase}/api/admin/orders`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-            body: JSON.stringify({
-              orderId: createdOrder.id,
-              delivery: {
-                packageWeightG: packageWeightG ? Number(packageWeightG) : null,
-                packageDimensions: packageDimensions || null,
-                assignedDriver: assignedDriver || null,
-                codCollectAmount: codCollectAmount ? Number(codCollectAmount) : 0,
-              },
-            }),
-          });
-        } catch (deliveryErr) {
-          console.error('Lỗi lưu thông tin kiện hàng:', deliveryErr);
-        }
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Không tạo được đơn hàng');
+
+      const orderCode = data.orderCode || '';
+      const orderId = data.orderId;
+
+      if (data.warnings && data.warnings.length > 0) {
+        alert(`✅ Đơn hàng ${orderCode} đã tạo thành công! (Lưu ý: chưa lưu đủ thông tin giao hàng, kiểm tra lại ở chi tiết đơn). Khách hàng vào Mini App xác nhận.`);
+      } else {
+        alert(`✅ Đã tạo đơn nháp ${orderCode} thành công! Khách hàng vào Mini App xác nhận.`);
       }
 
-      if (overLimit && canOverride && createdOrder?.id) {
-        // Ghi log duyệt vượt hạn mức qua API (service-role) — order_history
-        // chỉ có policy SELECT cho client, không insert thẳng được. Không
-        // chặn tạo đơn nếu bước log lỗi.
+      // In phiếu tạm ngay sau khi đặt hàng (nếu có nhu cầu)
+      if (orderId && confirm('In phiếu tạm cho đơn này ngay bây giờ?')) {
         try {
-          const apiBase = import.meta.env.VITE_API_BASE_URL || '';
-          await fetch(`${apiBase}/api/admin/orders/credit-override`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-            body: JSON.stringify({
-              orderId: createdOrder.id,
-              note: `Duyệt vượt hạn mức công nợ (hạn mức ${money(creditLimit)}, dự kiến ${money(projectedDebt)}). Lý do: ${overrideNote}`,
-            }),
-          });
-        } catch (logErr) {
-          console.error('Lỗi ghi log duyệt vượt hạn mức:', logErr);
-        }
-      }
-
-      alert(`✅ Đã tạo đơn nháp ${orderCode} thành công! Khách hàng vào Mini App xác nhận.`);
-
-      // In phiếu tạm ngay sau khi đặt hàng — khớp yêu cầu "khi đặt hàng xong
-      // phải có màn hình in phiếu giao hàng tạm" (mục brief 2026-09-10).
-      // Lấy lại đơn đầy đủ (kèm order_items + sales_rep_name) từ API vì RPC
-      // admin_create_order chỉ trả về hàng orders, chưa có 2 phần này.
-      if (createdOrder?.id && confirm('In phiếu tạm cho đơn này ngay bây giờ?')) {
-        try {
-          const apiBase = import.meta.env.VITE_API_BASE_URL || '';
-          const res = await fetch(`${apiBase}/api/admin/orders?id=${createdOrder.id}`, {
+          const fullRes = await fetch(`${apiBase}/api/admin/orders?id=${orderId}`, {
             headers: { Authorization: `Bearer ${token}` },
           });
-          const data = await res.json();
-          if (data.ok && data.order) printOrderSlip(data.order);
+          const fullData = await fullRes.json();
+          if (fullData.ok && fullData.order) printOrderSlip(fullData.order);
         } catch (printErr) {
           console.error('Lỗi tải đơn để in phiếu:', printErr);
         }
       }
 
-      // Đơn xong -> đóng tab này (giống KiotViet đóng tab khi hoàn tất), mở
-      // tab mới nếu đây là tab cuối cùng.
+      // Đơn xong -> đóng tab này, mở tab mới nếu đây là tab cuối
       closeTab(activeTab.id);
     } catch (err: any) {
       alert('❌ Lỗi tạo đơn: ' + (err.message || 'Không xác định'));
@@ -649,18 +826,50 @@ export default function PosCreatePage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Customer + Products */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Customer Selection */}
+          {/* Customer Selection & Delivery Information */}
           <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 space-y-4">
-            <h2 className="font-bold text-slate-800 flex items-center gap-2"><User size={18} className="text-green-600" />Thông tin khách hàng</h2>
+            <h2 className="font-bold text-slate-800 flex items-center gap-2"><User size={18} className="text-green-600" />Thông tin khách hàng &amp; Giao hàng</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="text-xs font-semibold text-slate-500 mb-1.5 block">Chọn khách hàng *</label>
+                <select value={activeTab.selectedCustomerId} onChange={e => handleSelectCustomer(e.target.value)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20">
+                  <option value="">-- Chọn Khách Hàng --</option>
+                  {customers.map(c => (
+                    <option key={c.id} value={c.id}>{c.name} ({c.phone || ''}){c.verification_status && c.verification_status !== 'verified' ? ' — chưa xác thực' : ''}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-500 mb-1.5 flex items-center gap-1">
+                  <Calendar size={13} className="text-green-600" />
+                  Ngày giao hàng *
+                </label>
+                <input type="date" value={activeTab.deliveryDate} onChange={e => updateActiveTab({ deliveryDate: e.target.value })}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20" />
+                {activeTab.cutoffInfo?.isLate ? (
+                  <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mt-1.5 flex items-center gap-1.5 font-medium">
+                    <Clock size={13} className="shrink-0 text-amber-600" />
+                    <span>Đơn sau giờ chốt ({activeTab.cutoffInfo.cutoffTimeStr || '16:30'} ngày {activeTab.deliveryDate}) — hệ thống sẽ đánh cờ trễ giờ</span>
+                  </p>
+                ) : activeTab.cutoffInfo ? (
+                  <p className="text-[11px] text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5 mt-1.5 flex items-center gap-1.5 font-medium">
+                    <Clock size={13} className="shrink-0 text-emerald-600" />
+                    <span>Hạn chốt {activeTab.cutoffInfo.cutoffTimeStr} ({formatMinutesLeft(activeTab.cutoffInfo.minutesLeft)})</span>
+                  </p>
+                ) : null}
+              </div>
+            </div>
+
+            {/* Mã đơn KiotViet */}
             <div>
-              <label className="text-xs font-semibold text-slate-500 mb-1.5 block">Chọn khách hàng *</label>
-              <select value={activeTab.selectedCustomerId} onChange={e => handleSelectCustomer(e.target.value)}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20">
-                <option value="">-- Chọn Khách Hàng --</option>
-                {customers.map(c => (
-                  <option key={c.id} value={c.id}>{c.name} ({c.phone || ''}){c.verification_status && c.verification_status !== 'verified' ? ' — chưa xác thực' : ''}</option>
-                ))}
-              </select>
+              <label className="text-xs font-semibold text-slate-500 mb-1.5 flex items-center gap-1">
+                <FileSpreadsheet size={13} className="text-blue-600" />
+                Mã đơn / Hóa đơn KiotViet (nếu có)
+              </label>
+              <input type="text" value={activeTab.externalRef} onChange={e => updateActiveTab({ externalRef: e.target.value })}
+                placeholder="VD: HDB00123, HD00456... để đối chiếu 10 đơn thử"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20" />
             </div>
 
             {activeTab.selectedCustomerId && (() => {
@@ -710,20 +919,37 @@ export default function PosCreatePage() {
                   </div>
                 </div>
                 <div>
-                  <label className="text-xs font-semibold text-slate-500 mb-1.5 block"><Truck size={13} className="inline mr-1" />Địa chỉ giao hàng</label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-semibold text-slate-500 flex items-center gap-1">
+                      <MapPin size={13} className="text-red-500" />
+                      Điểm giao hàng
+                    </label>
+                    {savedAddresses.length > 0 && (
+                      <span className="text-[11px] text-slate-400">Chọn nhanh từ sổ địa chỉ khách:</span>
+                    )}
+                  </div>
                   {savedAddresses.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 mb-1.5">
+                    <div className="flex flex-wrap gap-1.5 mb-2">
                       {savedAddresses.map(a => (
                         <button key={a.id} type="button" onClick={() => applySavedAddress(a)}
-                          className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${activeTab.deliveryAddress === a.address ? 'bg-green-600 border-green-600 text-white' : 'bg-white border-slate-200 text-slate-600 hover:border-green-300'}`}>
-                          {a.label}
+                          className={`px-2.5 py-1 rounded-full text-xs border transition-colors flex items-center gap-1 ${activeTab.deliveryAddressId === a.id || activeTab.deliveryAddress === a.address ? 'bg-green-600 border-green-600 text-white font-medium shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:border-green-300'}`}>
+                          <span>{a.label || 'Địa chỉ'}</span>
+                          {a.is_default && <span className="text-[9px] bg-white/30 rounded px-1">Mặc định</span>}
                         </button>
                       ))}
                     </div>
                   )}
-                  <input type="text" value={activeTab.deliveryAddress} onChange={e => updateActiveTab({ deliveryAddress: e.target.value })}
+                  <input type="text" value={activeTab.deliveryAddress}
+                    onChange={e => updateActiveTab({ deliveryAddress: e.target.value, deliveryAddressId: '' })}
                     placeholder="Để trống = khách nhận tại điểm..."
                     className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20" />
+                  {activeTab.deliveryAddress && !savedAddresses.some(a => a.address === activeTab.deliveryAddress) && (
+                    <label className="flex items-center gap-2 mt-1.5 text-xs text-slate-600 cursor-pointer">
+                      <input type="checkbox" checked={!!activeTab.saveNewAddress} onChange={e => updateActiveTab({ saveNewAddress: e.target.checked })}
+                        className="rounded border-slate-300 text-green-600 focus:ring-green-500/20" />
+                      <span>Lưu địa chỉ này vào sổ địa chỉ của khách để lần sau chọn nhanh</span>
+                    </label>
+                  )}
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-slate-500 mb-1.5 block">Ghi chú đơn hàng</label>
@@ -756,48 +982,18 @@ export default function PosCreatePage() {
           {/* Product Search */}
           <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 space-y-4">
             <h2 className="font-bold text-slate-800 flex items-center gap-2"><Search size={18} className="text-green-600" />Tìm & thêm sản phẩm</h2>
-            <div className="relative">
-              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input type="text" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
-                placeholder="Gõ tên sản phẩm để tìm (tự gợi ý)..."
-                className="pl-9 pr-8 py-2.5 w-full border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20" />
-              {searching && <RefreshCw size={14} className="animate-spin absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />}
-            </div>
-
-            {searchTerm.trim().length >= 2 && (
-              <div className="border border-slate-200 rounded-xl overflow-hidden">
-                {searchResults.map(p => (
-                  <button key={p.id} onClick={() => addFromSearch(p)}
-                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-green-50 text-left border-b border-slate-100 last:border-0 transition-colors">
-                    {getImgUrl(p.image_url) && <img src={getImgUrl(p.image_url)!} alt="" className="w-10 h-10 rounded-lg object-cover border border-slate-100" />}
-                    <div className="flex-1">
-                      <p className="font-medium text-slate-800 text-sm">{p.name}</p>
-                      <p className="text-xs text-slate-400 flex items-center gap-1.5">
-                        {p.categoryLabel || ''} · {p.unit || 'Kg'}
-                        {p.trackInventory && (
-                          <span className={p.lowStock ? 'text-red-500 font-semibold' : 'text-slate-400'}>
-                            · Tồn {p.stockQty ?? 0}{p.lowStock ? ' (sắp hết)' : ''}
-                          </span>
-                        )}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className={`font-semibold ${p.basePrice != null && p.price !== p.basePrice ? 'text-red-600' : 'text-green-700'}`}>
-                        {money(p.price)}
-                      </p>
-                      <Plus size={16} className="text-green-500 ml-auto" />
-                    </div>
-                  </button>
-                ))}
-                {!searching && searchResults.length === 0 && (
-                  <p className="px-4 py-3 text-xs text-slate-400">Không tìm thấy — có thể tạo mới vào danh mục bên dưới.</p>
-                )}
-                <button onClick={() => setShowQuickAddProduct(true)}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm text-green-700 hover:bg-green-50 border-t border-slate-100">
-                  <Plus size={15} /> Thêm "{searchTerm}" vào danh mục hàng hóa (có ảnh, tự sinh mã)
-                </button>
-              </div>
-            )}
+            
+            <ProductSearchBox
+              apiBase={import.meta.env.VITE_API_BASE_URL || ''}
+              token={token}
+              customerId={activeTab.selectedCustomerId}
+              placeholder="Gõ tên hoặc mã sản phẩm (tự tìm, Enter để chọn)..."
+              onSelectProduct={(p) => addFromSearch(p)}
+              onQuickAddProduct={(initialName) => {
+                setSearchTerm(initialName);
+                setShowQuickAddProduct(true);
+              }}
+            />
 
             {/* Custom Product */}
             <div className="border border-dashed border-slate-200 rounded-xl p-4 space-y-3">
@@ -838,20 +1034,101 @@ export default function PosCreatePage() {
               ) : activeTab.cart.map((item, idx) => (
                 <div key={idx} className="p-3 text-sm">
                   <div className="flex items-start gap-2 mb-2">
-                    <div className="flex-1">
-                      <p className="font-medium text-slate-800 leading-tight">{item.name}</p>
-                      <p className="text-xs text-slate-400">{item.productId ? item.productId.substring(0, 8) : 'Tùy chỉnh'} | {item.unit}</p>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="font-medium text-slate-800 leading-tight">{item.name}</p>
+                        {activeTab.processingOrderId && item.orderedQty == null && (
+                          <span className="text-[10px] bg-blue-100 text-blue-700 font-semibold px-1.5 py-0.5 rounded">Mặt hàng mới</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                        <p className="text-xs text-slate-400">{item.productId ? item.productId.substring(0, 8) : 'Tùy chỉnh'} | {item.unit}</p>
+                        {activeTab.processingOrderId && item.orderedQty != null && (
+                          <span className="text-[11px] font-semibold text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
+                            Khách đặt: {item.orderedQty} {item.unit}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <button onClick={() => removeItem(idx)} className="text-slate-300 hover:text-red-500 transition-colors mt-0.5">
+                    <button onClick={() => removeItem(idx)} className="text-slate-300 hover:text-red-500 transition-colors mt-0.5" title="Xóa mặt hàng">
                       <X size={15} />
                     </button>
                   </div>
-                  <div className="flex gap-2">
-                    <input type="number" min="0.001" step="0.001" value={item.quantity} onChange={e => updateQty(idx, Number(e.target.value))}
-                      className="w-20 border border-slate-200 rounded-lg px-2 py-1 text-xs text-center focus:outline-none" />
-                    <input type="number" min="0" step="1000" value={item.price} onChange={e => updatePrice(idx, Number(e.target.value))}
-                      className="flex-1 border border-slate-200 rounded-lg px-2 py-1 text-xs text-right focus:outline-none" />
-                    <span className="text-xs font-semibold text-slate-700 py-1 min-w-[60px] text-right">{money(item.quantity * item.price)}</span>
+                  <div className="flex gap-2 items-center">
+                    <div className="w-20">
+                      <input type="number" min="0.001" step="0.001" value={item.quantity} onChange={e => updateQty(idx, Number(e.target.value))}
+                        title="Số lượng (hỗ trợ số thập phân)"
+                        className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs text-center focus:outline-none font-medium" />
+                    </div>
+                    <div className="flex-1">
+                      <input type="number" min="0" step="1000" value={item.price} onChange={e => updatePrice(idx, Number(e.target.value))}
+                        title="Đơn giá"
+                        className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs text-right focus:outline-none font-medium" />
+                    </div>
+                    <span className="text-xs font-semibold text-slate-700 py-1 min-w-[65px] text-right">{money(item.quantity * item.price)}</span>
+                  </div>
+
+                  {/* WP6: Lý do điều chỉnh khi số lượng khác số khách đặt ban đầu */}
+                  {activeTab.processingOrderId && item.orderedQty != null && Math.abs(item.quantity - item.orderedQty) > 0.0001 && (
+                    <div className="mt-1.5 p-2 bg-amber-50/80 border border-amber-200 rounded-lg space-y-1">
+                      <p className="text-[11px] text-amber-900 font-medium">
+                        ⚠️ Đổi số lượng: {item.orderedQty} → {item.quantity} {item.unit}
+                      </p>
+                      <select
+                        value={item.changeReason || ''}
+                        onChange={e => updateItemChangeReason(idx, e.target.value)}
+                        className="w-full border border-amber-300 rounded px-2 py-1 text-xs bg-white text-slate-700 focus:outline-none"
+                      >
+                        <option value="">-- Chọn lý do điều chỉnh * --</option>
+                        <option value="Hết hàng">Hết hàng</option>
+                        <option value="Khách yêu cầu">Khách yêu cầu</option>
+                        <option value="Thay thế đã thống nhất KH">Thay thế đã thống nhất KH</option>
+                        <option value="Khác">Khác</option>
+                      </select>
+                      {item.changeReason === 'Thay thế đã thống nhất KH' && (
+                        <label className="flex items-center gap-1.5 text-xs text-amber-900 cursor-pointer pt-0.5">
+                          <input
+                            type="checkbox"
+                            checked={!!item.agreedWithCustomer}
+                            onChange={e => updateItemAgreed(idx, e.target.checked)}
+                          />
+                          Đã thống nhất với khách *
+                        </label>
+                      )}
+                    </div>
+                  )}
+
+                  {/* WP6: Lý do khi thêm mặt hàng mới vào đơn cũ */}
+                  {activeTab.processingOrderId && item.orderedQty == null && (
+                    <div className="mt-1.5 p-2 bg-blue-50/80 border border-blue-200 rounded-lg space-y-1">
+                      <p className="text-[11px] font-semibold text-blue-900">➕ Mặt hàng thêm mới</p>
+                      <select
+                        value={item.changeReason || ''}
+                        onChange={e => updateItemChangeReason(idx, e.target.value)}
+                        className="w-full border border-blue-300 rounded px-2 py-1 text-xs bg-white text-slate-700 focus:outline-none"
+                      >
+                        <option value="">-- Chọn lý do thêm hàng * --</option>
+                        <option value="Khách yêu cầu thêm">Khách yêu cầu thêm</option>
+                        <option value="Thay thế đã thống nhất KH">Thay thế đã thống nhất KH</option>
+                        <option value="Gợi ý bán thêm">Gợi ý bán thêm</option>
+                        <option value="Khác">Khác</option>
+                      </select>
+                      <label className="flex items-center gap-1.5 text-xs text-blue-900 cursor-pointer pt-0.5">
+                        <input
+                          type="checkbox"
+                          checked={!!item.agreedWithCustomer}
+                          onChange={e => updateItemAgreed(idx, e.target.checked)}
+                        />
+                        Đã thống nhất với khách *
+                      </label>
+                    </div>
+                  )}
+
+                  {/* Ghi chú từng dòng (quy cách, thái mỏng, chia túi...) */}
+                  <div className="mt-1.5">
+                    <input type="text" value={item.note || ''} onChange={e => updateItemNote(idx, e.target.value)}
+                      placeholder="Ghi chú dòng: quy cách, thái mỏng, đóng gói..."
+                      className="w-full border border-slate-200/80 bg-slate-50/70 rounded-lg px-2.5 py-1 text-[11px] text-slate-700 placeholder:text-slate-400 focus:bg-white focus:border-green-400 focus:outline-none transition-colors" />
                   </div>
                   {/* Khách đặt hàng không bị chặn theo tồn kho nữa — chỉ cảnh
                       báo cho sale biết mà báo thu mua; nút "Nhập hàng" chỉ
@@ -871,6 +1148,29 @@ export default function PosCreatePage() {
                   )}
                 </div>
               ))}
+
+              {/* WP6: Hiển thị các mặt hàng đã xóa khỏi đơn cũ */}
+              {activeTab.processingOrderId && (activeTab.deletedOriginalItems || []).length > 0 && (
+                <div className="p-3 bg-red-50/70 border-t border-red-100 space-y-2">
+                  <p className="text-xs font-bold text-red-800">
+                    Mặt hàng đã xóa ({activeTab.deletedOriginalItems!.length}):
+                  </p>
+                  {activeTab.deletedOriginalItems!.map((del, dIdx) => (
+                    <div key={dIdx} className="flex items-center justify-between text-xs text-red-700 bg-white p-2 rounded-lg border border-red-200 shadow-2xs">
+                      <div className="min-w-0 flex-1 pr-2">
+                        <p className="font-medium line-through truncate">{del.name}</p>
+                        <p className="text-[10px] text-slate-500">Khách đặt: {del.orderedQty} {del.unit} · Lý do: {del.reason}</p>
+                      </div>
+                      <button
+                        onClick={() => restoreDeletedItem(dIdx)}
+                        className="text-[11px] text-green-700 font-semibold hover:underline px-2 py-1 bg-green-50 rounded border border-green-200 shrink-0"
+                      >
+                        Khôi phục
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Voucher — ẩn ở chế độ Bán nhanh để giảm số field cần điền */}
@@ -940,7 +1240,6 @@ export default function PosCreatePage() {
             updateActiveTab(t => ({ cart: [...t.cart, { productId: product.id, name: product.name, unit: product.unit || 'Kg', quantity: 1, price: Number(product.price_retail), image_url: product.image_url || undefined }] }));
             setShowQuickAddProduct(false);
             setSearchTerm('');
-            setSearchResults([]);
           }}
         />
       )}

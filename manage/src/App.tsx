@@ -1,5 +1,6 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { can } from './lib/permissions';
 import SaleLayout from './layouts/SaleLayout';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
@@ -18,6 +19,7 @@ import CongNoPage from './pages/CongNoPage';
 import BaoCaoPage from './pages/BaoCaoPage';
 import DatHangPage from './pages/DatHangPage';
 import DatHangExcelPage from './pages/DatHangExcelPage';
+import DonTongPage from './pages/DonTongPage';
 
 const LoadingScreen = () => (
   <div className="min-h-screen flex items-center justify-center bg-[#0B130E] text-white">Đang tải...</div>
@@ -34,11 +36,14 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 // SaleLayout. Khách hàng gõ thẳng URL nội bộ như /pos, /don-hang, /khach-hang
 // phải bị redirect về "/" (Đơn hàng của tôi), không được render nội dung nhân
 // viên dù chỉ trong một khoảnh khắc.
-const StaffOnlyRoute = ({ children }: { children: React.ReactNode }) => {
+// `perm` (tùy chọn): nếu có, nhân viên không đủ quyền bị chuyển về "/" kèm
+// cảnh báo. Chặn thật sự vẫn ở API (401/403). (yêu cầu 2026-09-20)
+const StaffOnlyRoute = ({ children, perm }: { children: React.ReactNode; perm?: string }) => {
   const { user, loading } = useAuth();
   if (loading) return <LoadingScreen />;
   if (!user) return <Navigate to="/dang-nhap" />;
   if (user.userType !== 'staff') return <Navigate to="/" replace />;
+  if (perm && !can(user.role, perm)) return <Navigate to="/" replace />;
   return <>{children}</>;
 };
 
@@ -76,10 +81,12 @@ function App() {
             <Route path="khach-hang/:id" element={<StaffOnlyRoute><CustomerDetailPage /></StaffOnlyRoute>} />
             <Route path="hang-hoa" element={<StaffOnlyRoute><ProductsPage /></StaffOnlyRoute>} />
             <Route path="hang-hoa/:id" element={<StaffOnlyRoute><ProductDetailPage /></StaffOnlyRoute>} />
-            <Route path="soan-hang" element={<StaffOnlyRoute><SoanHangPage /></StaffOnlyRoute>} />
-            <Route path="ap-gia-hang-ngay" element={<StaffOnlyRoute><BulkPricingPage /></StaffOnlyRoute>} />
-            <Route path="cong-no" element={<StaffOnlyRoute><CongNoPage /></StaffOnlyRoute>} />
-            <Route path="bao-cao" element={<StaffOnlyRoute><BaoCaoPage /></StaffOnlyRoute>} />
+            <Route path="soan-hang" element={<StaffOnlyRoute perm="orders.packing"><SoanHangPage /></StaffOnlyRoute>} />
+            <Route path="ap-gia-hang-ngay" element={<StaffOnlyRoute perm="pricing.edit"><BulkPricingPage /></StaffOnlyRoute>} />
+            {/* /don-tong: WP5 - Đơn tổng & tổng hợp soạn hàng cho Thu mua */}
+            <Route path="don-tong" element={<StaffOnlyRoute perm="procurement.view"><DonTongPage /></StaffOnlyRoute>} />
+            <Route path="cong-no" element={<StaffOnlyRoute perm="finance.view"><CongNoPage /></StaffOnlyRoute>} />
+            <Route path="bao-cao" element={<StaffOnlyRoute perm="reports.view"><BaoCaoPage /></StaffOnlyRoute>} />
             <Route path="don-hang-cua-toi" element={<CustomerOnlyRoute><MyOrdersPage /></CustomerOnlyRoute>} />
             <Route path="don-hang-cua-toi/:id" element={<CustomerOnlyRoute><MyOrderDetailPage /></CustomerOnlyRoute>} />
             <Route path="dat-hang/excel" element={<CustomerOnlyRoute><DatHangExcelPage /></CustomerOnlyRoute>} />

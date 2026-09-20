@@ -1,17 +1,11 @@
 import { useState } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { can, ROLE_LABELS } from '../lib/permissions';
 import {
   LayoutDashboard, ShoppingCart, Users, PackageOpen, LogOut, PlusSquare, Package,
-  Wallet, BarChart3, MoreHorizontal, X, ClipboardList, Tag,
+  Wallet, BarChart3, MoreHorizontal, X, ClipboardList, Tag, Truck,
 } from 'lucide-react';
-
-const ROLE_LABELS: Record<string, string> = {
-  admin: 'Quản trị viên',
-  sale: 'Nhân viên Sale',
-  truong_phong: 'Trưởng phòng',
-  thu_mua: 'Thu mua',
-};
 
 // GIAI ĐOẠN A/E: 2 bộ khung điều hướng riêng theo userType — chặn thật sự
 // nằm ở route guard trong App.tsx (StaffOnlyRoute/CustomerOnlyRoute), đây
@@ -22,6 +16,7 @@ export default function SaleLayout() {
   const [showMore, setShowMore] = useState(false);
 
   const isCustomer = user?.userType === 'customer';
+  const role = user?.role ?? '';
 
   const navItems = isCustomer
     ? [
@@ -29,19 +24,29 @@ export default function SaleLayout() {
         { path: '/don-hang-cua-toi', icon: <ClipboardList size={20} />, label: 'Đơn hàng của tôi' },
       ]
     : [
-        { path: '/', icon: <LayoutDashboard size={20} />, label: 'Dashboard' },
-        { path: '/don-hang', icon: <ShoppingCart size={20} />, label: 'Quản lý Đơn hàng' },
-        { path: '/tao-don-hang', icon: <PlusSquare size={20} />, label: 'Tạo đơn (POS)' },
-        { path: '/ap-gia-hang-ngay', icon: <Tag size={20} />, label: 'Áp giá hàng ngày' },
-        { path: '/khach-hang', icon: <Users size={20} />, label: 'Quản lý Khách hàng' },
-        { path: '/hang-hoa', icon: <Package size={20} />, label: 'Hàng hóa' },
-        { path: '/soan-hang', icon: <PackageOpen size={20} />, label: 'Xử lý đơn hàng' },
-        { path: '/cong-no', icon: <Wallet size={20} />, label: 'Công nợ' },
-        { path: '/bao-cao', icon: <BarChart3 size={20} />, label: 'Báo cáo' },
-      ];
+        // Dashboard — mọi nhân viên
+        { path: '/', icon: <LayoutDashboard size={20} />, label: 'Dashboard', perm: null },
+        // Đơn hàng — mọi nhân viên có quyền xem
+        can(role, 'orders.view') && { path: '/don-hang', icon: <ShoppingCart size={20} />, label: 'Quản lý Đơn hàng', perm: 'orders.view' },
+        // Tạo đơn POS — chỉ sale/admin/truong_phong
+        can(role, 'orders.create') && { path: '/tao-don-hang', icon: <PlusSquare size={20} />, label: 'Tạo đơn (POS)', perm: 'orders.create' },
+        // Áp giá — admin/truong_phong/sale/thu_mua (Thu mua báo giá lại, sale áp giá rồi soạn đơn ra phiếu tạm)
+        can(role, 'pricing.edit') && { path: '/ap-gia-hang-ngay', icon: <Tag size={20} />, label: 'Áp giá hàng ngày', perm: 'pricing.edit' },
+        // Đơn tổng (Thu mua) — admin/truong_phong/sale/thu_mua/kho (yêu cầu 2026-09-20)
+        can(role, 'procurement.view') && { path: '/don-tong', icon: <Truck size={20} />, label: 'Đơn tổng', perm: 'procurement.view' },
+        // Khách hàng
+        can(role, 'customers.view') && { path: '/khach-hang', icon: <Users size={20} />, label: 'Quản lý Khách hàng', perm: 'customers.view' },
+        // Hàng hóa
+        can(role, 'products.view') && { path: '/hang-hoa', icon: <Package size={20} />, label: 'Hàng hóa', perm: 'products.view' },
+        // Soạn hàng — admin/truong_phong/sale/thu_mua/kho (sale soạn đơn ra phiếu tạm)
+        can(role, 'orders.packing') && { path: '/soan-hang', icon: <PackageOpen size={20} />, label: 'Xử lý đơn hàng', perm: 'orders.packing' },
+        // Công nợ — admin/truong_phong/ke_toan
+        can(role, 'finance.view') && { path: '/cong-no', icon: <Wallet size={20} />, label: 'Công nợ', perm: 'finance.view' },
+        // Báo cáo — admin/truong_phong/ke_toan
+        can(role, 'reports.view') && { path: '/bao-cao', icon: <BarChart3 size={20} />, label: 'Báo cáo', perm: 'reports.view' },
+      ].filter(Boolean) as { path: string; icon: React.ReactNode; label: string; perm: string | null }[];
 
-  // Mobile: thanh dưới quá hẹp để nhét hết (giờ đã 8 mục cho nhân viên) — chỉ
-  // hiện 4 mục dùng nhiều nhất, còn lại gom vào nút "Thêm".
+  // Mobile: chỉ hiện 4 mục dùng nhiều nhất, còn lại gom vào nút "Thêm".
   const MOBILE_PRIMARY_PATHS = ['/', '/don-hang', '/tao-don-hang', '/hang-hoa'];
   const primaryItems = isCustomer ? navItems : navItems.filter((i) => MOBILE_PRIMARY_PATHS.includes(i.path));
   const moreItems = isCustomer ? [] : navItems.filter((i) => !MOBILE_PRIMARY_PATHS.includes(i.path));
@@ -59,7 +64,7 @@ export default function SaleLayout() {
           <div>
             <h1 className="font-bold text-green-900 leading-tight">TPS1 System</h1>
             <p className="text-xs text-slate-500">
-              {isCustomer ? `Khách hàng ${user?.tier || ''}`.trim() : ROLE_LABELS[user?.role || ''] || user?.role}
+              {isCustomer ? `Khách hàng ${user?.tier || ''}`.trim() : (ROLE_LABELS[role] || role)}
             </p>
           </div>
         </div>

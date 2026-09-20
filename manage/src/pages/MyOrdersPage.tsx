@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { RefreshCw, ShoppingBag, MapPin, ChevronRight, Receipt } from 'lucide-react';
+import { RefreshCw, ShoppingBag, MapPin, ChevronRight, Receipt, RotateCcw, Calendar, AlertCircle } from 'lucide-react';
 
 const STATUS_LABELS: Record<string, string> = {
   draft: 'Đơn nháp',
@@ -37,6 +37,13 @@ function money(val: number | string) {
 
 function dt(val: string) {
   return val ? new Date(val).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' }) : '—';
+}
+
+function formatDeliveryDate(val: string) {
+  if (!val) return '';
+  const parts = val.split('-');
+  if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
+  return val;
 }
 
 // Trang "Đơn hàng của tôi" dành cho khách hàng đăng nhập vào sale-webapp
@@ -112,37 +119,79 @@ export default function MyOrdersPage() {
       ) : (
         <div className="space-y-3">
           {orders.map((order) => (
-            <button
+            <div
               key={order.id}
               onClick={() => navigate(`/don-hang-cua-toi/${order.id}`)}
-              className="w-full flex items-start justify-between gap-3 p-4 bg-white rounded-2xl border border-slate-100 shadow-sm hover:border-green-200 hover:shadow-md transition-all text-left"
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => { if (e.key === 'Enter') navigate(`/don-hang-cua-toi/${order.id}`); }}
+              className="w-full cursor-pointer flex flex-col gap-3 p-4 bg-white rounded-2xl border border-slate-100 shadow-sm hover:border-green-200 hover:shadow-md transition-all text-left"
             >
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-                  <h3 className="font-bold text-slate-800">{order.order_code}</h3>
-                  <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${STATUS_COLORS[order.status] || 'bg-slate-100 text-slate-600'}`}>
-                    {STATUS_LABELS[order.status] || order.status}
-                  </span>
-                  {order.status === 'completed' && order.invoice_document_id && (
-                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200 flex items-center gap-1">
-                      <Receipt size={11} /> Có hóa đơn
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    <h3 className="font-bold text-slate-800">{order.order_code}</h3>
+                    <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full ${STATUS_COLORS[order.status] || 'bg-slate-100 text-slate-600'}`}>
+                      {STATUS_LABELS[order.status] || order.status}
                     </span>
+                    {order.is_late_order && (
+                      <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1" title="Đơn đặt sau giờ chốt">
+                        <AlertCircle size={11} /> Trễ giờ chốt
+                      </span>
+                    )}
+                    {order.status === 'completed' && order.invoice_document_id && (
+                      <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200 flex items-center gap-1">
+                        <Receipt size={11} /> Có hóa đơn
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-400">{dt(order.created_at)}</p>
+                  {order.delivery_date && (
+                    <div className="flex items-center gap-1.5 text-xs text-emerald-700 font-medium mt-1">
+                      <Calendar size={13} className="shrink-0" />
+                      <span>Ngày giao: {formatDeliveryDate(order.delivery_date)}</span>
+                    </div>
                   )}
+                  <div className="flex items-start gap-1.5 mt-1">
+                    <MapPin size={13} className="text-slate-400 mt-0.5 shrink-0" />
+                    <p className="text-xs text-slate-500 truncate">{order.delivery_address || 'Nhận tại điểm'}</p>
+                  </div>
                 </div>
-                <p className="text-xs text-slate-400">{dt(order.created_at)}</p>
-                <div className="flex items-start gap-1.5 mt-1">
-                  <MapPin size={13} className="text-slate-400 mt-0.5 shrink-0" />
-                  <p className="text-xs text-slate-500 truncate">{order.delivery_address || 'Nhận tại điểm'}</p>
+                <div className="flex items-center gap-3 shrink-0">
+                  <div className="text-right">
+                    <p className="font-bold text-lg text-red-600">{money(order.grand_total)}</p>
+                    <p className="text-xs text-slate-400">{PAYMENT_LABELS[order.payment_status] || order.payment_status}</p>
+                  </div>
+                  <ChevronRight size={18} className="text-slate-400" />
                 </div>
               </div>
-              <div className="flex items-center gap-3 shrink-0">
-                <div className="text-right">
-                  <p className="font-bold text-lg text-red-600">{money(order.grand_total)}</p>
-                  <p className="text-xs text-slate-400">{PAYMENT_LABELS[order.payment_status] || order.payment_status}</p>
-                </div>
-                <ChevronRight size={18} className="text-slate-400" />
+
+              <div className="flex items-center justify-between pt-2 border-t border-slate-100/80">
+                <span className="text-xs text-slate-400">
+                  {order.items?.length || 0} mặt hàng
+                </span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const reorderItems = (order.items || []).map((it: any) => ({
+                      productId: it.productId,
+                      sku: it.sku,
+                      name: it.name,
+                      unit: it.unit,
+                      quantity: it.orderedQuantity || it.quantity || 1,
+                      price: it.price || 0,
+                      customerNote: it.customerNote || '',
+                    }));
+                    navigate('/', { state: { reorderItems } });
+                  }}
+                  className="text-xs font-semibold text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 flex items-center gap-1.5 transition-colors"
+                  title="Nạp lại các mặt hàng trong đơn này vào giỏ hàng"
+                >
+                  <RotateCcw size={12} /> Đặt lại đơn
+                </button>
               </div>
-            </button>
+            </div>
           ))}
         </div>
       )}
