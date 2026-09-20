@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { printOrderSlip } from '../lib/printOrder';
 import QuickAddProductModal from '../components/QuickAddProductModal';
 import ProductSearchBox, { type SearchProductItem } from '../components/ProductSearchBox';
+import { getApiBase } from '../lib/apiBase';
 import {
   Search, Plus, Tag, Truck, RefreshCw, ShoppingCart, User, X, CheckCircle2, AlertTriangle, PlusCircle, ClipboardEdit,
   Calendar, FileSpreadsheet, Clock, MapPin
@@ -155,7 +156,7 @@ export default function PosCreatePage() {
   // 1. Lấy thông tin cutoff và earliestDate từ server ngay khi mount
   useEffect(() => {
     if (!token) return;
-    const apiBase = import.meta.env.VITE_API_BASE_URL || '';
+    const apiBase = getApiBase();
     fetch(`${apiBase}/api/admin/order-cutoff`, {
       headers: { Authorization: `Bearer ${token}` },
     })
@@ -176,7 +177,7 @@ export default function PosCreatePage() {
     if (!token || !activeTab.deliveryDate) return;
     const timer = setTimeout(async () => {
       try {
-        const apiBase = import.meta.env.VITE_API_BASE_URL || '';
+        const apiBase = getApiBase();
         const res = await fetch(
           `${apiBase}/api/admin/order-cutoff?deliveryDate=${encodeURIComponent(activeTab.deliveryDate)}`,
           { headers: { Authorization: `Bearer ${token}` } }
@@ -231,10 +232,15 @@ export default function PosCreatePage() {
     setLoadingProcessOrder(true);
     (async () => {
       try {
-        const apiBase = import.meta.env.VITE_API_BASE_URL || '';
+        const apiBase = getApiBase();
         const res = await fetch(`${apiBase}/api/admin/orders?id=${processOrderId}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
+        const contentType = res.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+          const text = await res.text();
+          throw new Error(`Máy chủ phản hồi không đúng (${res.status}): ${text.slice(0, 100)}`);
+        }
         const data = await res.json();
         if (!data.ok || !data.order) throw new Error(data.error || 'Không tìm thấy đơn hàng');
         const o = data.order;
@@ -424,7 +430,7 @@ export default function PosCreatePage() {
     const qty = Number(qtyStr);
     if (!Number.isFinite(qty) || qty <= 0) { alert('Số lượng không hợp lệ'); return; }
     try {
-      const apiBase = import.meta.env.VITE_API_BASE_URL || '';
+      const apiBase = getApiBase();
       const res = await fetch(`${apiBase}/api/admin/products`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -569,7 +575,7 @@ export default function PosCreatePage() {
     if (!confirm(`Xác nhận cập nhật & chốt đơn ${orderCode}?`)) return;
     setSubmitting(true);
     try {
-      const apiBase = import.meta.env.VITE_API_BASE_URL || '';
+      const apiBase = getApiBase();
 
       // WP6: Ghi vết thay đổi vào order_history trước khi finalize
       const itemChanges: any[] = [];
@@ -701,7 +707,7 @@ export default function PosCreatePage() {
     if (!confirm(`Xác nhận tạo đơn nháp cho ${selectedCustomer?.name || 'khách hàng'}?`)) return;
     setSubmitting(true);
     try {
-      const apiBase = import.meta.env.VITE_API_BASE_URL || '';
+      const apiBase = getApiBase();
       const res = await fetch(`${apiBase}/api/admin/orders/create`, {
         method: 'POST',
         headers: {
@@ -984,7 +990,7 @@ export default function PosCreatePage() {
             <h2 className="font-bold text-slate-800 flex items-center gap-2"><Search size={18} className="text-green-600" />Tìm & thêm sản phẩm</h2>
             
             <ProductSearchBox
-              apiBase={import.meta.env.VITE_API_BASE_URL || ''}
+              apiBase={getApiBase()}
               token={token}
               customerId={activeTab.selectedCustomerId}
               placeholder="Gõ tên hoặc mã sản phẩm (tự tìm, Enter để chọn)..."
@@ -1232,7 +1238,7 @@ export default function PosCreatePage() {
 
       {showQuickAddProduct && (
         <QuickAddProductModal
-          apiBase={import.meta.env.VITE_API_BASE_URL || ''}
+          apiBase={getApiBase()}
           token={token}
           initialName={searchTerm}
           onClose={() => setShowQuickAddProduct(false)}
