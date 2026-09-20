@@ -5,8 +5,11 @@ import { useAuth } from '../contexts/AuthContext';
 import { printOrderSlip } from '../lib/printOrder';
 import {
   RefreshCw, Search, Eye, Printer, Clock, Truck, CheckCircle,
-  ShoppingBag, TrendingUp, ClipboardEdit, FileSpreadsheet, AlertCircle
+  ShoppingBag, TrendingUp, ClipboardEdit, FileSpreadsheet, AlertCircle,
+  ChevronLeft, ChevronRight
 } from 'lucide-react';
+
+const PAGE_SIZE = 50;
 
 const STATUS_LABELS: Record<string, string> = {
   draft: 'Đơn nháp',
@@ -70,6 +73,7 @@ export default function OrdersPage() {
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterPayment, setFilterPayment] = useState('');
   const [dateFrom, setDateFrom] = useState('');
@@ -79,6 +83,16 @@ export default function OrdersPage() {
   const [changeRequests, setChangeRequests] = useState<any[]>([]);
   const [changeRequestsMap, setChangeRequestsMap] = useState<Map<string, any>>(new Map());
   const [filterHasRequest, setFilterHasRequest] = useState(false);
+  const [page, setPage] = useState(0);
+  const [totalCount, setTotalCount] = useState(0);
+  const [stats, setStats] = useState({ pending: 0, preparing: 0, shipping: 0, completed: 0, revenue: 0 });
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchTerm.trim()), 250);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  useEffect(() => { setPage(0); }, [debouncedSearch, filterStatus, filterPayment, dateFrom, dateTo]);
 
   const fetchOrders = useCallback(async () => {
     setLoading(true);
@@ -111,12 +125,23 @@ export default function OrdersPage() {
           customer_tier, pricing_status, price_revision, confirmation_document_status,
           delivery_type, delivery_address, delivery_name, delivery_phone, delivery_alias,
           sales_rep_id, item_count
-        `)
+        `, { count: 'exact' })
         .order('created_at', { ascending: false })
-        .limit(500);
+        .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
 
-      if (dateFrom) query = query.gte('created_at', dateFrom);
-      if (dateTo) query = query.lt('created_at', `${dateTo}T23:59:59.999`);
+      let statsQuery = supabase
+        .from('orders')
+        .select('status, grand_total')
+        .limit(10000);
+
+      if (dateFrom) { query = query.gte('created_at', dateFrom); statsQuery = statsQuery.gte('created_at', dateFrom); }
+      if (dateTo) { query = query.lt('created_at', `${dateTo}T23:59:59.999`); statsQuery = statsQuery.lt('created_at', `${dateTo}T23:59:59.999`); }
+      if (filterStatus) query = query.eq('status', filterStatus);
+      if (filterPayment) query = query.eq('payment_status', filterPayment);
+      if (debouncedSearch) {
+        const safe = debouncedSearch.replace(/[,%()]/g, ' ').trim();
+        if (safe) query = query.or(`order_code.ilike.%${safe}%,customer_code.ilike.%${safe}%,customer_name.ilike.%${safe}%,customer_phone.ilike.%${safe}%,customer_company.ilike.%${safe}%`);
+      }
 
       // Sale chỉ thấy đơn hàng của KH được giao cho mình
       if (user?.role === 'sale' && user.id && user.id !== 'legacy-admin') {
@@ -127,13 +152,25 @@ export default function OrdersPage() {
         const myCodes = (myCustomers || []).map((c: any) => c.partner_code).filter(Boolean);
         if (myCodes.length > 0) {
           query = query.in('customer_code', myCodes);
+          statsQuery = statsQuery.in('customer_code', myCodes);
         } else {
           setOrders([]); setLoading(false); return;
         }
       }
 
-      const { data, error } = await query;
+      const [{ data, error, count }, { data: statsRows, error: statsError }] = await Promise.all([query, statsQuery]);
       if (error) throw error;
+      if (statsError) console.warn('Lỗi tải thống kê đơn hàng:', statsError);
+      setTotalCount(count || 0);
+      const summary = (statsRows || []).reduce((acc: any, order: any) => {
+        if (order.status === 'pending') acc.pending += 1;
+        if (order.status === 'preparing') acc.preparing += 1;
+        if (order.status === 'shipping') acc.shipping += 1;
+        if (order.status === 'completed') acc.completed += 1;
+        if (order.status !== 'canceled') acc.revenue += Number(order.grand_total) || 0;
+        return acc;
+      }, { pending: 0, preparing: 0, shipping: 0, completed: 0, revenue: 0 });
+      setStats(summary);
 
       const salesRepIds = [...new Set((data || []).map((o: any) => o.sales_rep_id).filter(Boolean))];
       const { data: reps } = salesRepIds.length
@@ -149,26 +186,14 @@ export default function OrdersPage() {
     } finally {
       setLoading(false);
     }
-  }, [user, dateFrom, dateTo, token, apiBase]);
+  }, [user, dateFrom, dateTo, filterStatus, filterPayment, debouncedSearch, page, token, apiBase]);
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
 
   const filteredOrders = orders.filter(order => {
-    const hay = [order.order_code, order.customer_code, order.customer_name, order.customer_phone, order.customer_company, order.delivery_address].filter(Boolean).join(' ').toLowerCase();
-    return (!searchTerm || hay.includes(searchTerm.toLowerCase()))
-      && (!filterStatus || order.status === filterStatus)
-      && (!filterPayment || order.payment_status === filterPayment)
-      && (!filterHasRequest || changeRequestsMap.has(order.id));
+    return !filterHasRequest || changeRequestsMap.has(order.id);
   });
 
-  // Stats
-  const stats = {
-    pending: orders.filter(o => o.status === 'pending').length,
-    preparing: orders.filter(o => o.status === 'preparing').length,
-    shipping: orders.filter(o => o.status === 'shipping').length,
-    completed: orders.filter(o => o.status === 'completed').length,
-    revenue: orders.filter(o => o.status !== 'canceled').reduce((s, o) => s + (Number(o.grand_total) || 0), 0),
-  };
   const totals = filteredOrders.reduce((acc, o) => {
     acc.grand += Number(o.grand_total) || 0;
     acc.paid += Number(o.paid_amount) || 0;
@@ -249,7 +274,7 @@ export default function OrdersPage() {
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Quản lý Đơn hàng</h1>
-          <p className="text-slate-500 text-sm">{orders.length} đơn hàng · đang hiển thị {filteredOrders.length}</p>
+          <p className="text-slate-500 text-sm">{totalCount} đơn hàng · đang hiển thị {filteredOrders.length}</p>
         </div>
         <div className="flex gap-2 flex-wrap">
           <button onClick={exportExcel} disabled={exporting}
@@ -419,6 +444,21 @@ export default function OrdersPage() {
             </tbody>
           </table>
         </div>
+        {totalCount > PAGE_SIZE && (
+          <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-slate-100 bg-slate-50/60 text-sm">
+            <span className="text-slate-500">Trang {page + 1} / {Math.max(1, Math.ceil(totalCount / PAGE_SIZE))}</span>
+            <div className="flex gap-2">
+              <button type="button" disabled={page === 0 || loading} onClick={() => setPage(p => Math.max(0, p - 1))}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 disabled:opacity-40">
+                <ChevronLeft size={15} /> Trước
+              </button>
+              <button type="button" disabled={(page + 1) * PAGE_SIZE >= totalCount || loading} onClick={() => setPage(p => p + 1)}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 disabled:opacity-40">
+                Sau <ChevronRight size={15} />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

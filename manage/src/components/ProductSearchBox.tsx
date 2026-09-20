@@ -4,6 +4,8 @@ import { Search, RefreshCw, X, Package, Plus } from 'lucide-react';
 type ProductSearchCacheEntry = { expiresAt: number; products: SearchProductItem[] };
 const PRODUCT_SEARCH_CACHE_TTL = 5 * 60 * 1000;
 const productSearchCache = new Map<string, ProductSearchCacheEntry>();
+const productCatalogCache = new Map<string, ProductSearchCacheEntry>();
+const CATALOG_STORAGE_PREFIX = 'tps1_admin_product_catalog_v1_';
 
 export interface SearchProductItem {
   id: string;
@@ -22,6 +24,28 @@ export interface SearchProductItem {
   lowStock?: boolean;
   categoryLabel?: string;
   [key: string]: any;
+}
+
+type CompactCatalogRow = [
+  string, string, string, string, string, number, number, string, boolean,
+  boolean, number | null, boolean
+];
+
+function normalizeSearch(value: string) {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase().trim();
+}
+
+function decodeCatalog(rows: CompactCatalogRow[]): SearchProductItem[] {
+  return rows.map((row) => ({
+    id: row[0], sku: row[1], name: row[2], category: row[3] || null, unit: row[4] || 'Kg',
+    price: Number(row[5]) || 0, basePrice: Number(row[6]) || 0,
+    thumb_url: row[8] ? row[7] : null, image_url: row[8] ? null : row[7],
+    trackInventory: Boolean(row[9]), stockQty: row[10], lowStock: Boolean(row[11]),
+    categoryLabel: row[3] || '',
+    _searchKey: normalizeSearch(`${row[1]} ${row[2]} ${row[3] || ''}`),
+    _skuKey: normalizeSearch(row[1] || ''),
+    _nameKey: normalizeSearch(row[2] || ''),
+  }));
 }
 
 interface ProductSearchBoxProps {
@@ -102,10 +126,57 @@ export default function ProductSearchBox({
   const [loading, setLoading] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [catalogProducts, setCatalogProducts] = useState<SearchProductItem[] | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Catalog giá theo khách được tải nền một lần và giữ 5 phút. Khi chưa sẵn
+  // sàng, ô tìm kiếm vẫn dùng API cũ làm phương án dự phòng.
+  useEffect(() => {
+    if (!token) return;
+    let active = true;
+    const catalogKey = `${apiBase}|${customerId || 'base'}`;
+    const cached = productCatalogCache.get(catalogKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      setCatalogProducts(cached.products);
+      return;
+    }
+    try {
+      const stored = sessionStorage.getItem(`${CATALOG_STORAGE_PREFIX}${customerId || 'base'}`);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed.expiresAt > Date.now() && Array.isArray(parsed.rows)) {
+          const products = decodeCatalog(parsed.rows);
+          productCatalogCache.set(catalogKey, { products, expiresAt: parsed.expiresAt });
+          setCatalogProducts(products);
+          return;
+        }
+      }
+    } catch { /* bỏ qua cache lỗi */ }
+    setCatalogProducts(null);
+    const params = new URLSearchParams({ catalog: '1' });
+    if (customerId) params.set('customerId', customerId);
+    fetch(`${apiBase}/api/admin/products?${params}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((res) => res.json())
+      .then((data) => {
+        if (!active || !data.ok || !Array.isArray(data.products)) return;
+        const expiresAt = Date.now() + PRODUCT_SEARCH_CACHE_TTL;
+        const products = decodeCatalog(data.products as CompactCatalogRow[]);
+        productCatalogCache.set(catalogKey, { products, expiresAt });
+        setCatalogProducts(products);
+        try {
+          for (let i = sessionStorage.length - 1; i >= 0; i--) {
+            const key = sessionStorage.key(i);
+            if (key?.startsWith(CATALOG_STORAGE_PREFIX)) sessionStorage.removeItem(key);
+          }
+          sessionStorage.setItem(`${CATALOG_STORAGE_PREFIX}${customerId || 'base'}`, JSON.stringify({ expiresAt, rows: data.products }));
+        } catch { /* sessionStorage đầy vẫn dùng cache RAM */ }
+      })
+      .catch(() => { /* API search sẽ fallback */ });
+    return () => { active = false; };
+  }, [apiBase, token, customerId]);
 
   // Tải danh mục phân loại một lần (qua get_distinct_categories)
   useEffect(() => {
@@ -217,12 +288,40 @@ export default function ProductSearchBox({
     [apiBase, token, customerId]
   );
 
+  const performLocalSearch = useCallback((q: string, cat: string) => {
+    if (!catalogProducts) return false;
+    const needle = normalizeSearch(q);
+    if (!needle && !cat) {
+      setResults([]); setLoading(false); setIsOpen(false); return true;
+    }
+    const categoryNeedle = normalizeSearch(cat);
+    const ranked = catalogProducts
+      .filter((p: any) => (!categoryNeedle || normalizeSearch(p.category || '') === categoryNeedle) && (!needle || p._searchKey.includes(needle)))
+      .map((p: any) => {
+        let score = 5;
+        if (p._skuKey === needle) score = 0;
+        else if (p._skuKey.startsWith(needle)) score = 1;
+        else if (p._nameKey === needle) score = 2;
+        else if (p._nameKey.startsWith(needle)) score = 3;
+        else if (p._nameKey.includes(needle)) score = 4;
+        return { p, score };
+      })
+      .sort((a, b) => a.score - b.score || a.p.name.localeCompare(b.p.name, 'vi'))
+      .slice(0, 50)
+      .map(({ p }) => p);
+    setResults(ranked);
+    setSelectedIndex(0);
+    setLoading(false);
+    setIsOpen(true);
+    return true;
+  }, [catalogProducts]);
+
   useEffect(() => {
     const timer = setTimeout(() => {
-      performSearch(searchTerm, selectedCategory);
-    }, 120);
+      if (!performLocalSearch(searchTerm, selectedCategory)) performSearch(searchTerm, selectedCategory);
+    }, catalogProducts ? 0 : 120);
     return () => clearTimeout(timer);
-  }, [searchTerm, selectedCategory, performSearch]);
+  }, [searchTerm, selectedCategory, performSearch, performLocalSearch, catalogProducts]);
 
   const handleSelect = (product: SearchProductItem) => {
     onSelectProduct(product);
