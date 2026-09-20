@@ -1,26 +1,47 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, type ComponentType } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { can } from './lib/permissions';
 import SaleLayout from './layouts/SaleLayout';
 import LoginPage from './pages/LoginPage';
-const DashboardPage = lazy(() => import('./pages/DashboardPage'));
-const OrdersPage = lazy(() => import('./pages/OrdersPage'));
-const OrderDetailPage = lazy(() => import('./pages/OrderDetailPage'));
-const PosCreatePage = lazy(() => import('./pages/PosCreatePage'));
-const CustomersPage = lazy(() => import('./pages/CustomersPage'));
-const CustomerDetailPage = lazy(() => import('./pages/CustomerDetailPage'));
-const SoanHangPage = lazy(() => import('./pages/SoanHangPage'));
-const BulkPricingPage = lazy(() => import('./pages/BulkPricingPage'));
-const MyOrdersPage = lazy(() => import('./pages/MyOrdersPage'));
-const MyOrderDetailPage = lazy(() => import('./pages/MyOrderDetailPage'));
-const ProductsPage = lazy(() => import('./pages/ProductsPage'));
-const ProductDetailPage = lazy(() => import('./pages/ProductDetailPage'));
-const CongNoPage = lazy(() => import('./pages/CongNoPage'));
-const BaoCaoPage = lazy(() => import('./pages/BaoCaoPage'));
-const DatHangPage = lazy(() => import('./pages/DatHangPage'));
-const DatHangExcelPage = lazy(() => import('./pages/DatHangExcelPage'));
-const DonTongPage = lazy(() => import('./pages/DonTongPage'));
+const CHUNK_RELOAD_KEY = 'tps1_manage_chunk_reload';
+function lazyPage(loader: () => Promise<{ default: ComponentType<any> }>) {
+  return lazy(async () => {
+    try {
+      const module = await loader();
+      sessionStorage.removeItem(CHUNK_RELOAD_KEY);
+      return module;
+    } catch (error) {
+      // Khi deploy, tab đang mở có thể giữ index cũ nhưng chunk cũ đã đổi tên.
+      // Tự reload đúng một lần để lấy manifest mới, tránh màn hình trắng.
+      if (!sessionStorage.getItem(CHUNK_RELOAD_KEY)) {
+        sessionStorage.setItem(CHUNK_RELOAD_KEY, '1');
+        window.location.reload();
+        return await new Promise<never>(() => undefined);
+      }
+      sessionStorage.removeItem(CHUNK_RELOAD_KEY);
+      throw error;
+    }
+  });
+}
+
+const DashboardPage = lazyPage(() => import('./pages/DashboardPage'));
+const OrdersPage = lazyPage(() => import('./pages/OrdersPage'));
+const OrderDetailPage = lazyPage(() => import('./pages/OrderDetailPage'));
+const PosCreatePage = lazyPage(() => import('./pages/PosCreatePage'));
+const CustomersPage = lazyPage(() => import('./pages/CustomersPage'));
+const CustomerDetailPage = lazyPage(() => import('./pages/CustomerDetailPage'));
+const SoanHangPage = lazyPage(() => import('./pages/SoanHangPage'));
+const BulkPricingPage = lazyPage(() => import('./pages/BulkPricingPage'));
+const MyOrdersPage = lazyPage(() => import('./pages/MyOrdersPage'));
+const MyOrderDetailPage = lazyPage(() => import('./pages/MyOrderDetailPage'));
+const ProductsPage = lazyPage(() => import('./pages/ProductsPage'));
+const ProductDetailPage = lazyPage(() => import('./pages/ProductDetailPage'));
+const CongNoPage = lazyPage(() => import('./pages/CongNoPage'));
+const BaoCaoPage = lazyPage(() => import('./pages/BaoCaoPage'));
+const DatHangPage = lazyPage(() => import('./pages/DatHangPage'));
+const DatHangExcelPage = lazyPage(() => import('./pages/DatHangExcelPage'));
+const DonTongPage = lazyPage(() => import('./pages/DonTongPage'));
 
 const LoadingScreen = () => (
   <div className="min-h-screen flex items-center justify-center bg-[#0B130E] text-white">Đang tải...</div>
