@@ -114,6 +114,9 @@ const SALE_MODES: { value: OrderTab['mode']; label: string; icon: string }[] = [
 ];
 
 const TABS_STORAGE_KEY = 'tps1_pos_tabs';
+const CUSTOMER_CACHE_TTL_MS = 2 * 60 * 1000;
+const customerCache = new Map<string, { data: any[]; expiresAt: number }>();
+const customerLoads = new Map<string, Promise<any[]>>();
 
 export default function PosCreatePage() {
   const { user, token } = useAuth();
@@ -307,21 +310,41 @@ export default function PosCreatePage() {
   const [savedAddresses, setSavedAddresses] = useState<any[]>([]);
 
   const loadCustomers = useCallback(async () => {
+    const isSale = user?.role === 'sale' && user.id && user.id !== 'legacy-admin';
+    const cacheKey = isSale ? `sale:${user.id}` : 'admin';
+    const cached = customerCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      setCustomers(cached.data);
+      return;
+    }
+
     try {
-      if (user?.role === 'sale' && user.id && user.id !== 'legacy-admin') {
-        // LƯU Ý: cột đúng là "company", không phải "company_name" — trước đây
-        // sai tên cột khiến query này lỗi 400 im lặng, sale KHÔNG chọn được
-        // khách hàng nào cả (bug Giai đoạn C, 2026-09-10).
-        const { data } = await supabase
-          .from('vip_accounts')
-          .select('id, name, phone, partner_code, company, discount_tier, credit_limit, default_shipping_address, default_shipping_name, default_shipping_phone, verification_status')
-          .eq('sales_rep_id', user.id)
-          .eq('is_active', true);
-        setCustomers(data || []);
-      } else {
-        const { data } = await supabase.rpc('admin_list_customers');
-        setCustomers(data || []);
+      let request = customerLoads.get(cacheKey);
+      if (!request) {
+        request = (async () => {
+          if (isSale) {
+            // LƯU Ý: cột đúng là "company", không phải "company_name" — trước đây
+            // sai tên cột khiến query này lỗi 400 im lặng, sale KHÔNG chọn được
+            // khách hàng nào cả (bug Giai đoạn C, 2026-09-10).
+            const { data, error } = await supabase
+              .from('vip_accounts')
+              .select('id, name, phone, partner_code, company, discount_tier, credit_limit, default_shipping_address, default_shipping_name, default_shipping_phone, verification_status')
+              .eq('sales_rep_id', user.id)
+              .eq('is_active', true);
+            if (error) throw error;
+            return data || [];
+          }
+
+          const { data, error } = await supabase.rpc('admin_list_customers');
+          if (error) throw error;
+          return data || [];
+        })().finally(() => customerLoads.delete(cacheKey));
+        customerLoads.set(cacheKey, request);
       }
+
+      const data = await request;
+      customerCache.set(cacheKey, { data, expiresAt: Date.now() + CUSTOMER_CACHE_TTL_MS });
+      setCustomers(data);
     } catch (err) {
       console.error('Lỗi tải khách hàng:', err);
     }
