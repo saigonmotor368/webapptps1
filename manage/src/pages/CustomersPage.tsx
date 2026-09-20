@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Search, RefreshCw, Users, Plus, FileSpreadsheet, ShieldAlert, Pencil, KeyRound, Trash2 } from 'lucide-react';
+import { Search, RefreshCw, Users, Plus, FileSpreadsheet, ShieldAlert, Pencil, KeyRound, Trash2, Copy, Check, X } from 'lucide-react';
 
 const TIER_COLORS: Record<string, string> = {
   VIP0: 'bg-slate-100 text-slate-600',
@@ -46,6 +46,8 @@ export default function CustomersPage() {
   const [onlyPending, setOnlyPending] = useState(false);
   const [onlyUnassigned, setOnlyUnassigned] = useState(false);
   const [onlyMissingContact, setOnlyMissingContact] = useState(false);
+  const [temporaryPassword, setTemporaryPassword] = useState<{ code: string; password: string } | null>(null);
+  const [passwordCopied, setPasswordCopied] = useState(false);
 
   // Chọn hàng loạt để gán người phụ trách (WP2b - G1)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -192,7 +194,8 @@ export default function CustomersPage() {
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || 'Không reset được mật khẩu');
-      alert(`✅ Mật khẩu tạm mới cho ${data.partnerCode}: ${data.temporaryPassword}\n\nHãy gửi riêng cho khách hàng. Khách sẽ phải đổi mật khẩu sau khi đăng nhập.`);
+      setPasswordCopied(false);
+      setTemporaryPassword({ code: data.partnerCode, password: String(data.temporaryPassword || '') });
     } catch (err: any) {
       alert('Lỗi: ' + (err.message || 'Không reset được mật khẩu'));
     }
@@ -216,6 +219,26 @@ export default function CustomersPage() {
       });
     } catch (err: any) {
       alert('Không thể xóa: ' + (err.message || 'Đã xảy ra lỗi'));
+    }
+  };
+
+  const copyTemporaryPassword = async () => {
+    if (!temporaryPassword?.password) return;
+    const credentials = `Mã khách hàng: ${temporaryPassword.code}\nMật khẩu tạm: ${temporaryPassword.password}`;
+    try {
+      await navigator.clipboard.writeText(credentials);
+      setPasswordCopied(true);
+    } catch {
+      const textarea = document.createElement('textarea');
+      textarea.value = credentials;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = document.execCommand('copy');
+      textarea.remove();
+      if (copied) setPasswordCopied(true);
+      else alert(credentials);
     }
   };
 
@@ -481,6 +504,32 @@ export default function CustomersPage() {
           </table>
         </div>
       </div>
+
+      {temporaryPassword && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/50" role="dialog" aria-modal="true" aria-labelledby="temporary-password-title">
+          <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl border border-slate-200 p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 id="temporary-password-title" className="text-lg font-bold text-slate-800">Đã reset mật khẩu</h2>
+                <p className="text-sm text-slate-500 mt-1">Mã khách hàng: <b className="text-slate-700">{temporaryPassword.code}</b></p>
+              </div>
+              <button onClick={() => setTemporaryPassword(null)} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100" aria-label="Đóng"><X size={19} /></button>
+            </div>
+            <label className="block text-xs font-semibold text-slate-500 mt-5 mb-1.5">Mật khẩu tạm thời</label>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input data-temporary-password value={temporaryPassword.password} readOnly onFocus={(e) => e.currentTarget.select()}
+                className="min-w-0 flex-1 rounded-xl border border-slate-300 bg-slate-50 px-3 py-3 font-mono text-base font-bold tracking-wide text-slate-800 focus:outline-none focus:ring-2 focus:ring-green-500/30" />
+              <button onClick={copyTemporaryPassword} title="Copy cả mã khách hàng và mật khẩu tạm" className={`shrink-0 inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-sm font-semibold ${passwordCopied ? 'bg-green-100 text-green-700' : 'bg-green-600 text-white hover:bg-green-700'}`}>
+                {passwordCopied ? <Check size={17} /> : <Copy size={17} />} {passwordCopied ? 'Đã copy' : 'Copy thông tin đăng nhập'}
+              </button>
+            </div>
+            <p className="mt-4 rounded-xl bg-amber-50 border border-amber-200 px-3 py-2.5 text-xs leading-relaxed text-amber-800">
+              Nút copy sẽ lấy cả mã khách hàng và mật khẩu tạm. Khách bắt buộc đổi mật khẩu ở lần đăng nhập tiếp theo.
+            </p>
+            <button onClick={() => setTemporaryPassword(null)} className="mt-4 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50">Đóng</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
