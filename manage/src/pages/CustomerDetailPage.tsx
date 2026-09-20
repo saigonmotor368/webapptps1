@@ -258,10 +258,30 @@ export default function CustomerDetailPage() {
   const resetPassword = async () => {
     if (!confirm(`Tạo mật khẩu tạm mới cho "${form.name}" (mã ${form.partner_code})? Mật khẩu cũ sẽ không dùng được nữa.`)) return;
     try {
-      const { data, error } = await supabase.rpc('admin_reset_customer_password', { p_code: form.partner_code });
-      if (error) throw error;
-      alert(`✅ Mật khẩu tạm mới cho ${form.partner_code}: ${data}\n\nGửi lại cho khách hàng, khách bắt buộc đổi mật khẩu ở lần đăng nhập tiếp theo.`);
+      const res = await fetch(`${apiBase}/api/admin/customers/${id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'reset-password' }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Không reset được mật khẩu');
+      alert(`✅ Mật khẩu tạm mới cho ${form.partner_code}: ${data.temporaryPassword}\n\nGửi lại cho khách hàng, khách bắt buộc đổi mật khẩu ở lần đăng nhập tiếp theo.`);
     } catch (err: any) { alert('Lỗi: ' + err.message); }
+  };
+
+  const deleteCustomer = async () => {
+    if (!confirm(`Xóa vĩnh viễn khách hàng "${form.name}" (${form.partner_code})?\n\nChỉ khách chưa có đơn hàng mới xóa được. Thao tác này không thể hoàn tác.`)) return;
+    try {
+      const res = await fetch(`${apiBase}/api/admin/customers/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Không xóa được khách hàng');
+      navigate('/khach-hang');
+    } catch (err: any) {
+      alert('Không thể xóa: ' + (err.message || 'Đã xảy ra lỗi'));
+    }
   };
 
   const changePartnerCode = async () => {
@@ -415,13 +435,16 @@ export default function CustomerDetailPage() {
           </div>
         </div>
         {!isNew && (
-          <div className="flex gap-2">
-            <button onClick={resetPassword} className="px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm text-slate-600 hover:bg-slate-50 flex items-center gap-1.5">
+          <div className="flex gap-2 flex-wrap justify-end">
+            {user?.role === 'admin' && <button onClick={resetPassword} className="px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm text-slate-600 hover:bg-slate-50 flex items-center gap-1.5">
               <KeyRound size={15} /> Reset mật khẩu
-            </button>
+            </button>}
             <button onClick={toggleActive} className={`px-3 py-2 border rounded-xl text-sm flex items-center gap-1.5 ${form.is_active ? 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50' : 'bg-green-50 border-green-200 text-green-700 hover:bg-green-100'}`}>
               {form.is_active ? <Lock size={15} /> : <Unlock size={15} />} {form.is_active ? 'Khóa' : 'Mở khóa'}
             </button>
+            {user?.role === 'admin' && <button onClick={deleteCustomer} className="px-3 py-2 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700 hover:bg-red-100 flex items-center gap-1.5">
+              <Trash2 size={15} /> Xóa khách hàng
+            </button>}
           </div>
         )}
       </header>

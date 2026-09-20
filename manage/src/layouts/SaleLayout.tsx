@@ -102,11 +102,11 @@ export default function SaleLayout() {
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 flex flex-col relative h-full overflow-y-auto bg-slate-50/50">
+      <main className="flex-1 min-w-0 flex flex-col relative h-full overflow-y-auto overflow-x-hidden bg-slate-50/50">
         {/* Background Image / Decoration */}
         <div className="absolute top-0 left-0 w-full h-64 bg-gradient-to-b from-green-600/10 to-transparent -z-10 pointer-events-none"></div>
 
-        <div className="p-4 md:p-8 flex-1 w-full max-w-7xl mx-auto pb-24 md:pb-8">
+        <div className="p-3 sm:p-4 md:p-6 xl:p-8 flex-1 min-w-0 w-full max-w-7xl mx-auto pb-24 md:pb-8">
           <Outlet />
         </div>
       </main>

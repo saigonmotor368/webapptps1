@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Search, RefreshCw, Users, Plus, FileSpreadsheet, ShieldAlert } from 'lucide-react';
+import { Search, RefreshCw, Users, Plus, FileSpreadsheet, ShieldAlert, Pencil, KeyRound, Trash2 } from 'lucide-react';
 
 const TIER_COLORS: Record<string, string> = {
   VIP0: 'bg-slate-100 text-slate-600',
@@ -33,7 +33,7 @@ function money(v: number) { return new Intl.NumberFormat('vi-VN').format(Math.ro
 // CustomerDetailPage để sửa thông tin/MK/hạng/chiết khấu/bảng giá riêng +
 // xem thống kê đơn/công nợ; có nút thêm khách mới + xuất Excel toàn bộ.
 export default function CustomersPage() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const navigate = useNavigate();
   const apiBase = import.meta.env.VITE_API_BASE_URL || '';
   const [customers, setCustomers] = useState<any[]>([]);
@@ -181,17 +181,55 @@ export default function CustomersPage() {
     } finally { setExporting(false); }
   };
 
+  const resetCustomerPassword = async (customer: any, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm(`Reset mật khẩu cho ${customer.name} (${customer.partner_code})?\nMật khẩu hiện tại sẽ không còn sử dụng được.`)) return;
+    try {
+      const res = await fetch(`${apiBase}/api/admin/customers/${customer.id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'reset-password' }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Không reset được mật khẩu');
+      alert(`✅ Mật khẩu tạm mới cho ${data.partnerCode}: ${data.temporaryPassword}\n\nHãy gửi riêng cho khách hàng. Khách sẽ phải đổi mật khẩu sau khi đăng nhập.`);
+    } catch (err: any) {
+      alert('Lỗi: ' + (err.message || 'Không reset được mật khẩu'));
+    }
+  };
+
+  const deleteCustomer = async (customer: any, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm(`Xóa vĩnh viễn khách hàng ${customer.name} (${customer.partner_code})?\n\nChỉ khách chưa có đơn hàng mới xóa được. Nếu đã giao dịch, hãy vào Sửa để khóa tài khoản.`)) return;
+    try {
+      const res = await fetch(`${apiBase}/api/admin/customers/${customer.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Không xóa được khách hàng');
+      setCustomers((current) => current.filter((item) => item.id !== customer.id));
+      setSelectedIds((current) => {
+        const next = new Set(current);
+        next.delete(customer.id);
+        return next;
+      });
+    } catch (err: any) {
+      alert('Không thể xóa: ' + (err.message || 'Đã xảy ra lỗi'));
+    }
+  };
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 min-w-0 max-w-full">
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Quản lý Khách hàng</h1>
           <p className="text-slate-500">{customers.length} khách hàng VIP · đang hiển thị {filteredCustomers.length}</p>
         </div>
-        <div className="flex gap-2 flex-wrap items-center">
-          <div className="relative">
+        <div className="flex gap-2 flex-wrap items-center w-full md:w-auto">
+          <div className="relative w-full sm:w-auto">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-            <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Tìm theo tên, SĐT, mã khách hàng, nhóm..." className="pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500"
+            <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Tìm theo tên, SĐT, mã khách hàng, nhóm..." className="w-full sm:w-80 pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500"
             />
           </div>
 
@@ -285,8 +323,48 @@ export default function CustomersPage() {
       )}
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm whitespace-nowrap">
+        <div className="md:hidden divide-y divide-slate-100">
+          {loading ? (
+            <div className="text-center py-10 text-slate-500">Đang tải dữ liệu...</div>
+          ) : filteredCustomers.length === 0 ? (
+            <div className="text-center py-12 text-slate-400"><Users size={30} className="mx-auto mb-2 opacity-40" />Không tìm thấy khách hàng nào</div>
+          ) : filteredCustomers.map((customer) => (
+            <article key={customer.id} onClick={() => navigate(`/khach-hang/${customer.id}`)} className="p-4 space-y-3 active:bg-slate-50">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-semibold text-slate-800 truncate">{customer.name}</p>
+                  <p className="font-mono text-xs text-slate-500 mt-0.5">{customer.partner_code}</p>
+                  {customer.company && <p className="text-xs text-slate-400 truncate mt-0.5">{customer.company}</p>}
+                </div>
+                <span className={`shrink-0 px-2.5 py-1 rounded-full text-xs font-semibold ${TIER_COLORS[customer.discount_tier] || 'bg-slate-100 text-slate-600'}`}>
+                  {customer.discount_tier || 'VIP0'}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div><span className="text-slate-400 block">Điện thoại</span><span className="text-slate-700">{customer.phone || 'Chưa có'}</span></div>
+                <div><span className="text-slate-400 block">Phụ trách</span><span className="text-slate-700">{staffMap.get(customer.sales_rep_id) || 'Chưa phân công'}</span></div>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex gap-1.5 flex-wrap">
+                  <span className={`px-2 py-1 rounded-full text-[11px] font-semibold ${VERIFICATION_COLORS[customer.verification_status] || VERIFICATION_COLORS.pending}`}>
+                    {VERIFICATION_LABELS[customer.verification_status] || 'Chờ xác thực'}
+                  </span>
+                  <span className={`px-2 py-1 rounded-full text-[11px] font-semibold ${customer.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
+                    {customer.is_active ? 'Hoạt động' : 'Đã khóa'}
+                  </span>
+                </div>
+                <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+                  <button onClick={() => navigate(`/khach-hang/${customer.id}`)} className="p-2 rounded-lg bg-green-50 text-green-700" aria-label="Sửa khách hàng"><Pencil size={16} /></button>
+                  {user?.role === 'admin' && <button onClick={(e) => resetCustomerPassword(customer, e)} className="p-2 rounded-lg bg-amber-50 text-amber-700" aria-label="Reset mật khẩu"><KeyRound size={16} /></button>}
+                  {user?.role === 'admin' && <button onClick={(e) => deleteCustomer(customer, e)} className="p-2 rounded-lg bg-red-50 text-red-600" aria-label="Xóa khách hàng"><Trash2 size={16} /></button>}
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+
+        <div className="hidden md:block max-w-full overflow-x-auto">
+          <table className="min-w-[1120px] w-full text-left text-sm whitespace-nowrap">
             <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-100">
               <tr>
                 <th className="px-3 py-4 w-10 text-center">
@@ -305,14 +383,15 @@ export default function CustomersPage() {
                 <th className="px-4 py-4 text-right">Hạn mức công nợ</th>
                 <th className="px-4 py-4 text-center">Xác thực</th>
                 <th className="px-4 py-4 text-center">Trạng thái</th>
+                <th className="px-4 py-4 text-right">Thao tác</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
-                <tr><td colSpan={9} className="text-center py-8 text-slate-500">Đang tải dữ liệu...</td></tr>
+                <tr><td colSpan={10} className="text-center py-8 text-slate-500">Đang tải dữ liệu...</td></tr>
               ) : filteredCustomers.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="text-center py-12 text-slate-400">
+                  <td colSpan={10} className="text-center py-12 text-slate-400">
                     <Users size={32} className="mx-auto mb-2 opacity-40" />
                     Không tìm thấy khách hàng nào
                   </td>
@@ -384,6 +463,17 @@ export default function CustomersPage() {
                     <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${customer.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
                       {customer.is_active ? 'Hoạt động' : 'Khóa'}
                     </span>
+                  </td>
+                  <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex justify-end gap-1">
+                      <button onClick={() => navigate(`/khach-hang/${customer.id}`)} className="p-1.5 rounded-lg bg-green-50 text-green-700 hover:bg-green-100" title="Sửa thông tin"><Pencil size={16} /></button>
+                      {user?.role === 'admin' && (
+                        <button onClick={(e) => resetCustomerPassword(customer, e)} className="p-1.5 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100" title="Reset mật khẩu"><KeyRound size={16} /></button>
+                      )}
+                      {user?.role === 'admin' && (
+                        <button onClick={(e) => deleteCustomer(customer, e)} className="p-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100" title="Xóa khách hàng"><Trash2 size={16} /></button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

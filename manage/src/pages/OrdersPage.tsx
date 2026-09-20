@@ -6,7 +6,7 @@ import { printOrderSlip } from '../lib/printOrder';
 import {
   RefreshCw, Search, Eye, Printer, Clock, Truck, CheckCircle,
   ShoppingBag, TrendingUp, ClipboardEdit, FileSpreadsheet, AlertCircle,
-  ChevronLeft, ChevronRight
+  ChevronLeft, ChevronRight, Trash2
 } from 'lucide-react';
 
 const PAGE_SIZE = 50;
@@ -158,10 +158,23 @@ export default function OrdersPage() {
         }
       }
 
-      const [{ data, error, count }, { data: statsRows, error: statsError }] = await Promise.all([query, statsQuery]);
+      // Danh sách là dữ liệu quan trọng nhất với người vận hành: hiển thị ngay
+      // khi query trang hiện tại xong, không bắt UI chờ query thống kê toàn bộ.
+      const statsPromise = Promise.resolve(statsQuery);
+      const { data, error, count } = await query;
       if (error) throw error;
-      if (statsError) console.warn('Lỗi tải thống kê đơn hàng:', statsError);
       setTotalCount(count || 0);
+      setOrders(data || []);
+      setLoading(false);
+
+      const salesRepIds = [...new Set((data || []).map((o: any) => o.sales_rep_id).filter(Boolean))];
+      const [{ data: statsRows, error: statsError }, { data: reps }] = await Promise.all([
+        statsPromise,
+        salesRepIds.length
+          ? supabase.from('admin_profiles').select('id, name').in('id', salesRepIds)
+          : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+      ]);
+      if (statsError) console.warn('Lỗi tải thống kê đơn hàng:', statsError);
       const summary = (statsRows || []).reduce((acc: any, order: any) => {
         if (order.status === 'pending') acc.pending += 1;
         if (order.status === 'preparing') acc.preparing += 1;
@@ -171,11 +184,6 @@ export default function OrdersPage() {
         return acc;
       }, { pending: 0, preparing: 0, shipping: 0, completed: 0, revenue: 0 });
       setStats(summary);
-
-      const salesRepIds = [...new Set((data || []).map((o: any) => o.sales_rep_id).filter(Boolean))];
-      const { data: reps } = salesRepIds.length
-        ? await supabase.from('admin_profiles').select('id, name').in('id', salesRepIds)
-        : { data: [] as { id: string; name: string }[] };
       const repMap = new Map((reps || []).map((r: any) => [r.id, r.name]));
 
       // Màn danh sách chỉ cần item_count. Chi tiết sản phẩm được tải khi mở
@@ -245,6 +253,27 @@ export default function OrdersPage() {
     navigate(`/tao-don-hang?processOrderId=${order.id}`);
   };
 
+  const deleteOrder = async (order: any, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (user?.role !== 'admin') return;
+    if (!confirm(`Xóa vĩnh viễn đơn ${order.order_code}?\n\nChỉ đơn chưa phát sinh giao nhận/thanh toán mới xóa được. Thao tác này không thể hoàn tác.`)) return;
+    setUpdatingId(order.id);
+    try {
+      const res = await fetch(`${apiBase}/api/admin/orders`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ orderId: order.id }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Không thể xóa đơn hàng');
+      await fetchOrders();
+    } catch (err: any) {
+      alert('Không thể xóa: ' + (err.message || 'Đã xảy ra lỗi'));
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
   const exportExcel = async () => {
     setExporting(true);
     try {
@@ -269,7 +298,7 @@ export default function OrdersPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 min-w-0 max-w-full">
       {/* Header */}
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -305,29 +334,29 @@ export default function OrdersPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-2 items-center bg-white rounded-xl border border-slate-100 p-3">
-        <div className="relative">
+      <div className="grid grid-cols-2 lg:flex lg:flex-wrap gap-2 items-center bg-white rounded-xl border border-slate-100 p-3">
+        <div className="relative col-span-2 lg:col-span-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
           <input type="text" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
             placeholder="Tìm mã đơn, khách, SĐT..."
-            className="pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500 w-56" />
+            className="pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500 w-full lg:w-56" />
         </div>
         <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
-          className="px-3 py-2 border border-slate-200 text-slate-600 text-sm rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500/20">
+          className="min-w-0 w-full lg:w-auto px-3 py-2 border border-slate-200 text-slate-600 text-sm rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500/20">
           <option value="">Tất cả trạng thái</option>
           {Object.entries(STATUS_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
         </select>
         <select value={filterPayment} onChange={e => setFilterPayment(e.target.value)}
-          className="px-3 py-2 border border-slate-200 text-slate-600 text-sm rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500/20">
+          className="min-w-0 w-full lg:w-auto px-3 py-2 border border-slate-200 text-slate-600 text-sm rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500/20">
           <option value="">Tất cả thanh toán</option>
           {Object.entries(PAYMENT_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
         </select>
-        <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-600" />
-        <span className="text-slate-400 text-sm">đến</span>
-        <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-600" />
+        <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="min-w-0 w-full lg:w-auto border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-600" />
+        <span className="hidden lg:inline text-slate-400 text-sm">đến</span>
+        <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="min-w-0 w-full lg:w-auto border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-600" />
         <button
           onClick={() => setFilterHasRequest(!filterHasRequest)}
-          className={`px-3 py-2 rounded-lg text-sm font-semibold flex items-center gap-1.5 transition-colors ${
+          className={`col-span-2 lg:col-span-1 justify-center px-3 py-2 rounded-lg text-sm font-semibold flex items-center gap-1.5 transition-colors ${
             filterHasRequest
               ? 'bg-amber-600 text-white shadow-sm'
               : changeRequests.length > 0
@@ -343,8 +372,63 @@ export default function OrdersPage() {
 
       {/* Table */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm whitespace-nowrap">
+        {/* Mobile/tablet: card gọn, không ép bảng rộng làm tràn viewport. */}
+        <div className="lg:hidden divide-y divide-slate-100">
+          {loading ? (
+            <div className="py-12 text-center text-sm text-slate-500">Đang tải đơn hàng...</div>
+          ) : filteredOrders.length === 0 ? (
+            <div className="py-14 text-center text-sm text-slate-400">
+              <ShoppingBag size={30} className="mx-auto mb-2 opacity-40" />
+              Không tìm thấy đơn hàng phù hợp
+            </div>
+          ) : filteredOrders.map((order) => (
+            <article key={order.id} onClick={() => navigate(`/don-hang/${order.id}`)}
+              className={`p-4 space-y-3 active:bg-slate-50 ${updatingId === order.id ? 'opacity-60 pointer-events-none' : ''}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="font-bold text-slate-800 text-sm break-all">{order.order_code}</p>
+                    <span className="text-[9px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">
+                      {SOURCE_LABELS[order.source] || order.source || 'Admin'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">{dt(order.created_at)}</p>
+                </div>
+                <p className="font-bold text-red-600 whitespace-nowrap">{money(order.grand_total)}</p>
+              </div>
+              <div className="min-w-0">
+                <p className="font-semibold text-slate-800 truncate">{order.customer_name}</p>
+                <p className="text-xs text-slate-400 truncate">{order.customer_code}{order.customer_company ? ` · ${order.customer_company}` : ''}</p>
+              </div>
+              <div className="grid grid-cols-2 gap-2" onClick={(e) => e.stopPropagation()}>
+                <select value={order.status} onChange={e => changeStatus(order, e.target.value)}
+                  className={`min-w-0 w-full text-xs px-2 py-2 rounded-lg border focus:outline-none ${STATUS_COLORS[order.status] || 'bg-slate-50 text-slate-600'} border-transparent`}>
+                  {Object.entries(STATUS_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+                <select value={order.payment_status} onChange={e => changePayment(order, e.target.value)}
+                  className={`min-w-0 w-full text-xs px-2 py-2 rounded-lg border focus:outline-none ${PAYMENT_COLORS[order.payment_status] || 'bg-slate-50 text-slate-600'} border-transparent`}>
+                  {Object.entries(PAYMENT_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+              </div>
+              <div className="flex items-center justify-between gap-2 text-xs text-slate-500">
+                <span>{order.item_count || 0} sản phẩm{order.sales_rep_name ? ` · ${order.sales_rep_name}` : ''}</span>
+                <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+                  {order.pricing_status !== 'finalized' && (
+                    <button onClick={e => handleProcess(order, e)} className="p-2 bg-amber-50 text-amber-700 rounded-lg" aria-label="Xử lý đơn hàng"><ClipboardEdit size={17} /></button>
+                  )}
+                  <button onClick={() => navigate(`/don-hang/${order.id}`)} className="p-2 bg-green-50 text-green-700 rounded-lg" aria-label="Xem chi tiết"><Eye size={17} /></button>
+                  <button onClick={e => handlePrint(order, e)} className="p-2 bg-slate-100 text-slate-600 rounded-lg" aria-label="Xuất phiếu tạm"><Printer size={17} /></button>
+                  {user?.role === 'admin' && (
+                    <button onClick={e => deleteOrder(order, e)} className="p-2 bg-red-50 text-red-600 rounded-lg" aria-label="Xóa đơn hàng"><Trash2 size={17} /></button>
+                  )}
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+
+        <div className="hidden lg:block max-w-full overflow-x-auto">
+          <table className="min-w-[1120px] w-full text-left text-sm whitespace-nowrap">
             <thead className="bg-slate-50 text-slate-500 uppercase text-[11px] font-bold tracking-wider">
               <tr>
                 <th className="px-4 py-3">Mã đơn</th>
@@ -437,6 +521,12 @@ export default function OrdersPage() {
                         className="p-1.5 bg-slate-50 text-slate-500 rounded-lg hover:bg-slate-100 transition-colors" title="Xuất phiếu tạm">
                         <Printer size={16} />
                       </button>
+                      {user?.role === 'admin' && (
+                        <button onClick={e => deleteOrder(order, e)}
+                          className="p-1.5 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors" title="Xóa đơn hàng">
+                          <Trash2 size={16} />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
