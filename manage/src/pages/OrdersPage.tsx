@@ -427,17 +427,15 @@ export default function OrdersPage() {
           ))}
         </div>
 
-        <div className="hidden lg:block max-w-full overflow-x-auto">
-          <table className="min-w-[1120px] w-full text-left text-sm whitespace-nowrap">
+        <div className="hidden lg:block w-full overflow-x-auto">
+          <table className="w-full min-w-[820px] text-left text-sm">
             <thead className="bg-slate-50 text-slate-500 uppercase text-[11px] font-bold tracking-wider">
               <tr>
                 <th className="px-4 py-3">Mã đơn</th>
                 <th className="px-4 py-3">Thời gian</th>
                 <th className="px-4 py-3">Khách hàng</th>
-                <th className="px-4 py-3">Sale</th>
                 <th className="px-4 py-3 text-center">SP</th>
                 <th className="px-4 py-3 text-right">Khách cần trả</th>
-                <th className="px-4 py-3 text-right">Đã trả</th>
                 <th className="px-4 py-3 text-center">Xử lý</th>
                 <th className="px-4 py-3 text-center">Thanh toán</th>
                 <th className="px-4 py-3"></th>
@@ -445,16 +443,15 @@ export default function OrdersPage() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               <tr className="bg-slate-50/70 font-semibold text-slate-500">
-                <td className="px-4 py-2" colSpan={5}>Tổng ({filteredOrders.length} đơn)</td>
+                <td className="px-4 py-2" colSpan={4}>Tổng ({filteredOrders.length} đơn)</td>
                 <td className="px-4 py-2 text-right text-slate-700">{money(totals.grand)}</td>
-                <td className="px-4 py-2 text-right text-slate-700">{money(totals.paid)}</td>
                 <td colSpan={3}></td>
               </tr>
               {loading ? (
-                <tr><td colSpan={10} className="text-center py-12 text-slate-500">Đang tải đơn hàng...</td></tr>
+                <tr><td colSpan={8} className="text-center py-12 text-slate-500">Đang tải đơn hàng...</td></tr>
               ) : filteredOrders.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="text-center py-16 text-slate-400">
+                  <td colSpan={8} className="text-center py-16 text-slate-400">
                     <ShoppingBag size={32} className="mx-auto mb-2 opacity-40" />
                     Không tìm thấy đơn hàng phù hợp
                   </td>
@@ -484,15 +481,17 @@ export default function OrdersPage() {
                       </span>
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-slate-500">{dt(order.created_at)}</td>
+                  <td className="px-4 py-3 text-slate-500 whitespace-nowrap">{dt(order.created_at)}</td>
                   <td className="px-4 py-3">
                     <p className="font-medium text-slate-800">{order.customer_name}</p>
                     <p className="text-xs text-slate-400">{order.customer_code}{order.customer_company ? ` · ${order.customer_company}` : ''}</p>
+                    {order.sales_rep_name && <p className="text-[11px] text-slate-400 mt-1">Sale: {order.sales_rep_name}</p>}
                   </td>
-                  <td className="px-4 py-3 text-slate-500">{order.sales_rep_name || '—'}</td>
                   <td className="px-4 py-3 text-center text-slate-600">{order.item_count || 0}</td>
-                  <td className="px-4 py-3 text-right font-semibold text-red-600">{money(order.grand_total)}</td>
-                  <td className="px-4 py-3 text-right text-slate-600">{money(order.paid_amount || 0)}</td>
+                  <td className="px-4 py-3 text-right">
+                    <p className="font-semibold text-red-600 whitespace-nowrap">{money(order.grand_total)}</p>
+                    <p className="text-[11px] text-slate-400 whitespace-nowrap">Đã trả: {money(order.paid_amount || 0)}</p>
+                  </td>
                   <td className="px-4 py-3 text-center" onClick={e => e.stopPropagation()}>
                     <select value={order.status} onChange={e => changeStatus(order, e.target.value)}
                       className={`text-xs px-2 py-1.5 rounded-lg border focus:outline-none ${STATUS_COLORS[order.status] || 'bg-slate-50 text-slate-600'} border-transparent`}>
