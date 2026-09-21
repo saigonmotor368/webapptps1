@@ -7,6 +7,26 @@ import {
   Wallet, BarChart3, MoreHorizontal, X, ClipboardList, Tag, Truck,
 } from 'lucide-react';
 
+const NAV_GROUPS = [
+  { key: 'overview', label: 'Tổng quan' },
+  { key: 'sales', label: 'Bán hàng & khách' },
+  { key: 'operations', label: 'Thu mua & vận hành' },
+  { key: 'finance', label: 'Tài chính & báo cáo' },
+];
+
+const NAV_GROUP_BY_PATH: Record<string, string> = {
+  '/': 'overview',
+  '/don-hang': 'sales',
+  '/tao-don-hang': 'sales',
+  '/khach-hang': 'sales',
+  '/hang-hoa': 'sales',
+  '/ap-gia-hang-ngay': 'sales',
+  '/don-tong': 'operations',
+  '/soan-hang': 'operations',
+  '/cong-no': 'finance',
+  '/bao-cao': 'finance',
+};
+
 // GIAI ĐOẠN A/E: 2 bộ khung điều hướng riêng theo userType — chặn thật sự
 // nằm ở route guard trong App.tsx (StaffOnlyRoute/CustomerOnlyRoute), đây
 // chỉ là ẩn/hiện menu cho gọn giao diện.
@@ -57,30 +77,41 @@ export default function SaleLayout() {
     <div className="flex h-screen bg-[#F4F7F6] text-slate-800 overflow-hidden font-sans">
       {/* Desktop Sidebar */}
       <aside className="hidden md:flex flex-col w-64 bg-white border-r border-slate-200 shadow-sm z-20">
-        <div className="p-6 border-b border-slate-100 flex items-center gap-3">
-          <div className="w-10 h-10 bg-green-600 text-white rounded-xl flex items-center justify-center font-bold text-lg shadow-md">
-            T1
+        <div className="p-5 border-b border-slate-100 flex items-center gap-3">
+          <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm border border-slate-100 shrink-0 overflow-hidden">
+            <img src="/tps1-logo-transparent.png" alt="Thực Phẩm Số Một" className="w-10 h-10 object-contain" />
           </div>
           <div>
-            <h1 className="font-bold text-green-900 leading-tight">TPS1 System</h1>
-            <p className="text-xs text-slate-500">
+            <h1 className="font-extrabold text-green-900 leading-tight tracking-tight">TPS1 Quản lý</h1>
+            <p className="text-[11px] text-slate-500 mt-0.5">
               {isCustomer ? `Khách hàng ${user?.tier || ''}`.trim() : (ROLE_LABELS[role] || role)}
             </p>
           </div>
         </div>
 
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-          {navItems.map((item) => (
-            <Link
-              key={item.path}
-              to={item.path}
-              className={`flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors ${
-                isActivePath(item.path) ? 'bg-green-100 text-green-800' : 'text-slate-600 hover:bg-green-50 hover:text-green-700'
-              }`}
-            >
-              {item.icon} {item.label}
-            </Link>
-          ))}
+          {NAV_GROUPS.map((group) => {
+            const groupItems = navItems.filter((item) => (NAV_GROUP_BY_PATH[item.path] || 'sales') === group.key);
+            if (groupItems.length === 0) return null;
+            return (
+              <div key={group.key} className="mb-4 last:mb-0">
+                <p className="px-4 mb-1.5 text-[10px] font-extrabold uppercase tracking-[0.14em] text-slate-400">{group.label}</p>
+                <div className="space-y-0.5">
+                  {groupItems.map((item) => (
+                    <Link
+                      key={item.path}
+                      to={item.path}
+                      className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors ${
+                        isActivePath(item.path) ? 'bg-green-100 text-green-800 shadow-sm' : 'text-slate-600 hover:bg-green-50 hover:text-green-700'
+                      }`}
+                    >
+                      {item.icon} {item.label}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </nav>
 
         <div className="p-4 border-t border-slate-100">
@@ -102,9 +133,18 @@ export default function SaleLayout() {
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 min-w-0 flex flex-col relative h-full overflow-y-auto overflow-x-hidden bg-slate-50/50">
-        {/* Background Image / Decoration */}
-        <div className="absolute top-0 left-0 w-full h-64 bg-gradient-to-b from-green-600/10 to-transparent -z-10 pointer-events-none"></div>
+      <main className="flex-1 min-w-0 flex flex-col relative h-full overflow-y-auto overflow-x-hidden bg-[#f5f8f7]">
+        <div className="md:hidden sticky top-0 z-20 flex items-center justify-between gap-3 px-4 py-3 bg-white/95 backdrop-blur border-b border-slate-200">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <img src="/tps1-logo-transparent.png" alt="TPS1" className="w-9 h-9 object-contain shrink-0" />
+            <div className="min-w-0">
+              <p className="font-extrabold text-sm text-green-900 truncate">TPS1 Quản lý</p>
+              <p className="text-[10px] text-slate-500 truncate">{ROLE_LABELS[role] || role || 'Hệ thống nội bộ'}</p>
+            </div>
+          </div>
+          <span className="px-2.5 py-1 rounded-full bg-green-50 text-green-700 text-[10px] font-bold border border-green-100">{user?.name || 'Tài khoản'}</span>
+        </div>
+        <div className="sticky top-0 z-10 h-1 bg-gradient-to-r from-[#0f6f4b] via-[#18a66f] to-[#f0a04b]" />
 
         <div className="p-3 sm:p-4 md:p-6 xl:p-8 flex-1 min-w-0 w-full max-w-7xl mx-auto pb-24 md:pb-8">
           <Outlet />
