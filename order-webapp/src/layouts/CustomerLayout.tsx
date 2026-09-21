@@ -5,7 +5,7 @@ import { useCart } from '../contexts/CartContext';
 import NotificationBell from '../components/NotificationBell';
 
 const tabs = [
-  { to: '/', label: 'Đặt hàng (POS)', icon: Package, end: true },
+  { to: '/', label: 'Đặt hàng', icon: Package, end: true },
   { to: '/dat-hang/excel', label: 'Đặt hàng Excel', icon: FileSpreadsheet },
   { to: '/don-hang', label: 'Đơn hàng của tôi', icon: ClipboardList },
 ];

@@ -120,6 +120,7 @@ export const api = {
     request<ProductCatalogResponse>('/api/customer/products?catalog=1', { signal }),
 
   orders: () => request<{ ok: true; orders: Order[] }>('/api/customer/orders'),
+  frequentItems: (signal?: AbortSignal) => request<{ ok: true; items: FrequentItem[] }>('/api/customer/frequent-items', { signal }),
 
   createOrder: (payload: {
     items: { productId: string; name: string; quantity: number }[];
@@ -226,6 +227,19 @@ export interface Order {
     finalLineTotal?: number;
     itemNote?: string;
   }[];
+}
+
+export interface FrequentItem {
+  productId: string;
+  sku?: string;
+  name: string;
+  category?: string | null;
+  unit?: string;
+  price: number;
+  priceOnRequest?: boolean;
+  imageUrl?: string | null;
+  totalQuantity?: number;
+  orderCount?: number;
 }
 
 export interface ExcelMatchResult {

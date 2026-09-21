@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Search,
@@ -19,8 +19,11 @@ import {
   Printer,
   ChevronDown,
   PackageOpen,
+  Heart,
+  Repeat2,
+  ChefHat,
 } from 'lucide-react';
-import { api, type Product, type ProductCatalogResponse, ApiError } from '../lib/api';
+import { api, type Product, type ProductCatalogResponse, type Order, type FrequentItem, ApiError } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 
 function money(v: number) {
@@ -205,6 +208,18 @@ export default function ProductsPage() {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [selectedResultIndex, setSelectedResultIndex] = useState(0);
   const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState('');
+  const [recentOrders, setRecentOrders] = useState<Order[]>([]);
+  const [frequentItems, setFrequentItems] = useState<FrequentItem[]>([]);
+  const [loadingLatestOrder, setLoadingLatestOrder] = useState(false);
+  const [favoriteIds, setFavoriteIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('tps1_favorite_products_v1');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
 
   // Submit & Modal state
   const [submitting, setSubmitting] = useState(false);
@@ -261,6 +276,22 @@ export default function ProductsPage() {
     void loadProducts('', false);
     return () => searchAbortRef.current?.abort();
   }, [loadProducts]);
+
+  // Endpoint này trả đúng 20 mặt hàng hay đặt, nhẹ hơn nhiều so với tải toàn bộ
+  // lịch sử đơn kèm từng dòng hàng ngay khi mở màn hình.
+  useEffect(() => {
+    const controller = new AbortController();
+    void api.frequentItems(controller.signal).then((res) => setFrequentItems(res.items || [])).catch(() => undefined);
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('tps1_favorite_products_v1', JSON.stringify(favoriteIds));
+    } catch {
+      // Không ảnh hưởng luồng đặt hàng nếu trình duyệt không cho lưu localStorage.
+    }
+  }, [favoriteIds]);
 
   // KiotViet cho cảm giác nhanh vì tìm trên catalog đã nằm trong trình duyệt.
   // TPS1 áp dụng cùng nguyên lý nhưng catalog vẫn mang đúng giá riêng của từng khách.
@@ -469,6 +500,73 @@ export default function ProductsPage() {
   const discountAmount = 0; // Áp dụng chiết khấu theo tier nếu có
   const finalTotalAmount = Math.max(0, subtotalAmount - discountAmount);
 
+  const frequentProducts = useMemo(() => frequentItems.slice(0, 8).map((item) => ({
+    id: item.productId,
+    sku: item.sku || '',
+    name: item.name,
+    category: item.category || null,
+    unit: item.unit || 'Kg',
+    price: Number(item.price) || 0,
+    priceOnRequest: Boolean(item.priceOnRequest),
+    imageUrl: item.imageUrl || null,
+    thumbUrl: item.imageUrl || null,
+    available: true,
+  } satisfies Product)), [frequentItems]);
+
+  const favoriteProducts = useMemo(
+    () => favoriteIds
+      .map((id) => catalogProducts.find((product) => product.id === id))
+      .filter((product): product is Product => Boolean(product))
+      .slice(0, 8),
+    [catalogProducts, favoriteIds]
+  );
+
+  const latestOrder = recentOrders[0];
+
+  const categories = useMemo(() => {
+    const values = [...new Set(catalogProducts.map((product) => String(product.category || '').trim()).filter(Boolean))];
+    return values.sort((a, b) => a.localeCompare(b, 'vi')).slice(0, 16);
+  }, [catalogProducts]);
+
+  const categoryProducts = useMemo(() => {
+    if (!selectedCategory) return [];
+    return catalogProducts.filter((product) => product.category === selectedCategory).slice(0, 12);
+  }, [catalogProducts, selectedCategory]);
+
+  const toggleFavorite = (productId: string) => {
+    setFavoriteIds((current) => current.includes(productId)
+      ? current.filter((id) => id !== productId)
+      : [...current, productId]);
+  };
+
+  const addOrderAgain = (order: Order) => {
+    const productsById = new Map(catalogProducts.map((product) => [product.id, product]));
+    order.items.forEach((item) => {
+      const product = productsById.get(item.productId);
+      if (product) handleAddProduct(product, Number(item.quantity) || 1);
+    });
+  };
+
+  const loadLatestOrderAndAdd = async () => {
+    if (latestOrder) {
+      addOrderAgain(latestOrder);
+      return;
+    }
+    setLoadingLatestOrder(true);
+    try {
+      const res = await api.orders();
+      const order = (res.orders || [])[0];
+      if (order) {
+        setRecentOrders([order]);
+        addOrderAgain(order);
+      }
+    } catch {
+      // Người dùng vẫn có thể đặt bằng danh mục/tìm kiếm nếu lịch sử không tải được.
+    } finally {
+      setLoadingLatestOrder(false);
+    }
+  };
+
   // Gửi đơn hàng (Submit Order)
   const handleSubmitOrder = async () => {
     setErrorMessage('');
@@ -517,6 +615,15 @@ export default function ProductsPage() {
 
   return (
     <div className="flex flex-col gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-1">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-black text-[#14231c]">Đặt hàng cho bếp</h1>
+          <p className="text-xs sm:text-sm text-[#59665f] mt-0.5">Chọn món quen thuộc hoặc tìm nhanh theo tên, mã hàng</p>
+        </div>
+        <div className="inline-flex items-center gap-2 self-start sm:self-auto px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs font-bold">
+          <Clock size={15} /> Chốt đơn hôm nay: 16:30
+        </div>
+      </div>
       {/* ========================================================================= */}
       {/* THANH TOP BAR: TÌM KIẾM HÀNG HÓA & HỆ THỐNG ĐA TAB */}
       {/* ========================================================================= */}
@@ -677,16 +784,142 @@ export default function ProductsPage() {
         </div>
       </div>
 
+      {/* Khu vực thao tác nhanh cho bếp: ưu tiên món quen thuộc và đơn gần nhất. */}
+      {(latestOrder || frequentItems.length > 0 || favoriteProducts.length > 0 || categories.length > 0) && (
+        <section className="bg-white rounded-2xl border border-[#14231c]/10 shadow-sm p-3.5 sm:p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <span className="w-9 h-9 rounded-xl bg-[#0f6f4b]/10 text-[#0f6f4b] flex items-center justify-center">
+                <ChefHat size={19} />
+              </span>
+              <div>
+                <h2 className="font-bold text-sm sm:text-base text-[#14231c]">Đặt nhanh cho bếp</h2>
+                <p className="text-[11px] sm:text-xs text-[#59665f]">Món quen thuộc, thêm vào đơn chỉ bằng một chạm</p>
+              </div>
+            </div>
+            {(latestOrder || frequentItems.length > 0) && (
+              <button type="button" onClick={loadLatestOrderAndAdd} disabled={loadingLatestOrder} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#0f6f4b] text-white text-xs font-bold hover:bg-[#0b5a3c] active:scale-[.98] transition-all disabled:opacity-70">
+                <Repeat2 size={15} className={loadingLatestOrder ? 'animate-spin' : ''} /> <span className="hidden sm:inline">{loadingLatestOrder ? 'Đang tải đơn...' : 'Đặt lại đơn gần nhất'}</span><span className="sm:hidden">{loadingLatestOrder ? 'Đang tải' : 'Đặt lại'}</span>
+              </button>
+            )}
+          </div>
+
+          {categories.length > 0 && (
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-wider text-[#59665f] mb-1.5">Duyệt theo nhóm hàng</p>
+              <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+                <button type="button" onClick={() => setSelectedCategory('')} className={`shrink-0 px-3 py-2 rounded-xl text-xs font-bold border transition-colors ${!selectedCategory ? 'bg-[#0f6f4b] text-white border-[#0f6f4b]' : 'bg-[#f8faf7] text-[#59665f] border-[#14231c]/10 hover:border-[#0f6f4b]/30'}`}>Tất cả nhóm</button>
+                {categories.map((category) => (
+                  <button key={category} type="button" onClick={() => setSelectedCategory(category)} className={`shrink-0 px-3 py-2 rounded-xl text-xs font-semibold border transition-colors ${selectedCategory === category ? 'bg-[#0f6f4b] text-white border-[#0f6f4b]' : 'bg-[#f8faf7] text-[#59665f] border-[#14231c]/10 hover:border-[#0f6f4b]/30'}`}>{category}</button>
+                ))}
+              </div>
+              {selectedCategory && (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 mt-2">
+                  {categoryProducts.map((product) => (
+                    <button key={product.id} type="button" onClick={() => handleAddProduct(product)} className="flex items-center gap-2 min-w-0 p-2 rounded-xl border border-[#14231c]/10 bg-[#fbfcfb] hover:border-[#0f6f4b]/30 hover:bg-[#f4faf6] text-left">
+                      <ProductThumbnail product={product} compact />
+                      <span className="min-w-0"><span className="block text-xs font-semibold truncate">{product.name}</span><span className="block text-[10px] text-[#59665f] mt-0.5">{product.unit || 'Kg'}</span></span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {favoriteProducts.length > 0 && (
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-wider text-[#59665f] mb-1.5 flex items-center gap-1"><Heart size={12} className="text-rose-500" /> Yêu thích</p>
+              <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+                {favoriteProducts.map((product) => (
+                  <button key={product.id} type="button" onClick={() => handleAddProduct(product)} className="min-w-[180px] max-w-[220px] flex items-center gap-2 p-2 rounded-xl border border-rose-100 bg-rose-50/50 hover:bg-rose-50 text-left">
+                    <ProductThumbnail product={product} compact />
+                    <span className="min-w-0 flex-1"><span className="block text-xs font-semibold truncate text-[#14231c]">{product.name}</span><span className="block text-[11px] text-[#0f6f4b] font-bold mt-0.5">{product.priceOnRequest ? 'Liên hệ' : money(product.price)}</span></span>
+                    <Heart size={14} className="shrink-0 fill-rose-500 text-rose-500" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {frequentProducts.length > 0 && (
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-wider text-[#59665f] mb-1.5">Hàng thường đặt</p>
+              <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+                {frequentProducts.map((product) => {
+                  const isFavorite = favoriteIds.includes(product.id);
+                  return (
+                    <div key={product.id} className="min-w-[210px] max-w-[250px] flex items-center gap-2 p-2 rounded-xl border border-[#14231c]/10 bg-[#f8faf7]">
+                      <button type="button" onClick={() => handleAddProduct(product)} className="min-w-0 flex-1 flex items-center gap-2 text-left">
+                        <ProductThumbnail product={product} compact />
+                        <span className="min-w-0"><span className="block text-xs font-semibold truncate text-[#14231c]">{product.name}</span><span className="block text-[11px] text-[#59665f] mt-0.5">{product.unit || 'Kg'} · {product.priceOnRequest ? 'Liên hệ' : money(product.price)}</span></span>
+                      </button>
+                      <button type="button" onClick={() => toggleFavorite(product.id)} className="p-1.5 rounded-lg hover:bg-white text-[#59665f]" aria-label={isFavorite ? `Bỏ yêu thích ${product.name}` : `Yêu thích ${product.name}`}>
+                        <Heart size={15} className={isFavorite ? 'fill-rose-500 text-rose-500' : ''} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+
       {/* ========================================================================= */}
       {/* VÙNG LÀM VIỆC CHÍNH: 2 CỘT (BẢNG HÀNG HÓA 68% + GIAO HÀNG & CHỐT ĐƠN 32%) */}
       {/* ========================================================================= */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-3 items-start">
         {/* --------------------------------------------------------------------- */}
         {/* CỘT TRÁI: BẢNG DANH SÁCH MẶT HÀNG (8/12) */}
         {/* --------------------------------------------------------------------- */}
-        <div className="lg:col-span-8 bg-white rounded-2xl border border-[#14231c]/10 shadow-sm flex flex-col min-h-[560px] overflow-hidden">
+        <div className="min-w-0 bg-white rounded-2xl border border-[#14231c]/10 shadow-sm flex flex-col min-h-[560px] overflow-hidden">
           {/* Header Bảng cột */}
-          <div className="overflow-x-auto flex-1">
+          <div className="md:hidden flex-1 divide-y divide-[#14231c]/5">
+            {activeTab.items.length === 0 ? (
+              <div className="py-16 px-6 text-center text-[#59665f]">
+                <div className="w-14 h-14 rounded-full bg-[#f6f7f4] flex items-center justify-center mx-auto mb-3 text-[#59665f]/40">
+                  <Search size={24} />
+                </div>
+                <p className="font-semibold text-sm text-[#14231c]">Chưa có mặt hàng nào</p>
+                <p className="text-xs mt-1">Tìm tên hoặc mã hàng ở phía trên để thêm vào đơn.</p>
+              </div>
+            ) : (
+              activeTab.items.map((item, idx) => {
+                const lineTotal = item.quantity * (item.product.price || 0);
+                return (
+                  <div key={item.product.id} className="p-3.5 space-y-3">
+                    <div className="flex items-start gap-3">
+                      <ProductThumbnail product={item.product} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="font-semibold text-sm text-[#14231c] leading-tight">{item.product.name}</p>
+                            <p className="text-[11px] text-[#59665f] mt-1 font-mono">{item.product.sku || '—'} · {item.product.unit || 'Kg'}</p>
+                          </div>
+                          <button type="button" onClick={() => handleRemoveItem(item.product.id)} className="p-1.5 -mr-1 text-[#59665f]/50 hover:text-red-600" aria-label={`Xóa ${item.product.name}`}>
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                        <div className="flex items-center justify-between gap-3 mt-3">
+                          <div className="flex items-center gap-1.5">
+                            <button type="button" onClick={() => handleUpdateQty(item.product.id, item.quantity - 1)} className="w-9 h-9 rounded-lg bg-[#f6f7f4] font-bold text-base">−</button>
+                            <input type="number" min={0.1} step={1} value={item.quantity} onChange={(e) => handleUpdateQty(item.product.id, parseFloat(e.target.value) || 0)} className="w-16 h-9 text-center font-bold border border-[#14231c]/15 rounded-lg text-sm" aria-label={`Số lượng ${item.product.name}`} />
+                            <button type="button" onClick={() => handleUpdateQty(item.product.id, item.quantity + 1)} className="w-9 h-9 rounded-lg bg-[#f6f7f4] font-bold text-base">+</button>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[11px] text-[#59665f]">{item.product.priceOnRequest ? 'Liên hệ báo giá' : money(item.product.price)} / {item.product.unit || 'Kg'}</p>
+                            <p className="font-bold text-[#0f6f4b]">{item.product.priceOnRequest ? 'Tạm tính' : money(lineTotal)}</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-[#59665f]">#{idx + 1} · Giá sẽ được xác nhận lại theo đơn cuối cùng.</p>
+                  </div>
+                );
+              })
+            )}
+          </div>
+          <div className="hidden md:block overflow-x-auto flex-1">
             <table className="w-full text-left border-collapse min-w-[620px]">
               <thead>
                 <tr className="bg-[#f8faf7] border-b border-[#14231c]/10 text-[12px] font-bold text-[#59665f] uppercase tracking-wider">
@@ -854,7 +1087,7 @@ export default function ProductsPage() {
         {/* --------------------------------------------------------------------- */}
         {/* CỘT PHẢI: GIAO HÀNG, THÔNG TIN KHÁCH HÀNG & NÚT ĐẶT HÀNG (4/12) */}
         {/* --------------------------------------------------------------------- */}
-        <div className="lg:col-span-4 space-y-3">
+        <div className="min-w-0 space-y-3">
           {/* Card Thông tin khách hàng & Giao nhận */}
           <div className="bg-white rounded-2xl border border-[#14231c]/10 shadow-sm p-4 space-y-3.5">
             {/* Header thông tin khách */}
