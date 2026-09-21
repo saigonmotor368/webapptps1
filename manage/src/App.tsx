@@ -25,7 +25,7 @@ function lazyPage(loader: () => Promise<{ default: ComponentType<any> }>) {
   });
 }
 
-const DashboardPage = lazyPage(() => import('./pages/DashboardPage'));
+const DashboardPage = lazyPage(() => import('./pages/WorkspaceDashboardPage'));
 const OrdersPage = lazyPage(() => import('./pages/OrdersPage'));
 const OrderDetailPage = lazyPage(() => import('./pages/OrderDetailPage'));
 const PosCreatePage = lazyPage(() => import('./pages/PosCreatePage'));
@@ -96,14 +96,14 @@ function App() {
           <Route path="/dang-nhap" element={<LoginPage />} />
           <Route path="/" element={<ProtectedRoute><SaleLayout /></ProtectedRoute>}>
             <Route index element={<HomeRoute />} />
-            <Route path="don-hang" element={<StaffOnlyRoute><OrdersPage /></StaffOnlyRoute>} />
-            <Route path="don-hang/:id" element={<StaffOnlyRoute><OrderDetailPage /></StaffOnlyRoute>} />
-            <Route path="tao-don-hang" element={<StaffOnlyRoute><PosCreatePage /></StaffOnlyRoute>} />
-            <Route path="khach-hang" element={<StaffOnlyRoute><CustomersPage /></StaffOnlyRoute>} />
-            <Route path="khach-hang/moi" element={<StaffOnlyRoute><CustomerDetailPage /></StaffOnlyRoute>} />
-            <Route path="khach-hang/:id" element={<StaffOnlyRoute><CustomerDetailPage /></StaffOnlyRoute>} />
-            <Route path="hang-hoa" element={<StaffOnlyRoute><ProductsPage /></StaffOnlyRoute>} />
-            <Route path="hang-hoa/:id" element={<StaffOnlyRoute><ProductDetailPage /></StaffOnlyRoute>} />
+            <Route path="don-hang" element={<StaffOnlyRoute perm="orders.view"><OrdersPage /></StaffOnlyRoute>} />
+            <Route path="don-hang/:id" element={<StaffOnlyRoute perm="orders.view"><OrderDetailPage /></StaffOnlyRoute>} />
+            <Route path="tao-don-hang" element={<StaffOnlyRoute perm="orders.create"><PosCreatePage /></StaffOnlyRoute>} />
+            <Route path="khach-hang" element={<StaffOnlyRoute perm="customers.view"><CustomersPage /></StaffOnlyRoute>} />
+            <Route path="khach-hang/moi" element={<StaffOnlyRoute perm="customers.edit"><CustomerDetailPage /></StaffOnlyRoute>} />
+            <Route path="khach-hang/:id" element={<StaffOnlyRoute perm="customers.view"><CustomerDetailPage /></StaffOnlyRoute>} />
+            <Route path="hang-hoa" element={<StaffOnlyRoute perm="products.view"><ProductsPage /></StaffOnlyRoute>} />
+            <Route path="hang-hoa/:id" element={<StaffOnlyRoute perm="products.view"><ProductDetailPage /></StaffOnlyRoute>} />
             <Route path="soan-hang" element={<StaffOnlyRoute perm="orders.packing"><SoanHangPage /></StaffOnlyRoute>} />
             <Route path="ap-gia-hang-ngay" element={<StaffOnlyRoute perm="pricing.edit"><BulkPricingPage /></StaffOnlyRoute>} />
             {/* /don-tong: WP5 - Đơn tổng & tổng hợp soạn hàng cho Thu mua */}

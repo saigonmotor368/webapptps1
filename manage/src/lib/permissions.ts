@@ -19,9 +19,9 @@ export type Role =
 export const ROLE_LABELS: Record<string, string> = {
   admin: 'Quản trị / BGĐ',
   truong_phong: 'Trưởng phòng',
-  sale: 'NV Vận hành',
+  sale: 'Sale / CSKH',
   thu_mua: 'Thu mua',
-  kho: 'Kho / Soạn hàng',
+  kho: 'Vận hành / Kho',
   ke_toan: 'Kế toán',
   tai_xe: 'Tài xế',
 };
