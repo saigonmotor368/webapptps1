@@ -67,7 +67,18 @@ function decodeCatalog(catalog: ProductCatalogResponse) {
   const imageBaseUrl = catalog.imageBaseUrl.replace(/\/$/, '');
   return catalog.items.map(([id, sku, name, category, unit, price, priceOnRequest, hasImage]) => {
     const imageUrl = hasImage && imageBaseUrl ? `${imageBaseUrl}/${id}.webp` : null;
-    const product: Product = { id, sku, name, category, unit, price: Number(price) || 0, priceOnRequest, imageUrl, thumbUrl: imageUrl, available: true };
+    const product: Product = {
+      id,
+      sku,
+      name,
+      category,
+      unit,
+      price: Number(price) || 0,
+      priceOnRequest,
+      imageUrl,
+      thumbUrl: imageUrl,
+      available: true,
+    };
     productSearchKeys.set(id, normalizeSearch(`${sku} ${name} ${category || ''}`));
     return product;
   });
@@ -78,6 +89,7 @@ function searchLocalCatalog(products: Product[], rawQuery: string) {
   if (!query) return products.slice(0, 24);
   const words = query.split(' ').filter(Boolean);
   const ranked: Array<{ product: Product; score: number }> = [];
+
   for (const product of products) {
     const key = productSearchKeys.get(product.id) || normalizeSearch(`${product.sku} ${product.name}`);
     if (!words.every((word) => key.includes(word))) continue;
@@ -86,6 +98,7 @@ function searchLocalCatalog(products: Product[], rawQuery: string) {
     const score = sku === query ? 0 : sku.startsWith(query) ? 1 : name === query ? 2 : name.startsWith(query) ? 3 : 4;
     ranked.push({ product, score });
   }
+
   return ranked
     .sort((a, b) => a.score - b.score || Number(Boolean(productImage(b.product))) - Number(Boolean(productImage(a.product))) || a.product.name.localeCompare(b.product.name, 'vi'))
     .slice(0, 60)
@@ -102,7 +115,14 @@ function ProductThumbnail({ product, compact = false }: { product: Product; comp
   return (
     <div className={`${compact ? 'w-11 h-11 rounded-lg' : 'w-12 h-12 rounded-xl'} border border-[#14231c]/10 bg-[#f6f7f4] overflow-hidden shrink-0 flex items-center justify-center text-[#59665f]/40`}>
       {src && !failed ? (
-        <img src={src} alt={product.name} loading="lazy" decoding="async" onError={() => setFailed(true)} className="w-full h-full object-cover" />
+        <img
+          src={src}
+          alt={product.name}
+          loading="lazy"
+          decoding="async"
+          onError={() => setFailed(true)}
+          className="w-full h-full object-cover"
+        />
       ) : (
         <PackageOpen size={compact ? 18 : 20} />
       )}
@@ -116,8 +136,21 @@ function getTomorrowDateStr() {
   return d.toISOString().split('T')[0];
 }
 
+function getDefaultDelivery(session: any) {
+  const shipping = session?.defaultShippingAddress;
+  const address = String(shipping?.address || '').trim();
+  if (!address) {
+    return { deliveryName: '', deliveryPhone: '', deliveryAddress: '' };
+  }
+  return {
+    deliveryName: String(shipping?.name || '').trim(),
+    deliveryPhone: String(shipping?.phone || '').trim(),
+    deliveryAddress: address,
+  };
+}
+
 function createDefaultTab(index: number, session: any): OrderTab {
-  const defaultShipping = session?.defaultShippingAddress;
+  const defaultDelivery = getDefaultDelivery(session);
   return {
     id: `tab-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
     title: `Đặt hàng ${index}`,
@@ -125,9 +158,7 @@ function createDefaultTab(index: number, session: any): OrderTab {
     note: '',
     deliveryDate: getTomorrowDateStr(),
     deliveryShift: 'Ca sáng sớm (05:00 - 07:00)',
-    deliveryName: defaultShipping?.name || session?.name || '',
-    deliveryPhone: defaultShipping?.phone || session?.phone || '',
-    deliveryAddress: defaultShipping?.address || session?.address || '',
+    ...defaultDelivery,
     mode: 'delivery',
   };
 }
@@ -142,7 +173,14 @@ export default function ProductsPage() {
       const saved = sessionStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const defaultDelivery = getDefaultDelivery(session);
+          return parsed.map((tab) =>
+            String(tab?.deliveryAddress || '').trim()
+              ? tab
+              : { ...tab, ...defaultDelivery }
+          );
+        }
       }
     } catch {}
     return [createDefaultTab(1, session)];
@@ -200,7 +238,10 @@ export default function ProductsPage() {
       const res = await api.products(query ? { search: query } : {}, controller.signal);
       if (requestId !== searchRequestRef.current) return;
       const products = res.products || [];
-      productSearchCache.set(cacheKey, { expiresAt: Date.now() + PRODUCT_CACHE_TTL_MS, products });
+      productSearchCache.set(cacheKey, {
+        expiresAt: Date.now() + PRODUCT_CACHE_TTL_MS,
+        products,
+      });
       setSearchResults(products);
       setIsDropdownOpen(openDropdown);
       setSelectedResultIndex(0);
@@ -215,11 +256,14 @@ export default function ProductsPage() {
     }
   }, [logout, navigate, session?.id]);
 
+  // Tải sẵn một nhóm sản phẩm đầu tiên để khách có thể chọn ngay khi mở trang.
   useEffect(() => {
     void loadProducts('', false);
     return () => searchAbortRef.current?.abort();
   }, [loadProducts]);
 
+  // KiotViet cho cảm giác nhanh vì tìm trên catalog đã nằm trong trình duyệt.
+  // TPS1 áp dụng cùng nguyên lý nhưng catalog vẫn mang đúng giá riêng của từng khách.
   useEffect(() => {
     const customerId = session?.id;
     if (!customerId) return;
@@ -266,6 +310,7 @@ export default function ProductsPage() {
     }).catch((error) => {
       if (!controller.signal.aborted) console.warn('Không tải được catalog nền:', error);
     });
+
     return () => controller.abort();
   }, [session?.id]);
 
@@ -659,7 +704,7 @@ export default function ProductsPage() {
               <tbody className="divide-y divide-[#14231c]/5 text-sm font-medium">
                 {activeTab.items.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="py-20 text-center text-[#59665f]">
+                     <td colSpan={9} className="py-20 text-center text-[#59665f]">
                       <div className="w-16 h-16 rounded-full bg-[#f6f7f4] flex items-center justify-center mx-auto mb-3 text-[#59665f]/40">
                         <Search size={28} />
                       </div>
@@ -684,6 +729,7 @@ export default function ProductsPage() {
                           {idx + 1}
                         </td>
 
+                        {/* Ảnh sản phẩm */}
                         <td className="py-2 px-3">
                           <ProductThumbnail product={item.product} compact />
                         </td>
