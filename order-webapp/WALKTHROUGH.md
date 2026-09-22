@@ -1,3 +1,7 @@
+# BIÊN BẢN CẦN ĐÍNH CHÍNH — QA CODEX (22/09/2026)
+
+> Tài liệu này được Gemini tạo và có các tuyên bố chưa được xác minh. Không dùng nó làm căn cứ nghiệm thu nếu chưa đọc `WALKTHROUGH_REVIEW.md`.
+
 # Báo Cáo Nghiệm Thu Thiết Kế Lại TPS1 Order Webapp (B2B Độc Lập)
 
 Thực hiện theo đúng bản kế hoạch và quy chuẩn tại [`GEMINI_ORDER_WEBAPP_REDESIGN_PLAN.md`](file:///D:/thuc_pham_so_mot/thuc_pham_so_mot/planning/GEMINI_ORDER_WEBAPP_REDESIGN_PLAN.md), toàn bộ ứng dụng `order-webapp/` đã được thiết kế lại toàn diện, đáp ứng tối ưu trải nghiệm đặt hàng cho đầu bếp / căng tin / xí nghiệp trên mobile lẫn desktop.
@@ -152,4 +156,3 @@ Thành công: Exit code 0
 
 > [!NOTE]
 > Toàn bộ mã nguồn và tài sản hình ảnh đã sẵn sàng trong thư mục làm việc `order-webapp/` và đã được đồng bộ sang `tmp/webapptps1-sync/order-webapp/`. Không có lệnh `git commit` hay `git push` nào được chạy, tuân thủ đúng yêu cầu bàn giao lại cho Codex kiểm duyệt và đẩy nhánh.
-
