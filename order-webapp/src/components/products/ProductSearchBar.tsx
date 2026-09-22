@@ -19,7 +19,7 @@ interface ProductSearchBarProps {
   onCloseDropdown: () => void;
   selectedResultIndex: number;
   onSelectIndex: (idx: number) => void;
-  onAddProduct: (product: Product, qty?: number) => void;
+  onAddProduct: (product: Product, qty?: number, options?: { resetSearch?: boolean; keepFocus?: boolean }) => void;
   searchInputRef: React.RefObject<HTMLInputElement | null>;
   dropdownRef: React.RefObject<HTMLDivElement | null>;
   onKeyDown: (e: React.KeyboardEvent) => void;
@@ -118,7 +118,7 @@ export default function ProductSearchBar({
                 return (
                   <div
                     key={p.id}
-                    onClick={() => onAddProduct(p, addQty)}
+                    onClick={() => onAddProduct(p, addQty, { resetSearch: true, keepFocus: false })}
                     onMouseEnter={() => onSelectIndex(idx)}
                     className={`px-3.5 py-2.5 flex items-center justify-between gap-3 cursor-pointer transition-colors ${
                       isSelected

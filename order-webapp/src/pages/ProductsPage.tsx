@@ -377,7 +377,11 @@ export default function ProductsPage() {
   );
 
   // Thao tác Thêm / Sửa số lượng / Ghi chú dòng
-  const handleAddProduct = (product: Product, quantityToAdd: number = addQty) => {
+  const handleAddProduct = (
+    product: Product,
+    quantityToAdd: number = 1,
+    options?: { resetSearch?: boolean; keepFocus?: boolean }
+  ) => {
     const qty = Math.max(0.1, Number(quantityToAdd) || 1);
     updateActiveTab((tab) => {
       const existingIdx = tab.items.findIndex((item) => item.product.id === product.id);
@@ -396,10 +400,14 @@ export default function ProductsPage() {
       }
     });
 
-    setSearchQuery('');
-    setIsDropdownOpen(false);
-    setAddQty(1);
-    searchInputRef.current?.focus();
+    if (options?.resetSearch) {
+      setSearchQuery('');
+      setIsDropdownOpen(false);
+      setAddQty(1);
+    }
+    if (options?.keepFocus) {
+      searchInputRef.current?.focus();
+    }
   };
 
   const handleUpdateQty = (productId: string, newQty: number) => {
@@ -490,7 +498,7 @@ export default function ProductsPage() {
     } else if (e.key === 'Enter') {
       e.preventDefault();
       if (searchResults[selectedResultIndex]) {
-        handleAddProduct(searchResults[selectedResultIndex]);
+        handleAddProduct(searchResults[selectedResultIndex], addQty, { resetSearch: true, keepFocus: true });
       }
     } else if (e.key === 'Escape') {
       setIsDropdownOpen(false);
