@@ -18,7 +18,7 @@
 }
 
 * {
-  font-family: "Be Vietnam Pro", "Segoe UI", system-ui, sans-serif;
+  font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
 html {
@@ -112,4 +112,3 @@ body {
   border-color: rgba(52, 211, 153, 0.7);
   box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.15);
 }
-
