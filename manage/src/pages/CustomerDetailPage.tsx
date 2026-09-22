@@ -74,12 +74,22 @@ export default function CustomerDetailPage() {
     if (isNew || !id) return;
     setLoading(true);
     try {
-      const { data } = await supabase.rpc('admin_list_customers');
-      const found = (data || []).find((c: any) => c.id === id);
-      if (!found) { alert('Không tìm thấy khách hàng'); navigate('/khach-hang'); return; }
-      setForm(found);
+      // Danh sách và chi tiết cùng đi qua backend đã xác thực. Cách cũ gọi
+      // admin_list_customers rồi find() theo UUID và bỏ qua error; sau khi RPC
+      // được siết quyền, lỗi tải danh sách bị hiểu nhầm thành "không tìm thấy".
+      const res = await fetch(`${apiBase}/api/admin/customers/${encodeURIComponent(id)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok || !json.customer) {
+        throw new Error(json.error || 'Không tải được thông tin khách hàng');
+      }
+      setForm(json.customer);
+    } catch (err: any) {
+      console.error('Lỗi tải chi tiết khách hàng:', err);
+      alert(`Không tải được thông tin khách hàng: ${err?.message || 'Lỗi không xác định'}`);
     } finally { setLoading(false); }
-  }, [id, isNew, navigate]);
+  }, [apiBase, id, isNew, token]);
 
   const loadContractPrices = useCallback(async () => {
     if (isNew || !id) return;
