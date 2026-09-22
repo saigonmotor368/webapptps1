@@ -188,8 +188,7 @@ export default function LoginPage() {
 
       {/* ========================================================================= */}
       {/* CỘT PHẢI (DESKTOP) & TOÀN BỘ MÀN HÌNH (MOBILE): THẺ ĐĂNG NHẬP SANG TRỌNG */}
-      {/* ========================================================================= */}
-      <div className="flex-1 relative flex items-center justify-center p-5 sm:p-8 lg:p-12 overflow-y-auto">
+      <div className="flex-1 relative flex items-center justify-center p-5 sm:p-8 lg:p-12 pt-[max(1.25rem,env(safe-area-inset-top))] pb-[max(1.25rem,env(safe-area-inset-bottom))] overflow-y-auto">
         <div className="absolute inset-0 bg-gradient-to-b from-[#05140d]/90 via-[#05140d]/95 to-[#05140d] pointer-events-none" />
 
         <div className="tps1-rise relative z-10 w-full max-w-md">

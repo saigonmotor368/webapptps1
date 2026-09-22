@@ -11,7 +11,15 @@ import OrderDetailPage from './pages/OrderDetailPage';
 import ExcelOrderPage from './pages/ExcelOrderPage';
 
 const LoadingScreen = () => (
-  <div className="min-h-screen flex items-center justify-center bg-[#0B130E] text-white">Đang tải...</div>
+  <div className="fixed inset-0 min-h-screen bg-white flex flex-col items-center justify-center z-50">
+    <img
+      src="/images/tps1-logo-vertical.png"
+      alt="Thực Phẩm Số Một"
+      className="w-36 max-w-[50vw] h-auto object-contain mb-6 animate-pulse"
+    />
+    <div className="w-8 h-8 border-3 border-[#eaf6ef] border-t-[#0f7a4f] rounded-full animate-spin" />
+    <p className="mt-3 text-xs font-medium text-[#59665f] tracking-wide">Đang tải dữ liệu...</p>
+  </div>
 );
 
 // Toàn bộ app này CHỈ dành cho khách hàng — không có khái niệm nhân viên

@@ -22,8 +22,8 @@ export default function CustomerLayout() {
 
   return (
     <div className="min-h-screen bg-[#f5f7f3] flex flex-col selection:bg-[#0f7a4f] selection:text-white">
-      {/* Top Header */}
-      <header className="bg-gradient-to-r from-[#0b4f34] via-[#0d593c] to-[#0f7a4f] sticky top-0 z-30 shadow-md border-b border-white/10">
+      {/* Top Header with safe area padding */}
+      <header className="bg-gradient-to-r from-[#0b4f34] via-[#0d593c] to-[#0f7a4f] sticky top-0 z-30 shadow-md border-b border-white/10 pt-[env(safe-area-inset-top,0px)]">
         <div className="max-w-[1520px] mx-auto px-3 sm:px-6 py-2.5 flex items-center justify-between gap-4">
           {/* Brand Logo & Customer Info */}
           <div className="flex items-center gap-3.5 min-w-0">
