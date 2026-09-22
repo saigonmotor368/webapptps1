@@ -123,11 +123,12 @@ export const api = {
   frequentItems: (signal?: AbortSignal) => request<{ ok: true; items: FrequentItem[] }>('/api/customer/frequent-items', { signal }),
 
   createOrder: (payload: {
-    items: { productId: string; name: string; quantity: number }[];
+    items: { productId: string; name: string; quantity: number; note?: string }[];
     deliveryAlias?: string;
     deliveryAddress: string;
     deliveryName: string;
     deliveryPhone: string;
+    deliveryDate?: string;
     note?: string;
     idempotencyKey: string;
   }) =>
@@ -139,6 +140,12 @@ export const api = {
         deliveryType: 'shipping',
         ...payload,
       },
+    }),
+
+  cancelOrder: (orderId: string, cancelReason: string) =>
+    request<{ ok: true; orderId: string; status: 'canceled' }>('/api/customer/orders/cancel', {
+      method: 'POST',
+      body: { orderId, cancelReason },
     }),
 
   importExcel: (file: File) => {
@@ -198,7 +205,9 @@ export interface Order {
   order_code: string;
   status: string;
   payment_status: string;
+  payment_method?: string;
   created_at: string;
+  delivery_date?: string | null;
   delivery_address?: string;
   delivery_name?: string;
   delivery_phone?: string;
@@ -225,6 +234,7 @@ export interface Order {
     finalUnitPrice?: number;
     lineTotal?: number;
     finalLineTotal?: number;
+    customerNote?: string;
     itemNote?: string;
   }[];
 }

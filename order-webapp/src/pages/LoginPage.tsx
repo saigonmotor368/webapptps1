@@ -122,8 +122,8 @@ export default function LoginPage() {
           </h1>
 
           <p className="text-emerald-100/80 text-base xl:text-lg leading-relaxed font-light">
-            Cổng đặt hàng trực tuyến dành riêng cho khách hàng VIP & Doanh nghiệp. Tự động áp giá hợp đồng riêng,
-            kiểm soát xuất xứ chuẩn VietGAP/HACCP và giao hàng lạnh tận nơi mỗi ngày.
+            Cổng đặt hàng trực tuyến dành cho khách hàng doanh nghiệp, giúp tra cứu bảng giá riêng,
+            đặt hàng và theo dõi tiến độ xử lý trên cùng một hệ thống.
           </p>
 
           {/* 3 cam kết dịch vụ */}
@@ -138,17 +138,17 @@ export default function LoginPage() {
               },
               {
                 icon: ShieldCheck,
-                title: 'Bảng giá sỉ VIP theo hợp đồng',
-                desc: 'Tự động tính chiết khấu theo hạng khách hàng (VIP0 - VIP3), bình ổn giá dài hạn.',
+                title: 'Bảng giá theo từng khách hàng',
+                desc: 'Hiển thị mức giá đang áp dụng cho tài khoản và từng mặt hàng.',
                 color: 'text-amber-400',
                 bg: 'bg-amber-500/15 border-amber-500/25',
               },
               {
                 icon: FileSpreadsheet,
                 title: 'Đặt hàng đa kênh & File Excel',
-                desc: 'Lên đơn trực tiếp hoặc tải file Excel hàng trăm mã sản phẩm chỉ trong 30 giây.',
-                color: 'text-blue-400',
-                bg: 'bg-blue-500/15 border-blue-500/25',
+                desc: 'Lên đơn trực tiếp hoặc tải file Excel khi cần nhập danh sách nhiều mặt hàng.',
+                color: 'text-teal-300',
+                bg: 'bg-teal-500/15 border-teal-500/25',
               },
             ].map(({ icon: Icon, title, desc, color, bg }) => (
               <div
@@ -171,10 +171,10 @@ export default function LoginPage() {
         <div className="relative z-10 pt-4 border-t border-white/10 space-y-2">
           <p className="text-[11px] font-semibold text-emerald-100/50 uppercase tracking-widest flex items-center gap-1.5">
             <Building2 size={13} />
-            Đồng hành cùng hơn 200+ bếp ăn xí nghiệp, bệnh viện & trường học
+            Hệ thống đặt hàng dành cho khách hàng doanh nghiệp của TPS1
           </p>
           <div className="flex flex-wrap items-center gap-2 pt-1 text-xs text-emerald-100/75 font-medium">
-            {['Toyota Long Thành', 'Hưng Nghiệp Formosa', 'Cargill', 'Bayer', 'Kirin', 'Aqua', 'Interfood'].map((name) => (
+            {['Bếp ăn doanh nghiệp', 'Nhà máy', 'Trường học', 'Đơn vị suất ăn'].map((name) => (
               <span
                 key={name}
                 className="px-2.5 py-1 rounded-lg bg-white/[0.07] border border-white/10 backdrop-blur-sm"
@@ -190,11 +190,6 @@ export default function LoginPage() {
       {/* CỘT PHẢI (DESKTOP) & TOÀN BỘ MÀN HÌNH (MOBILE): THẺ ĐĂNG NHẬP SANG TRỌNG */}
       {/* ========================================================================= */}
       <div className="flex-1 relative flex items-center justify-center p-5 sm:p-8 lg:p-12 overflow-y-auto">
-        {/* Hình nền mờ nhẹ cho mobile để giữ vẻ tươi mát và đồng bộ */}
-        <div
-          className="absolute inset-0 bg-cover bg-center opacity-20 lg:opacity-10 pointer-events-none"
-          style={{ backgroundImage: `url('/images/tps1-bg-fresh.jpg')` }}
-        />
         <div className="absolute inset-0 bg-gradient-to-b from-[#05140d]/90 via-[#05140d]/95 to-[#05140d] pointer-events-none" />
 
         <div className="tps1-rise relative z-10 w-full max-w-md">
@@ -225,7 +220,7 @@ export default function LoginPage() {
                   <span>Đăng nhập</span>
                 </h2>
                 <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 tracking-wider">
-                  B2B VIP
+                  TPS1 B2B
                 </span>
               </div>
               <p className="text-sm text-emerald-100/65 mt-1.5 leading-relaxed">
@@ -354,7 +349,7 @@ export default function LoginPage() {
             <div className="mt-6 pt-5 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-emerald-100/60">
               <span className="flex items-center gap-1.5">
                 <Clock3 size={13} className="text-emerald-400" />
-                <span>Nhận đơn 24/7 • Giao sớm từ 05:00</span>
+                <span>Đặt hàng và theo dõi đơn trực tuyến</span>
               </span>
               <button
                 type="button"
@@ -370,11 +365,11 @@ export default function LoginPage() {
           <div className="mt-6 flex items-center justify-center gap-6 text-[11px] text-emerald-100/40">
             <span className="flex items-center gap-1">
               <ShieldCheck size={14} className="text-emerald-400/60" />
-              <span>Bảo mật SSL 256-bit</span>
+              <span>Kết nối được mã hóa</span>
             </span>
             <span className="flex items-center gap-1">
               <Leaf size={14} className="text-emerald-400/60" />
-              <span>Tiêu chuẩn VietGAP - HACCP</span>
+              <span>Dữ liệu tài khoản riêng biệt</span>
             </span>
           </div>
         </div>
@@ -398,14 +393,14 @@ export default function LoginPage() {
                 <PhoneCall size={22} />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-white">Hỗ trợ khách hàng VIP</h3>
+                <h3 className="text-lg font-bold text-white">Hỗ trợ khách hàng</h3>
                 <p className="text-xs text-emerald-100/60">Cấp mới tài khoản hoặc đặt lại mật khẩu</p>
               </div>
             </div>
 
             <p className="text-sm text-emerald-100/80 leading-relaxed mb-5">
               Vì lý do an toàn bảo mật đơn hàng doanh nghiệp và bảng giá hợp đồng, vui lòng liên hệ nhân viên
-              kinh doanh phụ trách hoặc hotline tổng đài TPS1 để được cấp lại mật khẩu ngay trong 1-2 phút:
+              kinh doanh phụ trách hoặc hotline TPS1 để được hỗ trợ cấp lại mật khẩu:
             </p>
 
             <div className="space-y-2.5 mb-5">
@@ -427,23 +422,6 @@ export default function LoginPage() {
                 </span>
               </a>
 
-              <a
-                href="tel:0972792139"
-                className="flex items-center justify-between p-3.5 rounded-2xl bg-white/[0.07] hover:bg-white/[0.12] border border-white/10 transition-all text-white group"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-amber-500/20 flex items-center justify-center text-amber-400">
-                    <ShieldCheck size={16} />
-                  </div>
-                  <div>
-                    <div className="text-xs text-emerald-100/60 font-medium">Hỗ trợ khẩn cấp (CEO / Quản lý)</div>
-                    <div className="text-base font-bold text-amber-300">0972 792 139</div>
-                  </div>
-                </div>
-                <span className="text-xs font-semibold text-amber-400 group-hover:translate-x-0.5 transition-transform">
-                  Gọi ngay →
-                </span>
-              </a>
             </div>
 
             <button

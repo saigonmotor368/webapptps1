@@ -48,10 +48,10 @@ export default function ChangePasswordPage() {
     <div className="min-h-[70vh] flex items-center justify-center">
       <div className="bg-white rounded-3xl shadow-sm border border-[#14231c]/10 p-8 max-w-md w-full">
         <div className="flex flex-col items-center mb-6 text-center">
-          <div className="w-14 h-14 rounded-2xl bg-[#0f6f4b]/10 text-[#0f6f4b] flex items-center justify-center mb-3">
+          <div className="w-14 h-14 rounded-2xl bg-[#0f7a4f]/10 text-[#0f7a4f] flex items-center justify-center mb-3">
             <KeyRound size={26} />
           </div>
-          <h1 className="text-xl font-bold text-[#14231c]">
+          <h1 className="text-xl font-bold text-[#17231d]">
             {forced ? 'Đặt mật khẩu mới' : 'Đổi mật khẩu'}
           </h1>
           {forced && (
@@ -63,8 +63,8 @@ export default function ChangePasswordPage() {
 
         {done ? (
           <div className="text-center py-6 space-y-2">
-            <CheckCircle2 className="mx-auto text-[#0f6f4b]" size={36} />
-            <p className="font-medium text-[#14231c]">Đổi mật khẩu thành công!</p>
+            <CheckCircle2 className="mx-auto text-[#0f7a4f]" size={36} />
+            <p className="font-medium text-[#17231d]">Đổi mật khẩu thành công!</p>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -76,7 +76,7 @@ export default function ChangePasswordPage() {
                 type="password"
                 value={oldPassword}
                 onChange={(e) => setOldPassword(e.target.value)}
-                className="w-full border border-[#14231c]/15 rounded-xl py-2.5 px-3.5 focus:outline-none focus:ring-2 focus:ring-[#0f6f4b]/30"
+                className="w-full border border-[#17231d]/15 rounded-xl py-2.5 px-3.5 focus:outline-none focus:ring-2 focus:ring-[#0f7a4f]/30"
                 required
               />
             </div>
@@ -88,7 +88,7 @@ export default function ChangePasswordPage() {
                 type="password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
-                className="w-full border border-[#14231c]/15 rounded-xl py-2.5 px-3.5 focus:outline-none focus:ring-2 focus:ring-[#0f6f4b]/30"
+                className="w-full border border-[#17231d]/15 rounded-xl py-2.5 px-3.5 focus:outline-none focus:ring-2 focus:ring-[#0f7a4f]/30"
                 required
               />
             </div>
@@ -100,7 +100,7 @@ export default function ChangePasswordPage() {
                 type="password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full border border-[#14231c]/15 rounded-xl py-2.5 px-3.5 focus:outline-none focus:ring-2 focus:ring-[#0f6f4b]/30"
+                className="w-full border border-[#17231d]/15 rounded-xl py-2.5 px-3.5 focus:outline-none focus:ring-2 focus:ring-[#0f7a4f]/30"
                 required
               />
             </div>
@@ -110,7 +110,7 @@ export default function ChangePasswordPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-[#0f6f4b] hover:bg-[#0b5a3c] text-white font-semibold py-3 rounded-xl transition-colors disabled:opacity-50"
+              className="w-full bg-[#0f7a4f] hover:bg-[#0b4f34] text-white font-semibold py-3 rounded-xl transition-colors disabled:opacity-50"
             >
               {loading ? 'Đang lưu...' : 'Lưu mật khẩu mới'}
             </button>

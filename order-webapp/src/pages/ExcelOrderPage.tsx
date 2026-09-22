@@ -91,7 +91,7 @@ export default function ExcelOrderPage() {
         <button
           onClick={() => fileInputRef.current?.click()}
           disabled={loading}
-          className="flex items-center gap-2 px-4 py-2.5 bg-[#0f6f4b] text-white rounded-xl font-medium hover:bg-[#0b5a3c] disabled:opacity-50 transition-colors"
+          className="flex items-center gap-2 px-4 py-2.5 bg-[#0f7a4f] text-white rounded-xl font-medium hover:bg-[#0b4f34] disabled:opacity-50 transition-colors"
         >
           <Upload size={18} /> {loading ? 'Đang xử lý...' : 'Tải lên file đã điền'}
         </button>
@@ -112,7 +112,7 @@ export default function ExcelOrderPage() {
 
       {summary && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <SummaryTile label="Khớp đúng" value={summary.matched} color="text-[#0f6f4b]" icon={<CheckCircle2 size={16} />} />
+          <SummaryTile label="Khớp đúng" value={summary.matched} color="text-[#0f7a4f]" icon={<CheckCircle2 size={16} />} />
           <SummaryTile label="Cần chọn" value={summary.ambiguous} color="text-amber-600" icon={<AlertTriangle size={16} />} />
           <SummaryTile label="Không tìm thấy" value={summary.notFound} color="text-red-600" icon={<XCircle size={16} />} />
           <SummaryTile label="Sai số lượng" value={summary.invalidQuantity} color="text-red-600" icon={<XCircle size={16} />} />
@@ -122,7 +122,7 @@ export default function ExcelOrderPage() {
       {results && results.length > 0 && (
         <div className="space-y-2.5">
           {results.map((r) => (
-            <div key={r.row} className="bg-white border border-[#14231c]/10 rounded-xl p-3.5">
+            <div key={r.row} className="bg-white border border-[#14231d]/10 rounded-xl p-3.5">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-[#14231c] truncate">
@@ -133,7 +133,7 @@ export default function ExcelOrderPage() {
                 <StatusBadge status={r.status} />
               </div>
               {r.status === 'matched' && r.product && (
-                <p className="text-xs text-[#0f6f4b] mt-1.5">
+                <p className="text-xs text-[#0f7a4f] mt-1.5">
                   → {r.product.name} ({r.product.sku}) — {r.product.priceOnRequest ? 'Liên hệ báo giá' : money(r.product.price)}
                 </p>
               )}
@@ -158,7 +158,7 @@ export default function ExcelOrderPage() {
 
           <button
             onClick={addAllMatched}
-            className="w-full flex items-center justify-center gap-2 bg-[#0f6f4b] text-white font-semibold py-3 rounded-xl hover:bg-[#0b5a3c] transition-colors mt-4"
+            className="w-full flex items-center justify-center gap-2 bg-[#0f7a4f] text-white font-semibold py-3 rounded-xl hover:bg-[#0b4f34] transition-colors mt-4"
           >
             <ShoppingCart size={18} /> Thêm tất cả vào giỏ hàng
           </button>

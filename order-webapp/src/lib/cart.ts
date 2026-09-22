@@ -4,6 +4,7 @@ import type { Product } from './api';
 export interface CartLine {
   product: Product;
   quantity: number;
+  note?: string;
 }
 
 const CART_KEY = 'tps1_order_cart_v1';
@@ -17,10 +18,6 @@ function readCart(): Record<string, CartLine> {
   }
 }
 
-// Giỏ hàng đơn giản (1 giỏ duy nhất), lưu sessionStorage — đủ cho bản đầu.
-// sale-webapp/DatHangPage có mô hình nhiều tab đơn cùng lúc (khách tổ bếp cần
-// tách nhiều đơn riêng); nếu khách hàng thật của app này cũng cần, làm thêm
-// sau theo đúng mẫu đó, không cần thiết kế lại từ đầu.
 export function useCart() {
   const [cart, setCart] = useState<Record<string, CartLine>>(() => readCart());
 
@@ -28,10 +25,17 @@ export function useCart() {
     sessionStorage.setItem(CART_KEY, JSON.stringify(cart));
   }, [cart]);
 
-  const addItem = useCallback((product: Product, qty = 1) => {
+  const addItem = useCallback((product: Product, qty = 1, note = '') => {
     setCart((prev) => {
       const existing = prev[product.id];
-      return { ...prev, [product.id]: { product, quantity: (existing?.quantity || 0) + qty } };
+      return {
+        ...prev,
+        [product.id]: {
+          product,
+          quantity: (existing?.quantity || 0) + qty,
+          note: note || existing?.note || '',
+        },
+      };
     });
   }, []);
 
@@ -43,6 +47,13 @@ export function useCart() {
         return next;
       }
       return { ...prev, [productId]: { ...prev[productId], quantity: qty } };
+    });
+  }, []);
+
+  const setNote = useCallback((productId: string, note: string) => {
+    setCart((prev) => {
+      if (!prev[productId]) return prev;
+      return { ...prev, [productId]: { ...prev[productId], note } };
     });
   }, []);
 
@@ -60,5 +71,5 @@ export function useCart() {
   const count = lines.reduce((s, l) => s + l.quantity, 0);
   const total = lines.reduce((s, l) => s + l.quantity * (l.product.price || 0), 0);
 
-  return { cart, lines, count, total, addItem, setQty, removeItem, clear };
+  return { cart, lines, count, total, addItem, setQty, setNote, removeItem, clear };
 }

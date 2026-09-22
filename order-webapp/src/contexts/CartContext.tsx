@@ -6,8 +6,9 @@ interface CartContextType {
   lines: CartLine[];
   count: number;
   total: number;
-  addItem: (product: Product, qty?: number) => void;
+  addItem: (product: Product, qty?: number, note?: string) => void;
   setQty: (productId: string, qty: number) => void;
+  setNote: (productId: string, note: string) => void;
   removeItem: (productId: string) => void;
   clear: () => void;
 }

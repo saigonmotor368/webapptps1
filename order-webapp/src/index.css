@@ -1,15 +1,20 @@
 @import "tailwindcss";
 
 :root {
-  --tps1-green: #0f6f4b;
-  --tps1-green-dark: #0b5a3c;
-  --tps1-green-deep: #0a3d29;
+  --tps1-primary: #0f7a4f;
+  --tps1-primary-dark: #0b4f34;
+  --tps1-primary-deep: #062b1c;
+  --tps1-primary-light: #19a85b;
+  --tps1-primary-soft: #eaf6ef;
   --tps1-amber: #e0742f;
   --tps1-amber-dark: #c4601f;
-  --tps1-ink: #14231c;
-  --tps1-ink-2: #59665f;
-  --tps1-cream: #f6f7f4;
-  --tps1-paper: #fffdf8;
+  --tps1-amber-soft: #fef5ee;
+  --tps1-ink: #17231d;
+  --tps1-ink-muted: #59665f;
+  --tps1-ink-subtle: #8a9690;
+  --tps1-bg: #f5f7f3;
+  --tps1-surface: #ffffff;
+  --tps1-border: rgba(23, 35, 29, 0.08);
 }
 
 * {
@@ -19,20 +24,27 @@
 html {
   /* PWA fullscreen an toàn cho tai thỏ/notch khi cài lên màn hình chính */
   padding-top: env(safe-area-inset-top);
+  scroll-behavior: smooth;
 }
 
 body {
-  background: var(--tps1-cream);
+  background: var(--tps1-bg);
   color: var(--tps1-ink);
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Touch targets >= 44px on mobile for kitchen operation */
+.touch-target {
+  min-height: 44px;
+  min-width: 44px;
+}
+
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--tps1-green) 30%, transparent);
+  background: color-mix(in srgb, var(--tps1-primary) 25%, transparent);
   border-radius: 999px;
 }
 ::-webkit-scrollbar-track {
