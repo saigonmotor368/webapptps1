@@ -7,6 +7,9 @@ export interface User {
   userType: 'staff' | 'customer';
   // Nhân viên
   role?: string;
+  position?: string;
+  departmentId?: string | null;
+  department?: { code: string; name: string; function_group: string } | null;
   email?: string;
   // Khách hàng
   code?: string;
@@ -35,6 +38,7 @@ interface AuthContextType {
   loginStaff: (user: User, tokens: StaffLoginTokens) => Promise<void>;
   loginCustomer: (user: User, customerToken: string) => void;
   logout: () => Promise<void>;
+  authFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -44,6 +48,7 @@ const AuthContext = createContext<AuthContextType>({
   loginStaff: async () => {},
   loginCustomer: () => {},
   logout: async () => {},
+  authFetch: async (input, init) => fetch(input, init),
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -72,10 +77,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let mounted = true;
 
     const restore = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
+      let { data: { session } } = await supabase.auth.getSession();
 
       if (session?.user) {
         // Có phiên Supabase Auth thật -> chỉ có thể là nhân viên.
+        // Kiểm tra xem access token có hết hạn hoặc sắp hết hạn không
+        const expiresAt = session.expires_at ? session.expires_at * 1000 : 0;
+        if (expiresAt && expiresAt < Date.now() + 120000) {
+          try {
+            const { data: refreshed } = await supabase.auth.refreshSession();
+            if (refreshed?.session) {
+              session = refreshed.session;
+            }
+          } catch (e) {
+            console.warn('Lỗi tự động refresh session:', e);
+          }
+        }
+
         let profile: User | null = null;
         try {
           const stored = localStorage.getItem(STORAGE_USER_KEY);
@@ -121,19 +139,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     restore();
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-      // Chỉ can thiệp khi phiên hiện tại là của nhân viên — tránh việc Supabase
-      // Auth "không có session" (vốn luôn đúng với khách hàng) vô tình đăng
-      // xuất khách hàng đang dùng customerToken.
-      setUser((current) => {
-        if (current?.userType !== 'staff') return current;
-        if (!session) {
-          setToken(null);
-          localStorage.removeItem(STORAGE_USER_KEY);
-          return null;
-        }
+      if (!session) {
+        setUser((current) => {
+          if (current?.userType === 'staff') {
+            setToken(null);
+            localStorage.removeItem(STORAGE_USER_KEY);
+            return null;
+          }
+          return current;
+        });
+        return;
+      }
+      if (session.access_token) {
         setToken(session.access_token);
-        return current;
-      });
+      }
     });
 
     return () => {
@@ -141,6 +160,52 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       sub.subscription.unsubscribe();
     };
   }, []);
+
+  const getValidToken = React.useCallback(async (): Promise<string | null> => {
+    if (user?.userType === 'customer') {
+      return token || localStorage.getItem(STORAGE_CUSTOMER_TOKEN_KEY);
+    }
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return token;
+    const expiresAt = session.expires_at ? session.expires_at * 1000 : 0;
+    if (expiresAt && expiresAt < Date.now() + 60000) {
+      try {
+        const { data: refreshed } = await supabase.auth.refreshSession();
+        if (refreshed?.session) {
+          setToken(refreshed.session.access_token);
+          return refreshed.session.access_token;
+        }
+      } catch (e) {
+        console.warn('Refresh session thất bại:', e);
+      }
+    }
+    if (session.access_token && session.access_token !== token) {
+      setToken(session.access_token);
+    }
+    return session.access_token || token;
+  }, [token, user]);
+
+  const authFetch = React.useCallback(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const validToken = await getValidToken();
+    const headers = new Headers(init?.headers || {});
+    if (validToken && !headers.has('Authorization')) {
+      headers.set('Authorization', `Bearer ${validToken}`);
+    }
+    let res = await fetch(input, { ...init, headers });
+    if (res.status === 401 && user?.userType === 'staff') {
+      try {
+        const { data: refreshed } = await supabase.auth.refreshSession();
+        if (refreshed?.session) {
+          setToken(refreshed.session.access_token);
+          headers.set('Authorization', `Bearer ${refreshed.session.access_token}`);
+          res = await fetch(input, { ...init, headers });
+        }
+      } catch (e) {
+        console.warn('Retry authFetch sau refresh thất bại:', e);
+      }
+    }
+    return res;
+  }, [getValidToken, user]);
 
   const loginStaff = async (userData: User, tokens: StaffLoginTokens) => {
     // Gắn token thật của Supabase Auth vào client dùng chung (sale-webapp/src/lib/supabase.ts)
@@ -171,7 +236,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, loginStaff, loginCustomer, logout }}>
+    <AuthContext.Provider value={{ user, token, loading, loginStaff, loginCustomer, logout, authFetch }}>
       {children}
     </AuthContext.Provider>
   );

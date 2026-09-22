@@ -7,6 +7,7 @@ import {
   Trash2, Plus, Search as SearchIcon, RefreshCw, MapPin, Star, ShieldCheck, ShieldAlert, ShieldX,
   FileSpreadsheet, Download, X, CheckCircle2, CalendarClock, Copy,
 } from 'lucide-react';
+import { can } from '../lib/permissions';
 
 function money(v: number) { return new Intl.NumberFormat('vi-VN').format(Math.round(Number(v) || 0)) + 'đ'; }
 function dt(v: string) { return v ? new Date(v).toLocaleDateString('vi-VN') : '—'; }
@@ -38,12 +39,13 @@ export default function CustomerDetailPage() {
   const { id } = useParams();
   const isNew = id === 'moi';
   const navigate = useNavigate();
-  const { user, token } = useAuth();
-  const apiBase = import.meta.env.VITE_API_BASE_URL || '';
+  const { user, token, authFetch } = useAuth();
+  const apiBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 
   const [form, setForm] = useState<Record<string, any>>({ discount_tier: 'VIP0', credit_limit: 0 });
   const [salesReps, setSalesReps] = useState<{ id: string; name: string; role: string }[]>([]);
   const [loading, setLoading] = useState(!isNew);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [temporaryPassword, setTemporaryPassword] = useState<string | null>(null);
   const [passwordCopied, setPasswordCopied] = useState(false);
@@ -73,23 +75,22 @@ export default function CustomerDetailPage() {
   const loadCustomer = useCallback(async () => {
     if (isNew || !id) return;
     setLoading(true);
+    setLoadError(null);
     try {
-      // Danh sách và chi tiết cùng đi qua backend đã xác thực. Cách cũ gọi
-      // admin_list_customers rồi find() theo UUID và bỏ qua error; sau khi RPC
-      // được siết quyền, lỗi tải danh sách bị hiểu nhầm thành "không tìm thấy".
-      const res = await fetch(`${apiBase}/api/admin/customers/${encodeURIComponent(id)}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const json = await res.json();
-      if (!res.ok || !json.ok || !json.customer) {
-        throw new Error(json.error || 'Không tải được thông tin khách hàng');
+      // Lấy đúng hồ sơ theo UUID từ API chi tiết với authFetch có tự động refresh token
+      const res = await authFetch(`${apiBase}/api/admin/customers/${encodeURIComponent(id)}`);
+      const payload = await res.json().catch(() => null);
+      if (!res.ok || !payload?.ok || !payload.customer) {
+        throw new Error(payload?.error || 'Không tìm thấy khách hàng');
       }
-      setForm(json.customer);
-    } catch (err: any) {
-      console.error('Lỗi tải chi tiết khách hàng:', err);
-      alert(`Không tải được thông tin khách hàng: ${err?.message || 'Lỗi không xác định'}`);
+      setForm(payload.customer);
+      if (Array.isArray(payload.addresses)) setAddresses(payload.addresses);
+      if (Array.isArray(payload.orders)) setRecentOrders(payload.orders);
+    } catch (error: any) {
+      console.error('Lỗi tải chi tiết khách hàng:', error);
+      setLoadError(error?.message || 'Không tìm thấy khách hàng');
     } finally { setLoading(false); }
-  }, [apiBase, id, isNew, token]);
+  }, [apiBase, authFetch, id, isNew]);
 
   const loadContractPrices = useCallback(async () => {
     if (isNew || !id) return;
@@ -270,9 +271,9 @@ export default function CustomerDetailPage() {
   const resetPassword = async () => {
     if (!confirm(`Tạo mật khẩu tạm mới cho "${form.name}" (mã ${form.partner_code})? Mật khẩu cũ sẽ không dùng được nữa.`)) return;
     try {
-      const res = await fetch(`${apiBase}/api/admin/customers/${id}`, {
+      const res = await authFetch(`${apiBase}/api/admin/customers/${id}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'reset-password' }),
       });
       const data = await res.json();
@@ -285,9 +286,8 @@ export default function CustomerDetailPage() {
   const deleteCustomer = async () => {
     if (!confirm(`Xóa vĩnh viễn khách hàng "${form.name}" (${form.partner_code})?\n\nChỉ khách chưa có đơn hàng mới xóa được. Thao tác này không thể hoàn tác.`)) return;
     try {
-      const res = await fetch(`${apiBase}/api/admin/customers/${id}`, {
+      const res = await authFetch(`${apiBase}/api/admin/customers/${id}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || 'Không xóa được khách hàng');
@@ -345,11 +345,10 @@ export default function CustomerDetailPage() {
     }
 
     try {
-      const res = await fetch(`${apiBase}/api/admin/customers/change-code`, {
+      const res = await authFetch(`${apiBase}/api/admin/customers/change-code`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           customerId: id,
@@ -421,11 +420,39 @@ export default function CustomerDetailPage() {
 
   const [showImportContractPrices, setShowImportContractPrices] = useState(false);
 
-  const canEdit = user?.role === 'admin' || user?.role === 'truong_phong' || user?.role === 'sale';
+  const canEdit = can(user?.role, 'customers.edit');
 
   if (loading) return (
     <div className="flex items-center justify-center py-24 text-slate-500">
       <RefreshCw className="animate-spin mr-2" size={20} /> Đang tải khách hàng...
+    </div>
+  );
+
+  if (loadError) return (
+    <div className="max-w-2xl mx-auto py-16 px-4">
+      <div className="bg-red-50 border border-red-200 rounded-2xl p-6 text-center space-y-4 shadow-sm">
+        <div className="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto">
+          <ShieldAlert size={28} />
+        </div>
+        <div>
+          <h2 className="text-lg font-bold text-slate-800">Không thể tải thông tin khách hàng</h2>
+          <p className="text-sm text-red-600 mt-1">{loadError}</p>
+        </div>
+        <div className="flex items-center justify-center gap-3 pt-2">
+          <button
+            onClick={loadCustomer}
+            className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl text-sm font-medium transition-colors flex items-center gap-1.5"
+          >
+            <RefreshCw size={16} /> Thử lại
+          </button>
+          <button
+            onClick={() => navigate('/khach-hang')}
+            className="px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-sm font-medium transition-colors"
+          >
+            Về danh sách khách hàng
+          </button>
+        </div>
+      </div>
     </div>
   );
 

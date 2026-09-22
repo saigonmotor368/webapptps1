@@ -33,14 +33,15 @@ function money(v: number) { return new Intl.NumberFormat('vi-VN').format(Math.ro
 // CustomerDetailPage để sửa thông tin/MK/hạng/chiết khấu/bảng giá riêng +
 // xem thống kê đơn/công nợ; có nút thêm khách mới + xuất Excel toàn bộ.
 export default function CustomersPage() {
-  const { token, user } = useAuth();
+  const { user, authFetch } = useAuth();
   const navigate = useNavigate();
-  const apiBase = import.meta.env.VITE_API_BASE_URL || '';
+  const apiBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
   const [customers, setCustomers] = useState<any[]>([]);
   const [staffList, setStaffList] = useState<any[]>([]);
   const [groups, setGroups] = useState<string[]>([]);
   const [selectedGroup, setSelectedGroup] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [exporting, setExporting] = useState(false);
   const [onlyPending, setOnlyPending] = useState(false);
@@ -56,6 +57,7 @@ export default function CustomersPage() {
 
   const fetchCustomers = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       // 1. Tải danh sách nhân viên để hiển thị tên và phân công
       const { data: staff } = await supabase
@@ -66,9 +68,7 @@ export default function CustomersPage() {
       setStaffList(staff || []);
 
       // 2. Tải khách hàng qua API backend (dùng service-role + can() kiểm quyền theo G1)
-      const res = await fetch(`${apiBase}/api/admin/customers/list?all=1`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch(`${apiBase}/api/admin/customers/list?all=1`);
       const json = await res.json();
       if (!res.ok || !json.ok) {
         throw new Error(json.error || 'Không tải được danh sách khách hàng');
@@ -77,10 +77,11 @@ export default function CustomersPage() {
       if (Array.isArray(json.groups)) setGroups(json.groups);
     } catch (err: any) {
       console.error('Lỗi tải khách hàng:', err);
+      setLoadError(err?.message || 'Không thể tải danh sách khách hàng');
     } finally {
       setLoading(false);
     }
-  }, [apiBase, token]);
+  }, [apiBase, authFetch]);
 
   useEffect(() => { fetchCustomers(); }, [fetchCustomers]);
 
@@ -139,11 +140,10 @@ export default function CustomersPage() {
 
     setAssigning(true);
     try {
-      const res = await fetch(`${apiBase}/api/admin/customers/assign-rep`, {
+      const res = await authFetch(`${apiBase}/api/admin/customers/assign-rep`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           customerIds: Array.from(selectedIds),
@@ -169,9 +169,7 @@ export default function CustomersPage() {
   const exportExcel = async () => {
     setExporting(true);
     try {
-      const res = await fetch(`${apiBase}/api/admin/customers/export`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await authFetch(`${apiBase}/api/admin/customers/export`);
       if (!res.ok) throw new Error('Không xuất được danh sách khách hàng');
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -187,9 +185,9 @@ export default function CustomersPage() {
     e.stopPropagation();
     if (!confirm(`Reset mật khẩu cho ${customer.name} (${customer.partner_code})?\nMật khẩu hiện tại sẽ không còn sử dụng được.`)) return;
     try {
-      const res = await fetch(`${apiBase}/api/admin/customers/${customer.id}`, {
+      const res = await authFetch(`${apiBase}/api/admin/customers/${customer.id}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'reset-password' }),
       });
       const data = await res.json();
@@ -205,9 +203,8 @@ export default function CustomersPage() {
     e.stopPropagation();
     if (!confirm(`Xóa vĩnh viễn khách hàng ${customer.name} (${customer.partner_code})?\n\nChỉ khách chưa có đơn hàng mới xóa được. Nếu đã giao dịch, hãy vào Sửa để khóa tài khoản.`)) return;
     try {
-      const res = await fetch(`${apiBase}/api/admin/customers/${customer.id}`, {
+      const res = await authFetch(`${apiBase}/api/admin/customers/${customer.id}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || 'Không xóa được khách hàng');
@@ -342,6 +339,24 @@ export default function CustomersPage() {
               {assigning ? 'Đang gán...' : 'Gán hàng loạt'}
             </button>
           </div>
+        </div>
+      )}
+
+      {loadError && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-center justify-between gap-3 text-red-800 animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <ShieldAlert className="w-5 h-5 text-red-600 shrink-0" />
+            <div>
+              <p className="font-semibold text-sm">Không thể tải danh sách khách hàng</p>
+              <p className="text-xs text-red-600 mt-0.5">{loadError}</p>
+            </div>
+          </div>
+          <button
+            onClick={fetchCustomers}
+            className="px-3.5 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 shrink-0"
+          >
+            <RefreshCw size={14} /> Thử lại
+          </button>
         </div>
       )}
 
