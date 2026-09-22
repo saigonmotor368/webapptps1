@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -12,6 +12,16 @@ import {
 } from 'lucide-react';
 
 function money(v: number) { return new Intl.NumberFormat('vi-VN').format(Math.round(Number(v) || 0)) + 'đ'; }
+
+function normalizeSearch(value: unknown) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
+    .toLowerCase()
+    .trim();
+}
 
 interface CartItem {
   productId: string | null;
@@ -126,6 +136,9 @@ export default function PosCreatePage() {
   const [customers, setCustomers] = useState<any[]>([]);
   const [customersLoading, setCustomersLoading] = useState(false);
   const [customersError, setCustomersError] = useState('');
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
+  const [highlightedCustomerIndex, setHighlightedCustomerIndex] = useState(0);
   const [loadingDebt, setLoadingDebt] = useState(false);
   const [loadingProcessOrder, setLoadingProcessOrder] = useState(false);
 
@@ -311,10 +324,10 @@ export default function PosCreatePage() {
   // gõ tay mỗi lần cho khách công ty giao nhiều địa điểm.
   const [savedAddresses, setSavedAddresses] = useState<any[]>([]);
 
-  const loadCustomers = useCallback(async () => {
+  const loadCustomers = useCallback(async (force = false) => {
     if (!token || !user?.id) return;
     const cacheKey = `${user.role || 'staff'}:${user.id}`;
-    const cached = customerCache.get(cacheKey);
+    const cached = force ? undefined : customerCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
       setCustomers(cached.data);
       setCustomersError('');
@@ -357,10 +370,45 @@ export default function PosCreatePage() {
 
   useEffect(() => { loadCustomers(); }, [loadCustomers]);
 
+  const selectedCustomer = useMemo(
+    () => customers.find(customer => customer.id === activeTab.selectedCustomerId) || null,
+    [customers, activeTab.selectedCustomerId],
+  );
+
+  const filteredCustomers = useMemo(() => {
+    const query = normalizeSearch(customerSearch);
+    const rows = query
+      ? customers.filter(customer => normalizeSearch([
+          customer.partner_code,
+          customer.name,
+          customer.company,
+          customer.phone,
+        ].filter(Boolean).join(' ')).includes(query))
+      : customers;
+    return rows.slice(0, 30);
+  }, [customers, customerSearch]);
+
+  useEffect(() => {
+    if (!selectedCustomer) {
+      if (activeTab.selectedCustomerId) setCustomerSearch('');
+      return;
+    }
+    setCustomerSearch([
+      selectedCustomer.partner_code,
+      selectedCustomer.name,
+      selectedCustomer.company,
+      selectedCustomer.phone,
+    ].filter(Boolean).join(' · '));
+  }, [activeTab.id, activeTab.selectedCustomerId, selectedCustomer]);
+
+  useEffect(() => { setHighlightedCustomerIndex(0); }, [customerSearch]);
+
   const handleSelectCustomer = (id: string) => {
     const cust = customers.find(c => c.id === id);
     setSavedAddresses([]);
     if (cust) {
+      setCustomerSearch([cust.partner_code, cust.name, cust.company, cust.phone].filter(Boolean).join(' · '));
+      setCustomerPickerOpen(false);
       updateActiveTab({
         selectedCustomerId: id,
         deliveryName: cust.name || cust.default_shipping_name || '',
@@ -386,7 +434,28 @@ export default function PosCreatePage() {
           }
         });
     } else {
+      setCustomerSearch('');
+      setCustomerPickerOpen(false);
       updateActiveTab({ selectedCustomerId: '', deliveryName: '', deliveryPhone: '', deliveryAddress: '', deliveryAddressId: '', customerDebt: null });
+    }
+  };
+
+  const handleCustomerSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!customerPickerOpen && (event.key === 'ArrowDown' || event.key === 'Enter')) {
+      setCustomerPickerOpen(true);
+      return;
+    }
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setHighlightedCustomerIndex(index => Math.min(index + 1, filteredCustomers.length - 1));
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setHighlightedCustomerIndex(index => Math.max(index - 1, 0));
+    } else if (event.key === 'Enter' && filteredCustomers[highlightedCustomerIndex]) {
+      event.preventDefault();
+      handleSelectCustomer(filteredCustomers[highlightedCustomerIndex].id);
+    } else if (event.key === 'Escape') {
+      setCustomerPickerOpen(false);
     }
   };
 
@@ -861,18 +930,78 @@ export default function PosCreatePage() {
             <h2 className="font-bold text-slate-800 flex items-center gap-2"><User size={18} className="text-green-600" />Thông tin khách hàng &amp; Giao hàng</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="text-xs font-semibold text-slate-500 mb-1.5 block">Chọn khách hàng *</label>
-                <select value={activeTab.selectedCustomerId} onChange={e => handleSelectCustomer(e.target.value)} disabled={customersLoading}
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20">
-                  <option value="">{customersLoading ? 'Đang tải danh sách khách hàng...' : `-- Chọn Khách Hàng (${customers.length}) --`}</option>
-                  {customers.map(c => (
-                    <option key={c.id} value={c.id}>{c.partner_code ? `${c.partner_code} · ` : ''}{c.name}{c.company ? ` · ${c.company}` : ''}{c.phone ? ` · ${c.phone}` : ''}{c.verification_status && c.verification_status !== 'verified' ? ' — chưa xác thực' : ''}</option>
-                  ))}
-                </select>
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                  <label className="text-xs font-semibold text-slate-500">Tìm và chọn khách hàng *</label>
+                  <div className="flex items-center gap-2">
+                    <button type="button" onClick={() => void loadCustomers(true)} disabled={customersLoading}
+                      className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-green-700 disabled:opacity-50" title="Làm mới danh sách khách hàng">
+                      <RefreshCw size={12} className={customersLoading ? 'animate-spin' : ''} /> Làm mới
+                    </button>
+                    <button type="button" onClick={() => window.open('/khach-hang/moi', '_blank', 'noopener,noreferrer')}
+                      className="inline-flex items-center gap-1 text-[11px] font-bold text-green-700 hover:text-green-800">
+                      <Plus size={13} /> Khách hàng mới
+                    </button>
+                  </div>
+                </div>
+                <div className="relative">
+                  <div className={`flex items-center rounded-xl border bg-white transition-shadow ${customerPickerOpen ? 'border-green-500 ring-2 ring-green-500/15' : 'border-slate-200'}`}>
+                    <Search size={17} className="ml-3 shrink-0 text-slate-400" />
+                    <input
+                      value={customerSearch}
+                      onChange={event => { setCustomerSearch(event.target.value); setCustomerPickerOpen(true); }}
+                      onFocus={event => { event.currentTarget.select(); setCustomerPickerOpen(true); }}
+                      onBlur={() => window.setTimeout(() => setCustomerPickerOpen(false), 160)}
+                      onKeyDown={handleCustomerSearchKeyDown}
+                      disabled={customersLoading}
+                      placeholder={customersLoading ? 'Đang tải danh sách khách hàng...' : 'Gõ mã KH, tên, công ty hoặc SĐT...'}
+                      className="min-w-0 flex-1 bg-transparent px-3 py-2.5 text-sm outline-none placeholder:text-slate-400"
+                    />
+                    {(customerSearch || activeTab.selectedCustomerId) && (
+                      <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => handleSelectCustomer('')}
+                        className="mr-2 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600" title="Bỏ chọn khách hàng">
+                        <X size={15} />
+                      </button>
+                    )}
+                  </div>
+
+                  {customerPickerOpen && !customersLoading && (
+                    <div className="absolute z-40 mt-2 max-h-80 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl">
+                      <div className="flex items-center justify-between px-2 py-1.5 text-[11px] text-slate-400">
+                        <span>{filteredCustomers.length < customers.length ? `Hiển thị ${filteredCustomers.length} kết quả phù hợp` : `${customers.length} khách hàng đang hoạt động`}</span>
+                        <span>↑↓ chọn · Enter xác nhận</span>
+                      </div>
+                      {filteredCustomers.length === 0 ? (
+                        <div className="px-3 py-8 text-center text-sm text-slate-500">
+                          <p>Không tìm thấy khách hàng phù hợp.</p>
+                          <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => window.open('/khach-hang/moi', '_blank', 'noopener,noreferrer')}
+                            className="mt-2 font-bold text-green-700 hover:underline">+ Tạo khách hàng mới</button>
+                        </div>
+                      ) : filteredCustomers.map((customer, index) => (
+                        <button type="button" key={customer.id}
+                          onMouseDown={event => event.preventDefault()}
+                          onMouseEnter={() => setHighlightedCustomerIndex(index)}
+                          onClick={() => handleSelectCustomer(customer.id)}
+                          className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left ${index === highlightedCustomerIndex ? 'bg-green-50' : 'hover:bg-slate-50'}`}>
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-xs font-extrabold text-emerald-700">
+                            {String(customer.name || 'KH').trim().slice(0, 2).toUpperCase()}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="flex flex-wrap items-center gap-1.5">
+                              <span className="truncate text-sm font-bold text-slate-800">{customer.name || 'Chưa có tên'}</span>
+                              {customer.verification_status && customer.verification_status !== 'verified' && <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-700">CHƯA XÁC THỰC</span>}
+                            </span>
+                            <span className="block truncate text-xs text-slate-500">{[customer.partner_code, customer.company, customer.phone].filter(Boolean).join(' · ') || 'Chưa cập nhật thông tin liên hệ'}</span>
+                          </span>
+                          {activeTab.selectedCustomerId === customer.id && <CheckCircle2 size={17} className="shrink-0 text-green-600" />}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 {customersError && (
                   <div className="mt-1.5 flex items-center justify-between gap-2 rounded-lg bg-red-50 px-2.5 py-2 text-xs text-red-700">
                     <span>{customersError}</span>
-                    <button type="button" onClick={() => void loadCustomers()} className="shrink-0 font-bold underline">Tải lại</button>
+                    <button type="button" onClick={() => void loadCustomers(true)} className="shrink-0 font-bold underline">Tải lại</button>
                   </div>
                 )}
               </div>
