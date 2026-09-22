@@ -124,6 +124,8 @@ export default function PosCreatePage() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [customers, setCustomers] = useState<any[]>([]);
+  const [customersLoading, setCustomersLoading] = useState(false);
+  const [customersError, setCustomersError] = useState('');
   const [loadingDebt, setLoadingDebt] = useState(false);
   const [loadingProcessOrder, setLoadingProcessOrder] = useState(false);
 
@@ -310,34 +312,33 @@ export default function PosCreatePage() {
   const [savedAddresses, setSavedAddresses] = useState<any[]>([]);
 
   const loadCustomers = useCallback(async () => {
-    const isSale = user?.role === 'sale' && user.id && user.id !== 'legacy-admin';
-    const cacheKey = isSale ? `sale:${user.id}` : 'admin';
+    if (!token || !user?.id) return;
+    const cacheKey = `${user.role || 'staff'}:${user.id}`;
     const cached = customerCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
       setCustomers(cached.data);
+      setCustomersError('');
       return;
     }
 
+    setCustomersLoading(true);
+    setCustomersError('');
     try {
       let request = customerLoads.get(cacheKey);
       if (!request) {
         request = (async () => {
-          if (isSale) {
-            // LƯU Ý: cột đúng là "company", không phải "company_name" — trước đây
-            // sai tên cột khiến query này lỗi 400 im lặng, sale KHÔNG chọn được
-            // khách hàng nào cả (bug Giai đoạn C, 2026-09-10).
-            const { data, error } = await supabase
-              .from('vip_accounts')
-              .select('id, name, phone, partner_code, company, discount_tier, credit_limit, default_shipping_address, default_shipping_name, default_shipping_phone, verification_status')
-              .eq('sales_rep_id', user.id)
-              .eq('is_active', true);
-            if (error) throw error;
-            return data || [];
-          }
-
-          const { data, error } = await supabase.rpc('admin_list_customers');
-          if (error) throw error;
-          return data || [];
+          // RPC admin_list_customers đã bị khóa theo migration bảo mật. Luôn đi
+          // qua API có xác thực JWT: Admin thấy toàn bộ khách; Sale chỉ nhận
+          // khách được phân công theo kiểm tra role ở backend.
+          const apiBase = getApiBase();
+          const response = await fetch(`${apiBase}/api/admin/customers/list?all=1`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) throw new Error(payload.error || 'Không tải được danh sách khách hàng');
+          return (payload.customers || [])
+            .filter((customer: any) => customer.is_active !== false)
+            .sort((a: any, b: any) => String(a.name || '').localeCompare(String(b.name || ''), 'vi'));
         })().finally(() => customerLoads.delete(cacheKey));
         customerLoads.set(cacheKey, request);
       }
@@ -345,10 +346,14 @@ export default function PosCreatePage() {
       const data = await request;
       customerCache.set(cacheKey, { data, expiresAt: Date.now() + CUSTOMER_CACHE_TTL_MS });
       setCustomers(data);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Lỗi tải khách hàng:', err);
+      setCustomers([]);
+      setCustomersError(err?.message || 'Không tải được danh sách khách hàng');
+    } finally {
+      setCustomersLoading(false);
     }
-  }, [user]);
+  }, [token, user]);
 
   useEffect(() => { loadCustomers(); }, [loadCustomers]);
 
@@ -857,13 +862,19 @@ export default function PosCreatePage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="text-xs font-semibold text-slate-500 mb-1.5 block">Chọn khách hàng *</label>
-                <select value={activeTab.selectedCustomerId} onChange={e => handleSelectCustomer(e.target.value)}
+                <select value={activeTab.selectedCustomerId} onChange={e => handleSelectCustomer(e.target.value)} disabled={customersLoading}
                   className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20">
-                  <option value="">-- Chọn Khách Hàng --</option>
+                  <option value="">{customersLoading ? 'Đang tải danh sách khách hàng...' : `-- Chọn Khách Hàng (${customers.length}) --`}</option>
                   {customers.map(c => (
-                    <option key={c.id} value={c.id}>{c.name} ({c.phone || ''}){c.verification_status && c.verification_status !== 'verified' ? ' — chưa xác thực' : ''}</option>
+                    <option key={c.id} value={c.id}>{c.partner_code ? `${c.partner_code} · ` : ''}{c.name}{c.company ? ` · ${c.company}` : ''}{c.phone ? ` · ${c.phone}` : ''}{c.verification_status && c.verification_status !== 'verified' ? ' — chưa xác thực' : ''}</option>
                   ))}
                 </select>
+                {customersError && (
+                  <div className="mt-1.5 flex items-center justify-between gap-2 rounded-lg bg-red-50 px-2.5 py-2 text-xs text-red-700">
+                    <span>{customersError}</span>
+                    <button type="button" onClick={() => void loadCustomers()} className="shrink-0 font-bold underline">Tải lại</button>
+                  </div>
+                )}
               </div>
               <div>
                 <label className="text-xs font-semibold text-slate-500 mb-1.5 flex items-center gap-1">
