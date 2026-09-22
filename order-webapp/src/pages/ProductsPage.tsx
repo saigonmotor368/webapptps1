@@ -192,6 +192,7 @@ export default function ProductsPage() {
   const searchAbortRef = useRef<AbortController | null>(null);
   const searchRequestRef = useRef(0);
   const catalogAbortRef = useRef<AbortController | null>(null);
+  const cutoffLoadedRef = useRef(false);
 
   // Lưu danh sách yêu thích
   useEffect(() => {
@@ -200,7 +201,7 @@ export default function ProductsPage() {
     } catch {}
   }, [favoriteIds]);
 
-  // Tải danh sách sản phẩm (Search API)
+  // Tìm kiếm qua Search API khi catalog cục bộ chưa sẵn sàng
   const loadProducts = useCallback(
     async (rawQuery: string, openDropdown = true) => {
       const query = rawQuery.trim();
@@ -241,12 +242,6 @@ export default function ProductsPage() {
     },
     [logout, navigate, session?.id]
   );
-
-  // Tải trước nhóm sản phẩm ban đầu
-  useEffect(() => {
-    void loadProducts('', false);
-    return () => searchAbortRef.current?.abort();
-  }, [loadProducts]);
 
   // Tải 20 mặt hàng thường đặt
   useEffect(() => {
@@ -380,6 +375,8 @@ export default function ProductsPage() {
   // Lấy ngày giao sớm nhất do server tính theo giờ Việt Nam. Không dùng giờ
   // trên máy khách để quyết định vì đồng hồ thiết bị có thể sai hoặc bị đổi múi giờ.
   useEffect(() => {
+    if (cutoffLoadedRef.current) return;
+    cutoffLoadedRef.current = true;
     void api.orderConfig().then((info) => {
       setCutoffInfo({ earliestDate: info.earliestDate, cutoffTimeStr: info.cutoffTimeStr });
       updateActiveTab((tab) =>
