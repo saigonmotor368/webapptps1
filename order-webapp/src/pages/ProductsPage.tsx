@@ -166,6 +166,7 @@ export default function ProductsPage() {
   const [selectedResultIndex, setSelectedResultIndex] = useState(0);
   const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
+  const [cutoffInfo, setCutoffInfo] = useState<{ earliestDate: string; cutoffTimeStr: string } | null>(null);
   const [selectedCategory, setSelectedCategory] = useState('');
   const [recentOrders, setRecentOrders] = useState<Order[]>([]);
   const [frequentItems, setFrequentItems] = useState<FrequentItem[]>([]);
@@ -375,6 +376,19 @@ export default function ProductsPage() {
     },
     [activeTab.id]
   );
+
+  // Lấy ngày giao sớm nhất do server tính theo giờ Việt Nam. Không dùng giờ
+  // trên máy khách để quyết định vì đồng hồ thiết bị có thể sai hoặc bị đổi múi giờ.
+  useEffect(() => {
+    void api.orderConfig().then((info) => {
+      setCutoffInfo({ earliestDate: info.earliestDate, cutoffTimeStr: info.cutoffTimeStr });
+      updateActiveTab((tab) =>
+        tab.deliveryDate < info.earliestDate
+          ? { ...tab, deliveryDate: info.earliestDate }
+          : tab
+      );
+    }).catch(() => undefined);
+  }, [updateActiveTab]);
 
   // Thao tác Thêm / Sửa số lượng / Ghi chú dòng
   const handleAddProduct = (
@@ -673,7 +687,11 @@ export default function ProductsPage() {
         </div>
         <div className="inline-flex items-center gap-2 self-start sm:self-auto px-3.5 py-1.5 rounded-xl bg-amber-500/15 border border-amber-400/35 text-amber-900 text-xs font-bold shadow-xs">
           <Clock size={15} className="text-[#e0742f]" />
-          <span>Vui lòng chọn ngày và ca giao hàng phù hợp</span>
+          <span>
+            {cutoffInfo
+              ? `Ngày giao sớm nhất: ${cutoffInfo.earliestDate} · Chốt ${cutoffInfo.cutoffTimeStr}`
+              : 'Vui lòng chọn ngày và ca giao hàng phù hợp'}
+          </span>
         </div>
       </div>
 

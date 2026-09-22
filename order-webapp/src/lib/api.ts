@@ -120,6 +120,16 @@ export const api = {
     request<ProductCatalogResponse>('/api/customer/products?catalog=1', { signal }),
 
   orders: () => request<{ ok: true; orders: Order[] }>('/api/customer/orders'),
+  orderConfig: () =>
+    request<{
+      ok: true;
+      earliestDate: string;
+      deliveryDate: string;
+      cutoffAt: string;
+      cutoffTimeStr: string;
+      minutesLeft: number;
+      isLate: boolean;
+    }>('/api/customer/order-config'),
   frequentItems: (signal?: AbortSignal) => request<{ ok: true; items: FrequentItem[] }>('/api/customer/frequent-items', { signal }),
 
   createOrder: (payload: {
