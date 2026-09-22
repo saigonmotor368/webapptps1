@@ -34,6 +34,7 @@ export default function SaleLayout() {
   const { user, logout } = useAuth();
   const location = useLocation();
   const [showMore, setShowMore] = useState(false);
+  const [sidebarExpanded, setSidebarExpanded] = useState(false);
 
   const isCustomer = user?.userType === 'customer';
   const role = user?.role ?? '';
@@ -76,12 +77,16 @@ export default function SaleLayout() {
   return (
     <div className="flex h-screen bg-[#F4F7F6] text-slate-800 overflow-hidden font-sans">
       {/* Desktop Sidebar */}
-      <aside className="hidden md:flex flex-col w-64 bg-white border-r border-slate-200 shadow-sm z-20">
-        <div className="p-5 border-b border-slate-100 flex items-center gap-3">
+      <aside
+        onMouseEnter={() => setSidebarExpanded(true)}
+        onMouseLeave={() => setSidebarExpanded(false)}
+        className={`hidden md:flex shrink-0 flex-col overflow-hidden bg-white border-r border-slate-200 shadow-sm z-20 transition-[width] duration-200 ease-out ${sidebarExpanded ? 'w-64' : 'w-[76px]'}`}
+      >
+        <div className={`h-[88px] border-b border-slate-100 flex items-center gap-3 transition-[padding] duration-200 ${sidebarExpanded ? 'px-5' : 'px-3'}`}>
           <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm border border-slate-100 shrink-0 overflow-hidden">
             <img src="/tps1-logo-transparent.png" alt="Thực Phẩm Số Một" className="w-10 h-10 object-contain" />
           </div>
-          <div>
+          <div className={`min-w-[150px] transition-opacity duration-150 ${sidebarExpanded ? 'opacity-100' : 'opacity-0'}`}>
             <h1 className="font-extrabold text-green-900 leading-tight tracking-tight">TPS1 Quản lý</h1>
             <p className="text-[11px] text-slate-500 mt-0.5">
               {isCustomer ? `Khách hàng ${user?.tier || ''}`.trim() : (ROLE_LABELS[role] || role)}
@@ -89,23 +94,25 @@ export default function SaleLayout() {
           </div>
         </div>
 
-        <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
+        <nav className={`flex-1 space-y-1 overflow-y-auto overflow-x-hidden transition-[padding] duration-200 ${sidebarExpanded ? 'p-4' : 'px-2.5 py-4'}`}>
           {NAV_GROUPS.map((group) => {
             const groupItems = navItems.filter((item) => (NAV_GROUP_BY_PATH[item.path] || 'sales') === group.key);
             if (groupItems.length === 0) return null;
             return (
               <div key={group.key} className="mb-4 last:mb-0">
-                <p className="px-4 mb-1.5 text-[10px] font-extrabold uppercase tracking-[0.14em] text-slate-400">{group.label}</p>
+                <p className={`h-4 mb-1.5 whitespace-nowrap px-4 text-[10px] font-extrabold uppercase tracking-[0.14em] text-slate-400 transition-opacity ${sidebarExpanded ? 'opacity-100' : 'opacity-0'}`}>{group.label}</p>
                 <div className="space-y-0.5">
                   {groupItems.map((item) => (
                     <Link
                       key={item.path}
                       to={item.path}
-                      className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors ${
+                      title={!sidebarExpanded ? item.label : undefined}
+                      className={`flex items-center rounded-xl py-2.5 text-sm font-semibold transition-all ${sidebarExpanded ? 'gap-3 px-4' : 'justify-center px-0'} ${
                         isActivePath(item.path) ? 'bg-green-100 text-green-800 shadow-sm' : 'text-slate-600 hover:bg-green-50 hover:text-green-700'
                       }`}
                     >
-                      {item.icon} {item.label}
+                      <span className="shrink-0">{item.icon}</span>
+                      <span className={`min-w-[150px] whitespace-nowrap transition-opacity ${sidebarExpanded ? 'opacity-100' : 'opacity-0'}`}>{item.label}</span>
                     </Link>
                   ))}
                 </div>
@@ -114,20 +121,22 @@ export default function SaleLayout() {
           })}
         </nav>
 
-        <div className="p-4 border-t border-slate-100">
-          <div className="flex items-center gap-3 px-4 py-3 bg-slate-50 rounded-xl mb-2">
+        <div className={`border-t border-slate-100 transition-[padding] duration-200 ${sidebarExpanded ? 'p-4' : 'p-2.5'}`}>
+          <div className={`flex items-center bg-slate-50 rounded-xl mb-2 ${sidebarExpanded ? 'gap-3 px-4 py-3' : 'justify-center p-2'}`}>
             <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-sm uppercase">
               {user?.name?.substring(0, 2) || 'AD'}
             </div>
-            <div className="flex-1 truncate">
+            <div className={`min-w-[150px] flex-1 truncate transition-opacity ${sidebarExpanded ? 'opacity-100' : 'opacity-0'}`}>
               <p className="text-sm font-semibold truncate">{user?.name || 'User'}</p>
             </div>
           </div>
           <button
             onClick={logout}
-            className="flex w-full items-center gap-3 px-4 py-2.5 rounded-xl text-red-600 hover:bg-red-50 font-medium transition-colors"
+            title={!sidebarExpanded ? 'Đăng xuất' : undefined}
+            className={`flex w-full items-center rounded-xl py-2.5 text-red-600 hover:bg-red-50 font-medium transition-all ${sidebarExpanded ? 'gap-3 px-4' : 'justify-center px-0'}`}
           >
-            <LogOut size={18} /> Đăng xuất
+            <LogOut size={18} className="shrink-0" />
+            <span className={`min-w-[150px] whitespace-nowrap transition-opacity ${sidebarExpanded ? 'opacity-100' : 'opacity-0'}`}>Đăng xuất</span>
           </button>
         </div>
       </aside>
@@ -146,7 +155,7 @@ export default function SaleLayout() {
         </div>
         <div className="sticky top-0 z-10 h-1 bg-gradient-to-r from-[#0f6f4b] via-[#18a66f] to-[#f0a04b]" />
 
-        <div className="p-3 sm:p-4 md:p-6 xl:p-8 flex-1 min-w-0 w-full max-w-7xl mx-auto pb-24 md:pb-8">
+        <div className="p-3 sm:p-4 md:p-5 xl:p-6 2xl:p-8 flex-1 min-w-0 w-full max-w-[1680px] mx-auto pb-24 md:pb-8">
           <Outlet />
         </div>
       </main>
