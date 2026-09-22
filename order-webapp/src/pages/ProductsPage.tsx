@@ -253,7 +253,25 @@ export default function ProductsPage() {
     return () => controller.abort();
   }, []);
 
-  // Tải toàn bộ Catalog vào bộ nhớ để tìm kiếm tức thì
+  // Hiển thị nhóm hàng đầu tiên trước. Không bắt khách chờ toàn bộ catalog
+  // 5.000+ mặt hàng; tìm kiếm sẽ gọi API theo từ khóa trong lúc catalog nền
+  // chưa sẵn sàng.
+  useEffect(() => {
+    const controller = new AbortController();
+    void api.products({}, controller.signal)
+      .then((res) => {
+        if (controller.signal.aborted) return;
+        setSearchResults(res.products || []);
+        setCatalogLoading(false);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setCatalogLoading(false);
+      });
+    return () => controller.abort();
+  }, []);
+
+  // Tải toàn bộ Catalog vào bộ nhớ ở nền để tìm kiếm tức thì cho các lần sau.
+  // Trì hoãn nhẹ để request đầu tiên và khung thao tác của khách được ưu tiên.
   useEffect(() => {
     const customerId = session?.id;
     if (!customerId) return;
@@ -287,7 +305,7 @@ export default function ProductsPage() {
 
     const controller = new AbortController();
     catalogAbortRef.current = controller;
-    void api
+    const timer = window.setTimeout(() => void api
       .productCatalog(controller.signal)
       .then((catalog) => {
         if (controller.signal.aborted) return;
@@ -306,9 +324,12 @@ export default function ProductsPage() {
       })
       .finally(() => {
         if (!controller.signal.aborted) setCatalogLoading(false);
-      });
+      }), 1200);
 
-    return () => controller.abort();
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
   }, [session?.id]);
 
   // Phím tắt F3 để focus ô tìm kiếm
