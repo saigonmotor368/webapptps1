@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { can, ROLE_LABELS } from '../lib/permissions';
 import {
   LayoutDashboard, ShoppingCart, Users, PackageOpen, LogOut, PlusSquare, Package,
-  Wallet, BarChart3, MoreHorizontal, X, ClipboardList, Tag, Truck,
+  Wallet, BarChart3, MoreHorizontal, X, ClipboardList, Tag, Truck, FileSpreadsheet,
 } from 'lucide-react';
 
 const NAV_GROUPS = [
@@ -21,6 +21,7 @@ const NAV_GROUP_BY_PATH: Record<string, string> = {
   '/khach-hang': 'sales',
   '/hang-hoa': 'sales',
   '/ap-gia-hang-ngay': 'sales',
+  '/bang-gia': 'sales',
   '/don-tong': 'operations',
   '/soan-hang': 'operations',
   '/cong-no': 'finance',
@@ -51,6 +52,8 @@ export default function SaleLayout() {
         can(role, 'orders.view') && { path: '/don-hang', icon: <ShoppingCart size={20} />, label: 'Quản lý Đơn hàng', perm: 'orders.view' },
         // Tạo đơn POS — chỉ sale/admin/truong_phong
         can(role, 'orders.create') && { path: '/tao-don-hang', icon: <PlusSquare size={20} />, label: 'Tạo đơn (POS)', perm: 'orders.create' },
+        // Bảng giá G2 — admin/truong_phong/sale/thu_mua
+        can(role, 'pricing.edit') && { path: '/bang-gia', icon: <FileSpreadsheet size={20} />, label: 'Bảng giá (G2)', perm: 'pricing.edit' },
         // Áp giá — admin/truong_phong/sale/thu_mua (Thu mua báo giá lại, sale áp giá rồi soạn đơn ra phiếu tạm)
         can(role, 'pricing.edit') && { path: '/ap-gia-hang-ngay', icon: <Tag size={20} />, label: 'Áp giá hàng ngày', perm: 'pricing.edit' },
         // Đơn tổng (Thu mua) — admin/truong_phong/sale/thu_mua/kho (yêu cầu 2026-09-20)
