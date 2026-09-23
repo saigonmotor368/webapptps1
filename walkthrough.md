@@ -36,9 +36,38 @@ Hệ thống đã được nâng cấp toàn diện chức năng "Tạo Đơn H�
 - Rollback không xoá các cột legacy như `pricing_status`, `final_unit_price`, `department_id`; chỉ rollback các cột G1 mới và dừng nếu còn đơn `merged`.
 - Migration snapshot dùng `price_resolution_status` riêng để không xung đột với `orders.pricing_status` cũ (`provisional/finalized`).
 
-### Kiểm tra trước G2
+### Kết quả kiểm thử thực tế G1.2 (Đã thông qua)
 
-1. Chạy các migration G1 trên database staging.
-2. Chạy `test_pricebook_fixtures.sql` bằng SQL Editor staging.
-3. Gọi `scratch/test_resolve.js` với session token staging.
-4. Kiểm tra fallback, bảng giá hết hạn, RLS và rollback trong một database staging riêng.
+Lệnh test:
+```powershell
+$env:API_BASE_URL="http://localhost:3000"
+$env:ORDER_SESSION_TOKEN="77396351-669f-49b4-ab89-4164b3ef9b45"
+node scratch/test_resolve.js "5d3330d0-8438-4c85-9b00-bc1b3291dee3" "3f4ea85a-6de5-4bf4-9409-2e1c7c45a0a2"
+```
+
+Kết quả phản hồi HTTP 200 OK:
+```json
+{
+  "status": 200,
+  "body": {
+    "data": [
+      {
+        "product_id": "5d3330d0-8438-4c85-9b00-bc1b3291dee3",
+        "price": 95000,
+        "price_source": "customer_price_book",
+        "price_book_id": "21d79706-e2bd-49e1-9f4f-1121b0770c5e"
+      },
+      {
+        "product_id": "3f4ea85a-6de5-4bf4-9409-2e1c7c45a0a2",
+        "price": 150000,
+        "price_source": "general_fallback",
+        "price_book_id": "d3dbbe46-2ecf-4cc2-8f6b-549920bc78e1"
+      }
+    ]
+  }
+}
+```
+- **Sản phẩm 1 (`5d3330d0-8438-4c85-9b00-bc1b3291dee3`)**: Lấy đúng giá từ bảng giá riêng của khách (`customer_price_book`) với giá 95.000đ.
+- **Sản phẩm 2 (`3f4ea85a-6de5-4bf4-9409-2e1c7c45a0a2`)**: Bảng giá riêng không có món này -> Tự động fallback sang bảng giá chung (`general_fallback`) với giá 150.000đ.
+- Bảng giá hết hạn (`PB_EXPIRED`) và bảng giá nháp (`PB_DRAFT`) được lọc bỏ chính xác, không bị nhầm lẫn.
+- Đơn gộp giả định (`status = 'merged'`) cùng `order_merge_audit` chạy sạch sẽ qua migration fixture.
