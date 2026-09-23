@@ -31,21 +31,7 @@ export function CompanyProfileWidget() {
   const locale: Locale = pathname.startsWith("/en") ? "en" : "vi";
   const text = profileText[locale];
   return (
-    <>
-      <aside className="company-profile-widget" aria-label={text.aria}>
-        <a
-          href={siteConfig.profilePdfUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="company-profile-widget__button company-profile-widget__button--compact"
-        >
-          <FileText size={16} />
-          <span>{locale === "en" ? "Profile" : "HSNL"}</span>
-          <MoveUpRight size={15} />
-        </a>
-      </aside>
-
-      <div className={`company-profile-fab${mobileOpen ? " is-open" : ""}`} aria-label={text.aria}>
+    <div className={`company-profile-fab${mobileOpen ? " is-open" : ""}`} aria-label={text.aria}>
         <button
           type="button"
           className="company-profile-fab__trigger"
@@ -78,8 +64,7 @@ export function CompanyProfileWidget() {
             </a>
           </div>
         </div>
-      </div>
-    </>
+    </div>
   );
 }
 

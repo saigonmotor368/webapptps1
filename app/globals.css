@@ -8011,6 +8011,36 @@ a {
   }
 }
 
+/* Compact laptops do not have enough room for the full navigation plus two
+   header CTAs. Switch to the menu before any label can collide with the logo. */
+@media (min-width: 769px) and (max-width: 1360px) {
+  .site-header__inner {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 12px;
+  }
+
+  .site-brand {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .site-header__actions {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .site-menu-toggle {
+    display: inline-flex;
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .site-nav,
+  .site-nav--minimal {
+    display: none !important;
+  }
+}
+
 /* Customer self-service profile editor */
 body:has(.customer-profile-modal) { overflow:hidden; }
 .customer-panel__tools { display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end; }
