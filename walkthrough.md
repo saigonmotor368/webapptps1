@@ -26,3 +26,19 @@ Hệ thống đã được nâng cấp toàn diện chức năng "Tạo Đơn H�
 2. Copy và Chạy nội dung trong file [tps1-miniapp/supabase/migrations/20260824_admin_pos_create_order.sql](file:///d:/thuc_pham_so_mot/thuc_pham_so_mot/tps1-miniapp/supabase/migrations/20260824_admin_pos_create_order.sql) vào công cụ SQL Editor.
 3. Nhấn **RUN** để khởi tạo hàm.
 4. Mở `quanly/index.html` hoặc tải lại trang Vercel để trải nghiệm thành quả ngay lập tức!
+
+## 4. G1.2 — Bảng giá và bảo mật (bổ sung)
+
+- Bảng giá chung active có thể được đọc qua policy giới hạn; bảng giá riêng, assignment, import, audit và dữ liệu phân công không được client truy cập trực tiếp.
+- API resolve giá dùng `POST` với `orderSessionToken`, lấy `customer_id` từ `customer_sessions`, kiểm tra session còn hạn và kiểm tra hiệu lực bảng giá/assignment/item.
+- Giá riêng thiếu dòng sẽ fallback sang bảng giá chung và trả về `price_source=general_fallback`.
+- Fixture staging có bảng giá chung, bảng giá riêng, bảng giá hết hạn, fallback và đơn `merged`; fixture có thể chạy lại.
+- Rollback không xoá các cột legacy như `pricing_status`, `final_unit_price`, `department_id`; chỉ rollback các cột G1 mới và dừng nếu còn đơn `merged`.
+- Migration snapshot dùng `price_resolution_status` riêng để không xung đột với `orders.pricing_status` cũ (`provisional/finalized`).
+
+### Kiểm tra trước G2
+
+1. Chạy các migration G1 trên database staging.
+2. Chạy `test_pricebook_fixtures.sql` bằng SQL Editor staging.
+3. Gọi `scratch/test_resolve.js` với session token staging.
+4. Kiểm tra fallback, bảng giá hết hạn, RLS và rollback trong một database staging riêng.
