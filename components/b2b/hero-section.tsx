@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import {
   ShieldCheck,
   Award,
@@ -18,8 +19,14 @@ import {
   Sparkles,
 } from "lucide-react";
 import { siteConfig } from "@/lib/site";
-import { ThreeBackground } from "@/components/b2b/three-background";
 import { trackMetaLead } from "@/components/meta-pixel";
+
+// WebGL is decorative only. Defer it so the hero copy, image and lead CTA
+// can render without waiting for the Three.js bundle on the critical path.
+const ThreeBackground = dynamic(
+  () => import("@/components/b2b/three-background").then((mod) => mod.ThreeBackground),
+  { ssr: false, loading: () => null },
+);
 
 const texts = {
   vi: {
