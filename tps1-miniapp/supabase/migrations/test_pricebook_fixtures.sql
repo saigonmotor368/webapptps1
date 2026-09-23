@@ -16,12 +16,15 @@ begin
   delete from public.price_books
   where code in ('PB_GEN_2026', 'PB_CUST_TEST', 'PB_DRAFT', 'PB_EXPIRED');
 
-  -- Lấy 1 khách hàng test (giả định có KH active)
-  select id into v_customer_id from public.vip_accounts where is_active = true limit 1;
+  -- Lấy khách hàng test theo session token mà anh đã test
+  select customer_id into v_customer_id 
+  from public.customer_sessions 
+  where token = '77396351-669f-49b4-ab89-4164b3ef9b45' 
+  limit 1;
   
-  -- Lấy 2 sản phẩm test
-  select id into v_product_1 from public.products where active = true limit 1;
-  select id into v_product_2 from public.products where id != v_product_1 and active = true limit 1;
+  -- Gán cứng 2 sản phẩm mà anh vừa yêu cầu test
+  v_product_1 := '5d3330d0-8438-4c85-9b00-bc1b3291dee3';
+  v_product_2 := '3f4ea85a-6de5-4bf4-9409-2e1c7c45a0a2';
 
   if v_customer_id is null or v_product_1 is null then
     raise notice 'Không đủ dữ liệu khách hàng hoặc sản phẩm để tạo fixture';
@@ -64,21 +67,31 @@ begin
   insert into public.price_book_customer_assignments (price_book_id, customer_id, valid_from, valid_to)
   values (v_expired_pb_id, v_customer_id, now() - interval '30 days', now() - interval '1 day');
 
+  -- Dọn dẹp dữ liệu đơn gộp thử nghiệm cũ nếu có
+  delete from public.orders 
+  where customer_id = v_customer_id 
+    and status = 'merged' 
+    and order_code like '%-M-%';
+
   -- 5. Tạo dữ liệu giả định cho trạng thái đơn MERGED
-  select id into v_order_id from public.orders where customer_id = v_customer_id limit 1;
+  select id into v_order_id 
+  from public.orders 
+  where customer_id = v_customer_id 
+    and status != 'merged' 
+  limit 1;
   
   if v_order_id is not null then
-    -- Đơn cũ bị gộp
+    -- Đơn cũ bị gộp (phải có pricing_status = 'finalized' để thỏa mãn constraint orders_processing_requires_final_price)
     insert into public.orders (
       order_code, customer_id, customer_code, customer_name, customer_phone,
       source, idempotency_key,
-      status, subtotal, grand_total, merged_into_order_id
+      status, pricing_status, subtotal, grand_total, merged_into_order_id
     )
     select 
       order_code || '-M-' || substr(gen_random_uuid()::text, 1, 8),
       customer_id, customer_code, customer_name, customer_phone,
-      source, idempotency_key || '-merged-' || substr(gen_random_uuid()::text, 1, 8),
-      'merged', 100000, 100000, v_order_id
+      source, coalesce(idempotency_key, gen_random_uuid()::text) || '-merged-' || substr(gen_random_uuid()::text, 1, 8),
+      'merged', 'finalized', 100000, 100000, v_order_id
     from public.orders
     where id = v_order_id
     returning id into v_merged_order_id;
