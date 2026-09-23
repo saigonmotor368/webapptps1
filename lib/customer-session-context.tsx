@@ -20,7 +20,16 @@ export function CustomerSessionProvider({ children }: { children: React.ReactNod
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Customer authentication is only used by the legacy portal. Avoid an
+    // extra API round trip on every SEO/Google Ads landing page.
+    if (!pathname.startsWith("/portal")) {
+      setSession(null);
+      setLoading(false);
+      return;
+    }
+
     let cancelled = false;
+    setLoading(true);
 
     fetch("/api/customer/me", { cache: "no-store" })
       .then((res) => res.json())

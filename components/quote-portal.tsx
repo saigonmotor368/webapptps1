@@ -394,8 +394,8 @@ export function QuotePortal({ initialNotice = null, locale = "vi" }: QuotePortal
     clearCart(); // Clear cart after successful submission
     
     // Trigger Google Ads Conversion Tracking
-    if (typeof window !== "undefined" && typeof (window as any).gtag === "function") {
-      (window as any).gtag("event", "conversion", {
+    if (typeof window !== "undefined" && typeof window.gtag === "function") {
+      window.gtag("event", "conversion", {
           "send_to": "AW-18295927026/QigLCM2X-8kcEPLhlpRE",
           "value": 1.0,
           "currency": "VND"

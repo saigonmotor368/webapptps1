@@ -232,6 +232,13 @@ export function LeadCaptureSection({ locale = "vi" }: { locale?: "vi" | "en" }) 
       if (res.ok) {
         setFormState("success");
         trackMetaLead({ form_name: "homepage_rfq", facility_type: sector || "unknown", has_buying_list: hasBuyingList });
+        if (typeof window.gtag === "function") {
+          window.gtag("event", "conversion", {
+            send_to: "AW-18295927026/QigLCM2X-8kcEPLhlpRE",
+            value: 1,
+            currency: "VND",
+          });
+        }
         if (fileInputRef.current) fileInputRef.current.value = "";
       } else {
         setFormState("error");
