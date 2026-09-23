@@ -9,6 +9,8 @@ import { navItemsByLocale, siteConfig, type Locale } from "@/lib/site";
 import { brandAssets } from "@/lib/brand";
 import { TopBar } from "@/components/b2b/top-bar";
 
+const orderAppUrl = "https://dathang.thucphamsomot.vn/";
+
 function localeFromPath(pathname: string): Locale {
   return pathname.startsWith("/en") ? "en" : "vi";
 }
@@ -134,7 +136,7 @@ export function SiteHeader() {
 
             <div className="site-header__cta-group">
               <Link
-                href={isEnglish ? "/en/portal" : "/portal"}
+                href={orderAppUrl}
                 className="btn-header-outline"
                 title={isEnglish ? "VIP Partner Portal" : "Cổng Đối Tác VIP"}
               >
@@ -156,7 +158,7 @@ export function SiteHeader() {
           <div className="container-shell site-mobile-nav__panel">
             <div className="site-mobile-nav__cta-group">
               <Link
-                href={isEnglish ? "/en/portal" : "/portal"}
+                href={orderAppUrl}
                 className="btn-header-outline"
                 onClick={() => setMenuOpen(false)}
               >

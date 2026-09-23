@@ -13,8 +13,10 @@ export function FloatingCart() {
   const destination = session ? "/portal/gio-hang" : "/bao-gia";
   const label = session ? "Xem giỏ hàng đặt hàng" : "Xem giỏ báo giá";
 
-  // Don't show the floating cart on the quote page itself
-  if (loading || pathname === destination || count === 0) {
+  // The marketing site no longer owns a cart. Ordering lives in the
+  // dedicated order webapp; keep this affordance only inside the legacy
+  // customer portal while its migration is completed.
+  if (loading || !pathname.startsWith("/portal") || pathname === destination || count === 0) {
     return null;
   }
 
