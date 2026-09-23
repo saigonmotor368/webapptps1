@@ -3,7 +3,6 @@ import Link from "next/link";
 import { ArrowRight, BookOpenText, CheckCircle2, ClipboardCheck } from "lucide-react";
 import type { ContentSection, FaqItem } from "@/lib/content";
 import { siteConfig } from "@/lib/site";
-import { QuoteAddButton } from "@/components/quote-add-button";
 import { brandAssets } from "@/lib/brand";
 import { FaqJsonLd } from "@/components/faq-json-ld";
 
@@ -69,7 +68,6 @@ export function ContentPage({
             <Link href={ctaHref} className="btn-primary">
               {ctaLabel} <ArrowRight size={18} />
             </Link>
-            {quoteItem ? <QuoteAddButton product={quoteItem} label="Thêm vào báo giá" /> : null}
             <a href={`tel:${siteConfig.phone.replace(/\s+/g, "")}`} className="btn-secondary">
               Gọi {siteConfig.phone}
             </a>
@@ -187,7 +185,6 @@ export function ContentPage({
         <Link href={ctaHref} className="btn-primary">
           {ctaLabel} <BookOpenText size={18} />
         </Link>
-        {quoteItem ? <QuoteAddButton product={quoteItem} label="Thêm vào báo giá" /> : null}
         <a href={`tel:${siteConfig.phone.replace(/\s+/g, "")}`} className="btn-secondary">
           Gọi {siteConfig.phone}
         </a>

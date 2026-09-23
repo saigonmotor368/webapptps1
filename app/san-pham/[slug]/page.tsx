@@ -35,7 +35,8 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
         bullets={item.features}
         sections={item.sections}
         faqs={item.faqs}
-        quoteItem={{ slug: item.slug, title: item.title, summary: item.summary }}
+        ctaHref="https://dathang.thucphamsomot.vn/"
+        ctaLabel="Đặt hàng trên Cổng Đối Tác"
       />
     </PageShell>
   );

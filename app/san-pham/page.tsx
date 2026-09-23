@@ -50,9 +50,9 @@ export default async function SanPhamPage() {
       <div className="sp-page__head container-shell">
         <div className="sp-page__head-left">
           <div className="eyebrow">Danh mục sản phẩm</div>
-          <h1 className="sp-page__title">Chọn hàng cho giỏ báo giá</h1>
+          <h1 className="sp-page__title">Danh mục thực phẩm cho bếp chuyên nghiệp</h1>
           <p className="sp-page__desc">
-            Chọn mặt hàng, đưa vào giỏ báo giá hoặc tải danh sách cần mua để gửi RFQ nhanh hơn.
+            Tra cứu nhóm hàng, quy cách và gửi nhu cầu để TPS1 tư vấn bảng giá phù hợp sản lượng của bếp.
           </p>
         </div>
         <div className="sp-page__badges">
@@ -73,7 +73,7 @@ export default async function SanPhamPage() {
             <p>Gửi nhóm hàng, số lượng dự kiến, khu vực giao và tần suất nhận hàng để đội ngũ chuẩn bị RFQ phù hợp. Anh/chị cũng có thể tải file Excel/PDF ngay ở form báo giá.</p>
           </div>
           <Link href="/bao-gia" className="btn-primary btn-on-dark">
-            Mở giỏ báo giá <ArrowRight size={18} />
+            Nhận báo giá theo nhu cầu <ArrowRight size={18} />
           </Link>
         </section>
       </div>
