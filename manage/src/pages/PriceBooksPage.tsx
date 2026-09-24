@@ -16,7 +16,11 @@ export default function PriceBooksPage() {
   const apiBase = import.meta.env.VITE_API_BASE_URL || '';
 
   // Tab: 'list' | 'import'
-  const [activeTab, setActiveTab] = useState<'list' | 'import'>('import');
+  const [activeTab, setActiveTab] = useState<'list' | 'import' | 'matrix'>('matrix');
+  const [matrixBooks, setMatrixBooks] = useState<any[]>([]);
+  const [matrixRows, setMatrixRows] = useState<any[]>([]);
+  const [matrixSearch, setMatrixSearch] = useState('');
+  const [loadingMatrix, setLoadingMatrix] = useState(false);
 
   // List of price books
   const [priceBooks, setPriceBooks] = useState<any[]>([]);
@@ -83,10 +87,34 @@ export default function PriceBooksPage() {
   }, [apiBase, token]);
 
   useEffect(() => {
-    if (activeTab === 'list') {
+    if (activeTab === 'list' || activeTab === 'matrix') {
       fetchPriceBooks();
     }
   }, [activeTab, fetchPriceBooks]);
+
+  useEffect(() => {
+    if (activeTab !== 'matrix' || !priceBooks.length) return;
+    let cancelled = false;
+    (async () => {
+      setLoadingMatrix(true);
+      try {
+        const books = await Promise.all(priceBooks.filter((p) => p.status === 'active' || p.kind === 'general').slice(0, 8).map(async (pb) => {
+          const res = await fetch(`${apiBase}/api/admin/price-books/${pb.id}`, { headers: { Authorization: `Bearer ${token}` } });
+          const data = await res.json();
+          return data.data || pb;
+        }));
+        if (cancelled) return;
+        const byProduct = new Map<string, any>();
+        books.forEach((book) => (book.items || []).forEach((item: any) => {
+          const row = byProduct.get(item.product_id) || { product_id: item.product_id, sku: item.sku_snapshot, name: item.name_snapshot, unit: item.unit_snapshot, prices: {} };
+          row.prices[book.id] = item.price;
+          byProduct.set(item.product_id, row);
+        }));
+        setMatrixBooks(books); setMatrixRows(Array.from(byProduct.values()));
+      } finally { if (!cancelled) setLoadingMatrix(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [activeTab, priceBooks, apiBase, token]);
 
   // Step 1: Upload & Inspect
   const handleFileSelected = async (selectedFile: File) => {
@@ -285,6 +313,9 @@ export default function PriceBooksPage() {
             }`}
           >
             Danh Sách Bảng Giá
+          </button>
+          <button onClick={() => setActiveTab('matrix')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'matrix' ? 'bg-white text-emerald-800 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>
+            Ma trận giá
           </button>
         </div>
       </div>
@@ -682,6 +713,18 @@ export default function PriceBooksPage() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {activeTab === 'matrix' && (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+          <div className="p-5 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div><h3 className="text-lg font-bold text-slate-800">Ma trận giá hàng hóa</h3><p className="text-xs text-slate-500 mt-1">So sánh giá chung, giá theo nhóm và giá riêng từng khách hàng trên cùng một bảng.</p></div>
+            <input value={matrixSearch} onChange={(e) => setMatrixSearch(e.target.value)} placeholder="Tìm mã hoặc tên hàng..." className="border border-slate-200 rounded-xl px-3 py-2 text-sm w-full md:w-72" />
+          </div>
+          <div className="overflow-auto max-h-[650px]">
+            {loadingMatrix ? <div className="p-12 text-center text-slate-400">Đang tải ma trận giá...</div> : <table className="w-full text-xs border-collapse min-w-[900px]"><thead className="sticky top-0 z-10 bg-slate-50"><tr><th className="p-3 text-left">Mã hàng</th><th className="p-3 text-left min-w-64">Tên hàng</th><th className="p-3 text-left">ĐVT</th>{matrixBooks.map((b) => <th key={b.id} className="p-3 text-right min-w-32">{b.name}</th>)}</tr></thead><tbody className="divide-y divide-slate-100">{matrixRows.filter((r) => !matrixSearch || `${r.sku} ${r.name}`.toLowerCase().includes(matrixSearch.toLowerCase())).map((r) => <tr key={r.product_id} className="hover:bg-emerald-50/30"><td className="p-3 font-mono">{r.sku || '—'}</td><td className="p-3 font-semibold text-slate-800">{r.name}</td><td className="p-3">{r.unit || '—'}</td>{matrixBooks.map((b) => <td key={b.id} className="p-3 text-right font-bold text-emerald-700">{r.prices[b.id] != null ? money(r.prices[b.id]) : <span className="text-slate-300">+</span>}</td>)}</tr>)}</tbody></table>}
+          </div>
         </div>
       )}
 
