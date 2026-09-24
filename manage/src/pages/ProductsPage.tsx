@@ -39,6 +39,7 @@ export default function ProductsPage() {
 
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [showImport, setShowImport] = useState(false);
   const [showPricebookImport, setShowPricebookImport] = useState(false);
 
@@ -52,6 +53,7 @@ export default function ProductsPage() {
   const fetchProducts = useCallback(async () => {
     if (!token) return;
     setLoading(true);
+    setLoadError('');
     try {
       const params = new URLSearchParams({ page: String(page) });
       if (search.trim()) params.set('search', search.trim());
@@ -61,11 +63,19 @@ export default function ProductsPage() {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
-      if (data.ok) {
+      if (res.status === 401 || res.status === 403) {
+        setProducts([]);
+        setTotal(0);
+        setLoadError('Phiên đăng nhập đã hết hạn hoặc không đủ quyền. Vui lòng đăng nhập lại.');
+      } else if (data.ok) {
         setProducts(data.products || []);
         setTotal(data.total || 0);
         setCanEdit(!!data.canEdit);
+      } else {
+        setLoadError(data.error || 'Không tải được danh sách hàng hóa.');
       }
+    } catch {
+      setLoadError('Không kết nối được máy chủ dữ liệu hàng hóa.');
     } finally {
       setLoading(false);
     }
@@ -151,6 +161,8 @@ export default function ProductsPage() {
         <div className="flex items-center justify-center py-16 text-slate-500">
           <RefreshCw className="animate-spin mr-2" size={20} /> Đang tải...
         </div>
+      ) : loadError ? (
+        <div className="bg-amber-50 rounded-2xl border border-amber-200 py-16 text-center text-amber-700">{loadError}</div>
       ) : products.length === 0 ? (
         <div className="bg-white rounded-2xl border border-slate-100 py-16 text-center text-slate-400">Không tìm thấy mã hàng nào</div>
       ) : (
