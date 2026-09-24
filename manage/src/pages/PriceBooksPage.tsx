@@ -21,6 +21,19 @@ export default function PriceBooksPage() {
   // List of price books
   const [priceBooks, setPriceBooks] = useState<any[]>([]);
   const [loadingList, setLoadingList] = useState(false);
+  const [selectedPriceBook, setSelectedPriceBook] = useState<any | null>(null);
+  const [loadingPriceBook, setLoadingPriceBook] = useState(false);
+
+  const openPriceBook = async (pb: any) => {
+    setSelectedPriceBook({ ...pb, items: [] });
+    setLoadingPriceBook(true);
+    try {
+      const res = await fetch(`${apiBase}/api/admin/price-books/${pb.id}`, { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (res.ok && data.data) setSelectedPriceBook(data.data);
+      else setMessage({ type: 'error', text: data.error || 'Không tải được chi tiết bảng giá' });
+    } finally { setLoadingPriceBook(false); }
+  };
 
   // Import Wizard Steps: 1 (Upload) | 2 (Mapping) | 3 (Preview) | 4 (Done)
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
@@ -687,6 +700,32 @@ export default function PriceBooksPage() {
             </button>
           </div>
 
+          {selectedPriceBook && (
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50/40 overflow-hidden">
+              <div className="p-4 flex items-center justify-between border-b border-emerald-100">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-emerald-700">Chi tiết bảng giá</p>
+                  <h4 className="font-extrabold text-slate-800">{selectedPriceBook.name} <span className="text-xs font-mono text-slate-500">{selectedPriceBook.code}</span></h4>
+                </div>
+                <button onClick={() => setSelectedPriceBook(null)} className="text-xs font-semibold text-slate-500 hover:text-slate-800">Đóng</button>
+              </div>
+              <div className="p-4 grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
+                <div><span className="text-slate-500 block">Phạm vi</span><b>{selectedPriceBook.kind === 'general' ? 'Toàn hệ thống' : selectedPriceBook.kind === 'group' ? 'Theo nhóm/bếp' : 'Theo khách hàng'}</b></div>
+                <div><span className="text-slate-500 block">Phiên bản</span><b>v{selectedPriceBook.version}</b></div>
+                <div><span className="text-slate-500 block">Trạng thái</span><b>{selectedPriceBook.status}</b></div>
+                <div><span className="text-slate-500 block">Từ ngày</span><b>{selectedPriceBook.valid_from ? new Date(selectedPriceBook.valid_from).toLocaleDateString('vi-VN') : 'Không giới hạn'}</b></div>
+                <div><span className="text-slate-500 block">Số mặt hàng</span><b>{selectedPriceBook.items?.length || 0}</b></div>
+              </div>
+              <div className="max-h-[420px] overflow-auto border-t border-emerald-100 bg-white">
+                {loadingPriceBook ? <div className="p-8 text-center text-slate-400">Đang tải bảng giá...</div> : (
+                  <table className="w-full text-xs"><thead className="sticky top-0 bg-slate-50 text-slate-600"><tr><th className="p-3 text-left">SKU</th><th className="p-3 text-left">Sản phẩm</th><th className="p-3 text-left">ĐVT</th><th className="p-3 text-right">Giá áp dụng</th><th className="p-3 text-right">Giá gốc</th></tr></thead>
+                    <tbody className="divide-y divide-slate-100">{(selectedPriceBook.items || []).map((item: any) => <tr key={item.product_id} className="hover:bg-emerald-50/30"><td className="p-3 font-mono">{item.sku_snapshot || '—'}</td><td className="p-3 font-semibold">{item.name_snapshot || '—'}</td><td className="p-3">{item.unit_snapshot || '—'}</td><td className="p-3 text-right font-bold text-emerald-700">{money(item.price)}</td><td className="p-3 text-right text-slate-500">{money(item.base_price)}</td></tr>)}</tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          )}
+
           <div className="overflow-x-auto border border-slate-200 rounded-xl">
             <table className="w-full text-left text-xs border-collapse">
               <thead className="bg-slate-50 text-slate-600 font-extrabold border-b border-slate-200">
@@ -709,7 +748,7 @@ export default function PriceBooksPage() {
                   </tr>
                 ) : (
                   priceBooks.map((pb) => (
-                    <tr key={pb.id} className="hover:bg-slate-50">
+                    <tr key={pb.id} onClick={() => openPriceBook(pb)} className="hover:bg-emerald-50/40 cursor-pointer">
                       <td className="py-3 px-4 font-mono font-bold text-slate-800">{pb.code}</td>
                       <td className="py-3 px-4 font-semibold text-slate-800">{pb.name}</td>
                       <td className="py-3 px-4">
