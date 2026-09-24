@@ -606,6 +606,25 @@ export default function OrderDetailPage() {
   // phiếu tạm/phiếu xác nhận ở trên (có ngay khi chốt giá). Mục brief
   // 2026-09-11: "lúc xác nhận đơn hàng chỉ là phiếu tạm thôi".
   const [downloadingInvoice, setDownloadingInvoice] = useState(false);
+  const [downloadingConfirmation, setDownloadingConfirmation] = useState(false);
+  const downloadConfirmation = async () => {
+    setDownloadingConfirmation(true);
+    try {
+      const apiBase = import.meta.env.VITE_API_BASE_URL || '';
+      const res = await fetch(`${apiBase}/api/admin/orders/document?orderId=${order.id}&type=order_confirmation`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || 'Chưa có phiếu xác nhận. Hãy chốt giá trước.');
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = `XAC-NHAN-DON-HANG_${order.order_code}.pdf`; a.click();
+      URL.revokeObjectURL(url);
+    } catch (err: any) { alert('Lỗi: ' + (err.message || 'Không tải được phiếu xác nhận')); }
+    finally { setDownloadingConfirmation(false); }
+  };
   const downloadInvoice = async () => {
     setDownloadingInvoice(true);
     try {
@@ -682,11 +701,17 @@ export default function OrderDetailPage() {
               <Receipt size={16} /> {downloadingInvoice ? 'Đang tải...' : 'Tải hóa đơn'}
             </button>
           )}
+          {order.pricing_status === 'finalized' && (
+            <button onClick={downloadConfirmation} disabled={downloadingConfirmation}
+              className="px-3 py-2 bg-blue-50 border border-blue-200 text-blue-700 rounded-xl text-sm font-medium hover:bg-blue-100 disabled:opacity-50 flex items-center gap-1.5" title="Tải phiếu xác nhận đơn hàng">
+              <FileText size={16} /> {downloadingConfirmation ? 'Đang tải...' : 'Phiếu xác nhận'}
+            </button>
+          )}
           <button onClick={exportExcelDetail} disabled={exportingExcel}
             className="p-2 border border-slate-200 rounded-xl text-slate-500 hover:bg-slate-50 disabled:opacity-50" title="Xuất file Excel">
             <FileSpreadsheet size={18} />
           </button>
-          <button onClick={() => printOrderSlip(order)} className="p-2 border border-slate-200 rounded-xl text-slate-500 hover:bg-slate-50" title="In phiếu tạm">
+          <button onClick={() => printOrderSlip(order, order.status === 'shipping' ? 'delivery' : 'temporary')} className="p-2 border border-slate-200 rounded-xl text-slate-500 hover:bg-slate-50" title={order.status === 'shipping' ? 'In phiếu giao hàng' : 'In phiếu tạm kiểm tra'}>
             <Printer size={18} />
           </button>
           <button onClick={fetchOrder} className="p-2 border border-slate-200 rounded-xl text-slate-500 hover:bg-slate-50">

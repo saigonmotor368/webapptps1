@@ -41,7 +41,7 @@ function dt(v: string) {
   return v ? new Date(v).toLocaleString('vi-VN') : '—';
 }
 
-export function printOrderSlip(order: PrintableOrder) {
+export function printOrderSlip(order: PrintableOrder, kind: 'temporary' | 'delivery' = 'temporary') {
   const win = window.open('', '', 'width=850,height=700');
   if (!win) return;
 
@@ -62,7 +62,7 @@ export function printOrderSlip(order: PrintableOrder) {
   }).join('');
 
   win.document.write(`
-    <html><head><title>Phiếu tạm ${order.order_code}</title>
+    <html><head><title>${kind === 'delivery' ? 'Phiếu giao hàng' : 'Phiếu tạm'} ${order.order_code}</title>
     <style>
       body{font-family:Arial,sans-serif;padding:24px;font-size:13px;color:#14231c}
       h1{text-align:center;font-size:18px;margin:0 0 2px}
@@ -77,7 +77,7 @@ export function printOrderSlip(order: PrintableOrder) {
       .total-row td{font-weight:bold;font-size:15px;border-top:2px solid #0f6f4b}
       .note{margin-top:10px;padding:8px;background:#f6f7f4;border-radius:6px;font-size:12px}
     </style></head><body>
-    <h1>PHIẾU TẠM / PHIẾU GIAO HÀNG</h1>
+    <h1>${kind === 'delivery' ? 'PHIẾU GIAO HÀNG' : 'PHIẾU TẠM KIỂM TRA ĐƠN'}</h1>
     <p class="sub">TPS1 — Công ty TNHH Thực Phẩm Số Một · ${order.order_code} · ${dt(order.created_at)}</p>
     <div class="grid">
       <div>
