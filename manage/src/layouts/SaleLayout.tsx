@@ -19,7 +19,7 @@ const NAV_GROUP_BY_PATH: Record<string, string> = {
   '/don-hang': 'sales',
   '/tao-don-hang': 'sales',
   '/khach-hang': 'sales',
-  '/hang-hoa': 'sales',
+  '/catalog': 'sales',
   '/ap-gia-hang-ngay': 'sales',
   '/bang-gia': 'sales',
   '/don-tong': 'operations',
@@ -61,7 +61,7 @@ export default function SaleLayout() {
         // Khách hàng
         can(role, 'customers.view') && { path: '/khach-hang', icon: <Users size={20} />, label: 'Quản lý Khách hàng', perm: 'customers.view' },
         // Hàng hóa
-        can(role, 'products.view') && { path: '/hang-hoa', icon: <Package size={20} />, label: 'Hàng hóa', perm: 'products.view' },
+        can(role, 'products.view') && { path: '/catalog', icon: <Package size={20} />, label: 'CATALOG', perm: 'products.view' },
         // Soạn hàng — admin/truong_phong/sale/thu_mua/kho (sale soạn đơn ra phiếu tạm)
         can(role, 'orders.packing') && { path: '/soan-hang', icon: <PackageOpen size={20} />, label: 'Xử lý đơn hàng', perm: 'orders.packing' },
         // Công nợ — admin/truong_phong/ke_toan
@@ -71,7 +71,7 @@ export default function SaleLayout() {
       ].filter(Boolean) as { path: string; icon: React.ReactNode; label: string; perm: string | null }[];
 
   // Mobile: chỉ hiện 4 mục dùng nhiều nhất, còn lại gom vào nút "Thêm".
-  const MOBILE_PRIMARY_PATHS = ['/', '/don-hang', '/tao-don-hang', '/hang-hoa'];
+  const MOBILE_PRIMARY_PATHS = ['/', '/don-hang', '/tao-don-hang', '/catalog'];
   const primaryItems = isCustomer ? navItems : navItems.filter((i) => MOBILE_PRIMARY_PATHS.includes(i.path));
   const moreItems = isCustomer ? [] : navItems.filter((i) => !MOBILE_PRIMARY_PATHS.includes(i.path));
 

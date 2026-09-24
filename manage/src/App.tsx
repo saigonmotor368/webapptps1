@@ -43,6 +43,7 @@ const DatHangPage = lazyPage(() => import('./pages/DatHangPage'));
 const DatHangExcelPage = lazyPage(() => import('./pages/DatHangExcelPage'));
 const DonTongPage = lazyPage(() => import('./pages/DonTongPage'));
 const PriceBooksPage = lazyPage(() => import('./pages/PriceBooksPage'));
+const CatalogPage = lazyPage(() => import('./pages/CatalogPage'));
 
 const LoadingScreen = () => (
   <div className="min-h-screen flex items-center justify-center bg-[#0B130E] text-white">Đang tải...</div>
@@ -104,6 +105,7 @@ function App() {
             <Route path="khach-hang/moi" element={<StaffOnlyRoute perm="customers.edit"><CustomerDetailPage /></StaffOnlyRoute>} />
             <Route path="khach-hang/:id" element={<StaffOnlyRoute perm="customers.view"><CustomerDetailPage /></StaffOnlyRoute>} />
             <Route path="hang-hoa" element={<StaffOnlyRoute perm="products.view"><ProductsPage /></StaffOnlyRoute>} />
+            <Route path="catalog" element={<StaffOnlyRoute perm="products.view"><CatalogPage /></StaffOnlyRoute>} />
             <Route path="hang-hoa/:id" element={<StaffOnlyRoute perm="products.view"><ProductDetailPage /></StaffOnlyRoute>} />
             <Route path="soan-hang" element={<StaffOnlyRoute perm="orders.packing"><SoanHangPage /></StaffOnlyRoute>} />
             <Route path="ap-gia-hang-ngay" element={<StaffOnlyRoute perm="pricing.edit"><BulkPricingPage /></StaffOnlyRoute>} />
