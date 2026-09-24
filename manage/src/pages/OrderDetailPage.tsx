@@ -453,7 +453,7 @@ export default function OrderDetailPage() {
   };
 
   const handleFinalize = async () => {
-    if (!confirm(`Xác nhận khách ở hạng ${selectedTier} và chốt tổng đơn ${money(totals.total)}?`)) return;
+    if (!confirm(`Xác nhận bảng giá và chốt tổng đơn ${money(totals.total)}?`)) return;
     setSaving(true);
     try {
       const apiBase = import.meta.env.VITE_API_BASE_URL || '';
@@ -924,7 +924,7 @@ export default function OrderDetailPage() {
           {/* Pricing Editor */}
           <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
             <div className="p-5 border-b border-slate-100 flex items-center justify-between">
-              <h2 className="font-bold text-slate-800 flex items-center gap-2"><CheckCircle2 size={18} className="text-blue-600" />Phân loại khách & Chốt giá</h2>
+              <h2 className="font-bold text-slate-800 flex items-center gap-2"><CheckCircle2 size={18} className="text-blue-600" />Kiểm tra bảng giá & Chốt đơn</h2>
               {order.pricing_status === 'finalized' ? (
                 <span className="text-xs font-semibold text-green-700 bg-green-100 px-3 py-1 rounded-full">Đã chốt R{order.price_revision || 1}</span>
               ) : (
@@ -934,23 +934,18 @@ export default function OrderDetailPage() {
             <div className="p-5 space-y-5">
               {isLocked && <div className="p-3 bg-slate-50 text-slate-500 text-sm rounded-lg border border-slate-200">⚠️ Đơn đã thanh toán/đang giao/hoàn thành nên không thể chỉnh giá.</div>}
 
-              {/* Banner thông tin hạng khách — auto-load từ vip_accounts */}
+              {/* Pricing source — price books replace the old VIP classification flow. */}
               {customerInfo && order.pricing_status !== 'finalized' && (
                 <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl text-sm space-y-1">
                   <p className="font-semibold text-indigo-800 flex items-center gap-1.5">
-                    🏷️ Thông tin hạng khách (tự động tải)
+                    🧾 Nguồn bảng giá (tự động tải)
                   </p>
                   <div className="flex flex-wrap gap-3 text-indigo-700 text-xs">
-                    <span>Hạng: <b>{customerInfo.discount_tier || 'VIP0'}</b></span>
-                    {customerInfo.contract_discount_percent != null && (
-                      <span>Chiết khấu HĐ: <b>{customerInfo.contract_discount_percent}%</b></span>
-                    )}
-                    {customerInfo.tier_expiry_date && (
-                      <span>Hết hạn: <b>{new Date(customerInfo.tier_expiry_date).toLocaleDateString('vi-VN')}</b></span>
-                    )}
+                    <span>Khách hàng: <b>{order.customer_code || '—'}</b></span>
+                    <span>Ưu tiên: <b>Giá riêng khách → Nhóm bếp → Bảng giá chung</b></span>
                     {Object.keys(contractPrices).length > 0 && (
                       <span className="text-purple-700 font-semibold">
-                        📋 {Object.keys(contractPrices).length} mặt hàng có giá cố định HĐ
+                        📋 {Object.keys(contractPrices).length} mặt hàng có giá riêng
                       </span>
                     )}
                   </div>
@@ -959,19 +954,13 @@ export default function OrderDetailPage() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">Hạng khách hàng</label>
-                  <select value={selectedTier} onChange={e => setSelectedTier(e.target.value)} disabled={isLocked}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20 disabled:opacity-60">
-                    {(tiers.length ? tiers : [
-                      { code: 'VIP0', name: 'VIP0 - Không chiết khấu', discount_percent: 0 },
-                      { code: 'VIP1', name: 'VIP1', discount_percent: 5 },
-                      { code: 'VIP2', name: 'VIP2', discount_percent: 10 },
-                      { code: 'VIP3', name: 'VIP3', discount_percent: 15 },
-                    ]).map(t => <option key={t.code} value={t.code}>{t.name || t.code} ({t.discount_percent || 0}%)</option>)}
-                  </select>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">Bảng giá áp dụng</label>
+                  <div className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-700">
+                    Giá riêng khách hàng / nhóm bếp / bảng giá chung
+                  </div>
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">Chế độ tính giá</label>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">Cách chốt giá</label>
                   <select value={pricingMode} onChange={e => setPricingMode(e.target.value)} disabled={isLocked}
                     className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20 disabled:opacity-60">
                     {PRICING_MODES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
@@ -1004,9 +993,9 @@ export default function OrderDetailPage() {
               )}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">Ghi chú phân loại khách</label>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">Ghi chú xử lý bảng giá</label>
                   <textarea value={verificationNote} onChange={e => setVerificationNote(e.target.value)} disabled={isLocked} rows={2}
-                    placeholder="Lý do giữ VIP0 hoặc nâng hạng..."
+                    placeholder="Trao đổi với thu mua, thiếu hàng, áp bảng giá nhóm..."
                     className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20 resize-none disabled:opacity-60" />
                 </div>
                 <div>
