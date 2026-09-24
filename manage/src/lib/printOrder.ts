@@ -77,7 +77,7 @@ export function printOrderSlip(order: PrintableOrder, kind: 'temporary' | 'deliv
       .total-row td{font-weight:bold;font-size:15px;border-top:2px solid #0f6f4b}
       .note{margin-top:10px;padding:8px;background:#f6f7f4;border-radius:6px;font-size:12px}
     </style></head><body>
-    <h1>${kind === 'delivery' ? 'PHIẾU GIAO HÀNG' : 'PHIẾU TẠM KIỂM TRA ĐƠN'}</h1>
+    <h1>${kind === 'delivery' ? 'PHIẾU GIAO HÀNG' : 'PHIẾU TẠM'}</h1>
     <p class="sub">TPS1 — Công ty TNHH Thực Phẩm Số Một · ${order.order_code} · ${dt(order.created_at)}</p>
     <div class="grid">
       <div>

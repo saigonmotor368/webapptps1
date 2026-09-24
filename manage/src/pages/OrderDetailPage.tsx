@@ -711,7 +711,7 @@ export default function OrderDetailPage() {
             className="p-2 border border-slate-200 rounded-xl text-slate-500 hover:bg-slate-50 disabled:opacity-50" title="Xuất file Excel">
             <FileSpreadsheet size={18} />
           </button>
-          <button onClick={() => printOrderSlip(order, order.status === 'shipping' ? 'delivery' : 'temporary')} className="p-2 border border-slate-200 rounded-xl text-slate-500 hover:bg-slate-50" title={order.status === 'shipping' ? 'In phiếu giao hàng' : 'In phiếu tạm kiểm tra'}>
+          <button onClick={() => printOrderSlip(order, order.status === 'shipping' ? 'delivery' : 'temporary')} className="p-2 border border-slate-200 rounded-xl text-slate-500 hover:bg-slate-50" title={order.status === 'shipping' ? 'In phiếu giao hàng' : 'In phiếu tạm'}>
             <Printer size={18} />
           </button>
           <button onClick={fetchOrder} className="p-2 border border-slate-200 rounded-xl text-slate-500 hover:bg-slate-50">
