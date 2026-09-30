@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Plus, Minus, Heart, MessageSquarePlus, Check } from 'lucide-react';
+import { Plus, Minus, Heart, MessageSquarePlus, Check, AlertCircle } from 'lucide-react';
 import type { Product } from '../../lib/api';
 import ProductThumbnail from './ProductThumbnail';
+import { validateOrderQuantity, formatQuantityVN } from '../../lib/quantityRules';
 
 function money(v: number) {
   return new Intl.NumberFormat('vi-VN').format(Number(v) || 0) + 'đ';
@@ -37,9 +38,29 @@ export default function ProductCard({
   }, [itemNote]);
 
   const isInCart = quantityInCart > 0;
+  const step = product.orderStep || 1;
+  const initialQty = product.enforceOrderStep && product.minOrderQty ? product.minOrderQty : step;
+
+  const qtyError = isInCart && product.enforceOrderStep
+    ? validateOrderQuantity(quantityInCart, product.minOrderQty, product.orderStep, true)
+    : null;
 
   const handleNoteSave = () => {
     onUpdateNote(product.id, tempNote.trim());
+  };
+
+  const handleMinus = () => {
+    const next = Math.round((quantityInCart - step) * 1000) / 1000;
+    if (product.enforceOrderStep && product.minOrderQty && next < product.minOrderQty) {
+      onUpdateQty(product.id, 0);
+    } else {
+      onUpdateQty(product.id, Math.max(0, next));
+    }
+  };
+
+  const handlePlus = () => {
+    const next = Math.round((quantityInCart + step) * 1000) / 1000;
+    onUpdateQty(product.id, next);
   };
 
   return (
@@ -95,6 +116,20 @@ export default function ProductCard({
                 <span className="text-[#59665f]/70 font-normal"> · {product.category}</span>
               )}
             </p>
+
+            {/* Quy cách đóng gói */}
+            {product.packagingNote && (
+              <div className="text-[11px] text-[#0f7a4f] bg-[#0f7a4f]/8 px-1.5 py-0.5 rounded inline-block font-medium mt-1">
+                📦 {product.packagingNote}
+              </div>
+            )}
+
+            {/* Quy cách đặt hàng bắt buộc */}
+            {product.enforceOrderStep && (
+              <div className="text-[10px] text-[#59665f] font-medium mt-0.5">
+                Tối thiểu: <strong className="text-[#17231d]">{formatQuantityVN(product.minOrderQty || 1)}</strong> · Bước: <strong className="text-[#17231d]">{formatQuantityVN(product.orderStep || 1)}</strong> {product.unit || 'Kg'}
+              </div>
+            )}
           </div>
         </div>
 
@@ -113,7 +148,7 @@ export default function ProductCard({
 
           {isInCart && (
             <span className="text-[11px] font-bold text-[#0f7a4f] bg-[#0f7a4f]/10 px-2 py-0.5 rounded-full">
-              Đã chọn: {quantityInCart} {product.unit || 'Kg'}
+              Đã chọn: {formatQuantityVN(quantityInCart)} {product.unit || 'Kg'}
             </span>
           )}
         </div>
@@ -164,52 +199,62 @@ export default function ProductCard({
         {!isInCart ? (
           <button
             type="button"
-            onClick={() => onAdd(product, 1)}
+            onClick={() => onAdd(product, initialQty)}
             className="w-full h-11 sm:h-10 rounded-xl bg-[#0f7a4f] hover:bg-[#0b4f34] active:scale-[0.98] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-sm shadow-[#0f7a4f]/20 transition-all cursor-pointer touch-target"
           >
             <Plus size={16} strokeWidth={2.5} />
             <span>Thêm vào đơn</span>
           </button>
         ) : (
-          <div className="flex items-center justify-between gap-1.5 bg-[#f5f7f3] p-1 rounded-xl border border-[#17231d]/10">
-            {/* Nút giảm */}
-            <button
-              type="button"
-              onClick={() => onUpdateQty(product.id, Math.max(0, Number((quantityInCart - 1).toFixed(2))))}
-              className="w-10 h-10 sm:w-9 sm:h-9 rounded-lg bg-white border border-[#17231d]/10 text-[#17231d] hover:bg-rose-50 hover:text-rose-600 active:scale-95 flex items-center justify-center font-bold text-base transition-colors cursor-pointer select-none touch-target"
-              aria-label="Giảm số lượng"
-            >
-              <Minus size={15} strokeWidth={2.5} />
-            </button>
+          <div>
+            <div className="flex items-center justify-between gap-1.5 bg-[#f5f7f3] p-1 rounded-xl border border-[#17231d]/10">
+              {/* Nút giảm */}
+              <button
+                type="button"
+                onClick={handleMinus}
+                className="w-10 h-10 sm:w-9 sm:h-9 rounded-lg bg-white border border-[#17231d]/10 text-[#17231d] hover:bg-rose-50 hover:text-rose-600 active:scale-95 flex items-center justify-center font-bold text-base transition-colors cursor-pointer select-none touch-target"
+                aria-label="Giảm số lượng"
+              >
+                <Minus size={15} strokeWidth={2.5} />
+              </button>
 
-            {/* Ô nhập số lượng (cho phép số thập phân như 1.5, 2.25) */}
-            <div className="flex-1 flex items-center justify-center">
-              <input
-                type="number"
-                min={0}
-                step="any"
-                value={quantityInCart}
-                onChange={(e) => {
-                  const val = parseFloat(e.target.value);
-                  onUpdateQty(product.id, isNaN(val) ? 0 : Math.max(0, val));
-                }}
-                className="w-16 sm:w-20 text-center font-extrabold text-sm sm:text-base text-[#0b4f34] bg-transparent focus:outline-none"
-                aria-label={`Số lượng ${product.name}`}
-              />
-              <span className="text-[11px] font-semibold text-[#59665f] -ml-1">
-                {product.unit || 'Kg'}
-              </span>
+              {/* Ô nhập số lượng (cho phép số thập phân như 1.5, 2.25) */}
+              <div className="flex-1 flex items-center justify-center">
+                <input
+                  type="number"
+                  min={0}
+                  step={step}
+                  value={quantityInCart}
+                  onChange={(e) => {
+                    const val = parseFloat(e.target.value);
+                    onUpdateQty(product.id, isNaN(val) ? 0 : Math.max(0, val));
+                  }}
+                  className="w-16 sm:w-20 text-center font-extrabold text-sm sm:text-base text-[#0b4f34] bg-transparent focus:outline-none"
+                  aria-label={`Số lượng ${product.name}`}
+                />
+                <span className="text-[11px] font-semibold text-[#59665f] -ml-1">
+                  {product.unit || 'Kg'}
+                </span>
+              </div>
+
+              {/* Nút tăng */}
+              <button
+                type="button"
+                onClick={handlePlus}
+                className="w-10 h-10 sm:w-9 sm:h-9 rounded-lg bg-white border border-[#17231d]/10 text-[#0f7a4f] hover:bg-[#0f7a4f] hover:text-white active:scale-95 flex items-center justify-center font-bold text-base transition-colors cursor-pointer select-none touch-target"
+                aria-label="Tăng số lượng"
+              >
+                <Plus size={15} strokeWidth={2.5} />
+              </button>
             </div>
 
-            {/* Nút tăng */}
-            <button
-              type="button"
-              onClick={() => onUpdateQty(product.id, Number((quantityInCart + 1).toFixed(2)))}
-              className="w-10 h-10 sm:w-9 sm:h-9 rounded-lg bg-white border border-[#17231d]/10 text-[#0f7a4f] hover:bg-[#0f7a4f] hover:text-white active:scale-95 flex items-center justify-center font-bold text-base transition-colors cursor-pointer select-none touch-target"
-              aria-label="Tăng số lượng"
-            >
-              <Plus size={15} strokeWidth={2.5} />
-            </button>
+            {/* Cảnh báo lỗi quy cách số lượng nếu nhập sai */}
+            {qtyError && (
+              <div className="mt-1.5 px-2 py-1 bg-rose-50 border border-rose-200 rounded-lg flex items-center gap-1.5 text-[11px] text-rose-700">
+                <AlertCircle size={13} className="shrink-0 text-rose-500" />
+                <span>{qtyError}</span>
+              </div>
+            )}
           </div>
         )}
       </div>

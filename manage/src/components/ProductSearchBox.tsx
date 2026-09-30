@@ -23,12 +23,17 @@ export interface SearchProductItem {
   stockQty?: number | null;
   lowStock?: boolean;
   categoryLabel?: string;
+  packagingNote?: string | null;
+  minOrderQty?: number;
+  orderStep?: number;
+  enforceOrderStep?: boolean;
   [key: string]: any;
 }
 
 type CompactCatalogRow = [
   string, string, string, string, string, number, number, string, boolean,
-  boolean, number | null, boolean
+  boolean, number | null, boolean,
+  string?, number?, number?, boolean?
 ];
 
 function normalizeSearch(value: string) {
@@ -42,6 +47,10 @@ function decodeCatalog(rows: CompactCatalogRow[]): SearchProductItem[] {
     thumb_url: row[8] ? row[7] : null, image_url: row[8] ? null : row[7],
     trackInventory: Boolean(row[9]), stockQty: row[10], lowStock: Boolean(row[11]),
     categoryLabel: row[3] || '',
+    packagingNote: row[12] || null,
+    minOrderQty: row[13] != null ? Number(row[13]) : 1,
+    orderStep: row[14] != null ? Number(row[14]) : 1,
+    enforceOrderStep: Boolean(row[15]),
     _searchKey: normalizeSearch(`${row[1]} ${row[2]} ${row[3] || ''}`),
     _skuKey: normalizeSearch(row[1] || ''),
     _nameKey: normalizeSearch(row[2] || ''),
@@ -482,6 +491,17 @@ export default function ProductSearchBox({
                         {product.category && <span className="text-slate-400">· {product.category}</span>}
                         <span className="text-slate-400">· ĐVT: {product.unit}</span>
                       </div>
+
+                      {product.packagingNote && (
+                        <p className="text-[11px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded inline-block font-medium mt-1 border border-emerald-200">
+                          📦 {product.packagingNote}
+                        </p>
+                      )}
+                      {product.enforceOrderStep && (
+                        <p className="text-[10px] text-slate-500 mt-0.5">
+                          Tối thiểu: {product.minOrderQty} · Bước: {product.orderStep} {product.unit}
+                        </p>
+                      )}
 
                       {product.trackInventory && (
                         <p

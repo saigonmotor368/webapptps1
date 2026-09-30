@@ -16,6 +16,7 @@ import {
 import type { CustomerSession } from '../../lib/api';
 import type { OrderTab } from './OrderTabsBar';
 import ProductThumbnail from './ProductThumbnail';
+import { validateOrderQuantity, formatQuantityVN } from '../../lib/quantityRules';
 
 function money(v: number) {
   return new Intl.NumberFormat('vi-VN').format(Number(v) || 0) + 'đ';
@@ -119,6 +120,16 @@ export default function CartCheckoutDrawer({
                             {item.product.priceOnRequest ? 'Liên hệ' : money(item.product.price)}
                           </strong>
                         </p>
+                        {item.product.packagingNote && (
+                          <p className="text-[10px] text-[#0f7a4f] bg-[#0f7a4f]/8 px-1.5 py-0.2 rounded inline-block font-medium mt-0.5">
+                            📦 {item.product.packagingNote}
+                          </p>
+                        )}
+                        {item.product.enforceOrderStep && (
+                          <p className="text-[9px] text-[#59665f] mt-0.5">
+                            Tối thiểu: {formatQuantityVN(item.product.minOrderQty || 1)} · Bước: {formatQuantityVN(item.product.orderStep || 1)}
+                          </p>
+                        )}
                       </div>
 
                       <button
@@ -132,52 +143,71 @@ export default function CartCheckoutDrawer({
                     </div>
 
                     {/* Stepper và tiền dòng */}
-                    <div className="flex items-center justify-between pt-1 border-t border-[#17231d]/5">
-                      <div className="flex items-center gap-1 bg-[#f5f7f3] p-1 rounded-xl border border-[#17231d]/10">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            onUpdateQty(
-                              item.product.id,
-                              Math.max(0, Number((item.quantity - 1).toFixed(2)))
-                            )
-                          }
-                          className="w-11 h-11 rounded-lg bg-white font-bold text-sm text-[#17231d] active:scale-95 flex items-center justify-center shadow-xs"
-                        >
-                          -
-                        </button>
-                        <input
-                          type="number"
-                          min={0.1}
-                          step="any"
-                          value={item.quantity}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value);
-                            onUpdateQty(item.product.id, isNaN(val) ? 0 : val);
-                          }}
-                          className="w-14 text-center font-bold text-sm bg-transparent focus:outline-none"
-                        />
-                        <button
-                          type="button"
-                          onClick={() =>
-                            onUpdateQty(
-                              item.product.id,
-                              Number((item.quantity + 1).toFixed(2))
-                            )
-                          }
-                          className="w-11 h-11 rounded-lg bg-white font-bold text-sm text-[#0f7a4f] active:scale-95 flex items-center justify-center shadow-xs"
-                        >
-                          +
-                        </button>
-                      </div>
+                    {(() => {
+                      const step = item.product.orderStep || 1;
+                      const lineErr = item.product.enforceOrderStep
+                        ? validateOrderQuantity(item.quantity, item.product.minOrderQty, item.product.orderStep, true)
+                        : null;
+                      return (
+                        <>
+                          <div className="flex items-center justify-between pt-1 border-t border-[#17231d]/5">
+                            <div className="flex items-center gap-1 bg-[#f5f7f3] p-1 rounded-xl border border-[#17231d]/10">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const next = Math.round((item.quantity - step) * 1000) / 1000;
+                                  if (item.product.enforceOrderStep && item.product.minOrderQty && next < item.product.minOrderQty) {
+                                    onRemoveItem(item.product.id);
+                                  } else {
+                                    onUpdateQty(item.product.id, Math.max(0, next));
+                                  }
+                                }}
+                                className="w-11 h-11 rounded-lg bg-white font-bold text-sm text-[#17231d] active:scale-95 flex items-center justify-center shadow-xs"
+                              >
+                                -
+                              </button>
+                              <input
+                                type="number"
+                                min={0.001}
+                                step={step}
+                                value={item.quantity}
+                                onChange={(e) => {
+                                  const val = parseFloat(e.target.value);
+                                  onUpdateQty(item.product.id, isNaN(val) ? 0 : val);
+                                }}
+                                className="w-14 text-center font-bold text-sm bg-transparent focus:outline-none"
+                              />
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  onUpdateQty(
+                                    item.product.id,
+                                    Math.round((item.quantity + step) * 1000) / 1000
+                                  )
+                                }
+                                className="w-11 h-11 rounded-lg bg-white font-bold text-sm text-[#0f7a4f] active:scale-95 flex items-center justify-center shadow-xs"
+                              >
+                                +
+                              </button>
+                            </div>
 
-                      <div className="text-right">
-                        <span className="text-[10px] text-[#59665f] block">Thành tiền</span>
-                        <span className="font-mono font-bold text-sm text-[#0f7a4f]">
-                          {item.product.priceOnRequest ? 'Tạm tính' : money(lineTotal)}
-                        </span>
-                      </div>
-                    </div>
+                            <div className="text-right">
+                              <span className="text-[10px] text-[#59665f] block">Thành tiền</span>
+                              <span className="font-mono font-bold text-sm text-[#0f7a4f]">
+                                {item.product.priceOnRequest ? 'Tạm tính' : money(lineTotal)}
+                              </span>
+                            </div>
+                          </div>
+
+                          {lineErr && (
+                            <p className="text-[11px] text-rose-600 font-medium mt-1 flex items-center gap-1">
+                              <AlertCircle size={12} className="shrink-0 text-rose-500" />
+                              <span>{lineErr}</span>
+                            </p>
+                          )}
+                        </>
+                      );
+                    })()}
 
                     {/* Ghi chú từng dòng */}
                     <div>
@@ -358,12 +388,27 @@ export default function CartCheckoutDrawer({
             </div>
           )}
 
-          <button
-            type="button"
-            onClick={onSubmitOrder}
-            disabled={submitting || activeTab.items.length === 0}
-            className="w-full py-3.5 rounded-2xl font-bold text-sm tracking-wider bg-[#0f7a4f] hover:bg-[#0b4f34] text-white shadow-lg shadow-[#0f7a4f]/25 active:scale-[0.98] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 uppercase touch-target"
-          >
+          {(() => {
+            const hasInvalidItems = activeTab.items.some(
+              (item) =>
+                item.product.enforceOrderStep &&
+                validateOrderQuantity(item.quantity, item.product.minOrderQty, item.product.orderStep, true) !== null
+            );
+            return (
+              <>
+                {hasInvalidItems && (
+                  <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 flex items-center gap-1.5">
+                    <AlertCircle size={14} className="shrink-0 text-amber-600" />
+                    <span>Có mặt hàng chưa đúng quy cách đặt hàng.</span>
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={onSubmitOrder}
+                  disabled={submitting || activeTab.items.length === 0 || hasInvalidItems}
+                  className="w-full py-3.5 rounded-2xl font-bold text-sm tracking-wider bg-[#0f7a4f] hover:bg-[#0b4f34] text-white shadow-lg shadow-[#0f7a4f]/25 active:scale-[0.98] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 uppercase touch-target"
+                >
             {submitting ? (
               <>
                 <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -376,6 +421,9 @@ export default function CartCheckoutDrawer({
               </>
             )}
           </button>
+        </>
+      );
+    })()}
         </div>
       </div>
     </div>

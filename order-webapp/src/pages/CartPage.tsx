@@ -19,6 +19,7 @@ import {
 import { useCart } from '../contexts/CartContext';
 import { useAuth } from '../contexts/AuthContext';
 import { api, ApiError } from '../lib/api';
+import { validateOrderQuantity, formatQuantityVN } from '../lib/quantityRules';
 import ProductThumbnail from '../components/products/ProductThumbnail';
 
 function money(v: number) {
@@ -63,6 +64,16 @@ export default function CartPage() {
     if (!deliveryAddress.trim() || !deliveryName.trim() || !deliveryPhone.trim()) {
       setError('Vui lòng nhập đầy đủ Tên người nhận, SĐT và Địa chỉ nhận hàng');
       return;
+    }
+
+    for (const l of lines) {
+      if (l.product.enforceOrderStep) {
+        const err = validateOrderQuantity(l.quantity, l.product.minOrderQty, l.product.orderStep, true);
+        if (err) {
+          setError(`Mặt hàng "${l.product.name}" chưa đúng quy cách: ${err}`);
+          return;
+        }
+      }
     }
 
     setSubmitting(true);
@@ -236,49 +247,86 @@ export default function CartPage() {
                         {product.priceOnRequest ? 'Liên hệ' : money(product.price)}
                       </strong>
                     </p>
+
+                    {/* Quy cách đóng gói */}
+                    {product.packagingNote && (
+                      <div className="text-[11px] text-[#0f7a4f] bg-[#0f7a4f]/8 px-1.5 py-0.5 rounded inline-block font-medium mt-1">
+                        📦 {product.packagingNote}
+                      </div>
+                    )}
+
+                    {/* Quy cách đặt hàng bắt buộc */}
+                    {product.enforceOrderStep && (
+                      <div className="text-[10px] text-[#59665f] font-medium mt-0.5">
+                        Tối thiểu: <strong className="text-[#17231d]">{formatQuantityVN(product.minOrderQty || 1)}</strong> · Bước: <strong className="text-[#17231d]">{formatQuantityVN(product.orderStep || 1)}</strong> {product.unit || 'Kg'}
+                      </div>
+                    )}
                   </div>
                 </div>
 
                 {/* Bộ Stepper số lượng & Thành tiền dòng */}
-                <div className="flex items-center justify-between pt-2 border-t border-[#17231d]/5">
-                  <div className="flex items-center gap-1.5 bg-[#f5f7f3] p-1 rounded-xl border border-[#17231d]/10">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setQty(product.id, Math.max(0, Number((quantity - 1).toFixed(2))))
-                      }
-                      className="w-8 h-8 rounded-lg bg-white font-bold text-sm text-[#17231d] active:scale-95 flex items-center justify-center shadow-xs cursor-pointer select-none"
-                    >
-                      <Minus size={14} />
-                    </button>
-                    <input
-                      type="number"
-                      min={0.1}
-                      step="any"
-                      value={quantity}
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value);
-                        setQty(product.id, isNaN(val) ? 0 : val);
-                      }}
-                      className="w-16 text-center font-bold text-sm text-[#0b4f34] bg-transparent focus:outline-none"
-                      aria-label={`Số lượng ${product.name}`}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setQty(product.id, Number((quantity + 1).toFixed(2)))}
-                      className="w-8 h-8 rounded-lg bg-white font-bold text-sm text-[#0f7a4f] active:scale-95 flex items-center justify-center shadow-xs cursor-pointer select-none"
-                    >
-                      <Plus size={14} />
-                    </button>
-                  </div>
+                {(() => {
+                  const step = product.orderStep || 1;
+                  const lineErr = product.enforceOrderStep
+                    ? validateOrderQuantity(quantity, product.minOrderQty, product.orderStep, true)
+                    : null;
+                  return (
+                    <>
+                      <div className="flex items-center justify-between pt-2 border-t border-[#17231d]/5">
+                        <div className="flex items-center gap-1.5 bg-[#f5f7f3] p-1 rounded-xl border border-[#17231d]/10">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const next = Math.round((quantity - step) * 1000) / 1000;
+                              if (product.enforceOrderStep && product.minOrderQty && next < product.minOrderQty) {
+                                removeItem(product.id);
+                              } else {
+                                setQty(product.id, Math.max(0, next));
+                              }
+                            }}
+                            className="w-8 h-8 rounded-lg bg-white font-bold text-sm text-[#17231d] active:scale-95 flex items-center justify-center shadow-xs cursor-pointer select-none"
+                          >
+                            <Minus size={14} />
+                          </button>
+                          <input
+                            type="number"
+                            min={0.001}
+                            step={step}
+                            value={quantity}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value);
+                              setQty(product.id, isNaN(val) ? 0 : val);
+                            }}
+                            className="w-16 text-center font-bold text-sm text-[#0b4f34] bg-transparent focus:outline-none"
+                            aria-label={`Số lượng ${product.name}`}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setQty(product.id, Math.round((quantity + step) * 1000) / 1000)}
+                            className="w-8 h-8 rounded-lg bg-white font-bold text-sm text-[#0f7a4f] active:scale-95 flex items-center justify-center shadow-xs cursor-pointer select-none"
+                          >
+                            <Plus size={14} />
+                          </button>
+                        </div>
 
-                  <div className="text-right">
-                    <span className="text-[10px] text-[#59665f] block">Thành tiền</span>
-                    <span className="font-mono font-bold text-sm sm:text-base text-[#0f7a4f]">
-                      {product.priceOnRequest ? 'Tạm tính 0đ' : money(lineTotal)}
-                    </span>
-                  </div>
-                </div>
+                        <div className="text-right">
+                          <span className="text-[10px] text-[#59665f] block">Thành tiền</span>
+                          <span className="font-mono font-bold text-sm sm:text-base text-[#0f7a4f]">
+                            {product.priceOnRequest ? 'Tạm tính 0đ' : money(lineTotal)}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Thông báo lỗi quy cách từng dòng nếu có */}
+                      {lineErr && (
+                        <div className="px-2.5 py-1 bg-rose-50 border border-rose-200 rounded-lg flex items-center gap-1.5 text-xs text-rose-700">
+                          <AlertCircle size={14} className="shrink-0 text-rose-500" />
+                          <span>{lineErr}</span>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
 
                 {/* Ghi chú quy cách theo dòng */}
                 <div>
@@ -468,23 +516,40 @@ export default function CartPage() {
               </div>
             )}
 
-            <button
-              onClick={submitOrder}
-              disabled={submitting || lines.length === 0}
-              className="w-full bg-[#0f7a4f] hover:bg-[#0b4f34] text-white font-bold py-3.5 rounded-xl transition-all shadow-md shadow-[#0f7a4f]/25 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 uppercase text-xs sm:text-sm tracking-wider touch-target cursor-pointer"
-            >
-              {submitting ? (
+            {(() => {
+              const hasInvalidLines = lines.some((l) =>
+                l.product.enforceOrderStep &&
+                validateOrderQuantity(l.quantity, l.product.minOrderQty, l.product.orderStep, true) !== null
+              );
+              return (
                 <>
-                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  <span>Đang gửi đơn...</span>
+                  {hasInvalidLines && (
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 flex items-center gap-2">
+                      <AlertCircle size={15} className="shrink-0 text-amber-600" />
+                      <span>Giỏ hàng có sản phẩm chưa đúng quy cách đặt hàng. Vui lòng điều chỉnh số lượng trước khi xác nhận.</span>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={submitOrder}
+                    disabled={submitting || lines.length === 0 || hasInvalidLines}
+                    className="w-full bg-[#0f7a4f] hover:bg-[#0b4f34] text-white font-bold py-3.5 rounded-xl transition-all shadow-md shadow-[#0f7a4f]/25 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 uppercase text-xs sm:text-sm tracking-wider touch-target cursor-pointer"
+                  >
+                    {submitting ? (
+                      <>
+                        <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        <span>Đang gửi đơn...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Xác nhận đặt hàng</span>
+                        <ArrowRight size={16} />
+                      </>
+                    )}
+                  </button>
                 </>
-              ) : (
-                <>
-                  <span>Xác nhận đặt hàng</span>
-                  <ArrowRight size={16} />
-                </>
-              )}
-            </button>
+              );
+            })()}
           </div>
         </div>
       </div>

@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { can, ROLE_LABELS } from '../lib/permissions';
 import {
   LayoutDashboard, ShoppingCart, Users, PackageOpen, LogOut, PlusSquare, Package,
-  Wallet, BarChart3, MoreHorizontal, X, ClipboardList, Tag, Truck, FileSpreadsheet,
+  Wallet, BarChart3, MoreHorizontal, X, ClipboardList, Tag, Truck, FileSpreadsheet, UserCheck,
 } from 'lucide-react';
 
 const NAV_GROUPS = [
@@ -68,6 +68,8 @@ export default function SaleLayout() {
         can(role, 'finance.view') && { path: '/cong-no', icon: <Wallet size={20} />, label: 'Công nợ', perm: 'finance.view' },
         // Báo cáo — admin/truong_phong/ke_toan
         can(role, 'reports.view') && { path: '/bao-cao', icon: <BarChart3 size={20} />, label: 'Báo cáo', perm: 'reports.view' },
+        // Nhân viên & phòng ban — chỉ Admin
+        can(role, 'admin.manage_staff') && { path: '/nhan-vien', icon: <UserCheck size={20} />, label: 'Nhân viên & phân quyền', perm: 'admin.manage_staff' },
       ].filter(Boolean) as { path: string; icon: React.ReactNode; label: string; perm: string | null }[];
 
   // Mobile: chỉ hiện 4 mục dùng nhiều nhất, còn lại gom vào nút "Thêm".

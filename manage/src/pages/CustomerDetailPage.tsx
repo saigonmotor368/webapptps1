@@ -8,6 +8,7 @@ import {
   FileSpreadsheet, Download, X, CheckCircle2, CalendarClock, Copy,
 } from 'lucide-react';
 import { can } from '../lib/permissions';
+import { isValidVietnamesePhone } from '../lib/phoneUtils';
 
 function money(v: number) { return new Intl.NumberFormat('vi-VN').format(Math.round(Number(v) || 0)) + 'đ'; }
 function dt(v: string) { return v ? new Date(v).toLocaleDateString('vi-VN') : '—'; }
@@ -229,26 +230,41 @@ export default function CustomerDetailPage() {
         alert(`✅ Đã tạo khách hàng! Mã: ${created?.partner_code}${created?.temp_password ? `, mật khẩu tạm: ${created.temp_password}` : ''}`);
         navigate(`/khach-hang/${created.id}`, { replace: true });
       } else {
-        const { error } = await supabase.rpc('admin_update_customer', {
-          p_id: id, ...payload,
-          p_credit_limit: Number(form.credit_limit) || 0,
-          p_notes: form.notes || '',
-          p_sales_rep_id: form.sales_rep_id || null,
-          p_contract_discount_percent: form.discount_tier === 'CUSTOM' ? Number(form.contract_discount_percent) || null : null,
-          p_tier_expiry_date: form.discount_tier === 'CUSTOM' ? form.tier_expiry_date || null : null,
-        });
-        if (error) throw error;
-        // Nhóm khách hàng là dữ liệu vận hành nội bộ của TPS1.
-        try {
-          await supabase
-            .from('vip_accounts')
-            .update({
-              customer_group: form.customer_group?.trim() || null,
-            })
-            .eq('id', id);
-        } catch (groupErr) {
-          console.warn('Chưa cập nhật nhóm khách hàng:', groupErr);
+        if (form.phone?.trim() && !isValidVietnamesePhone(form.phone.trim())) {
+          alert('Số điện thoại không đúng định dạng Việt Nam');
+          setSaving(false);
+          return;
         }
+
+        const patchPayload = {
+          name: form.name.trim(),
+          phone: form.phone.trim(),
+          company: form.company || '',
+          email: form.email || '',
+          tax_code: form.tax_code || '',
+          address: form.address || '',
+          default_shipping_alias: form.default_shipping_alias || 'Địa chỉ mặc định',
+          default_shipping_address: form.default_shipping_address || '',
+          default_shipping_name: form.default_shipping_name || '',
+          default_shipping_phone: form.default_shipping_phone || '',
+          discount_tier: form.discount_tier || 'VIP0',
+          credit_limit: Number(form.credit_limit) || 0,
+          notes: form.notes || '',
+          sales_rep_id: form.sales_rep_id || null,
+          customer_group: form.customer_group?.trim() || null,
+        };
+
+        const res = await authFetch(`${apiBase}/api/admin/customers/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patchPayload),
+        });
+
+        const patchData = await res.json();
+        if (!res.ok || !patchData.ok) {
+          throw new Error(patchData.error || 'Không lưu được');
+        }
+
         alert('✅ Đã lưu thông tin khách hàng');
         await loadCustomer();
       }

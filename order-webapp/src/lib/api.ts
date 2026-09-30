@@ -190,6 +190,10 @@ export interface Product {
   priceOnRequest?: boolean;
   available: boolean;
   stockQty?: number;
+  packagingNote?: string | null;
+  minOrderQty?: number;
+  orderStep?: number;
+  enforceOrderStep?: boolean;
 }
 
 export type ProductCatalogTuple = [
@@ -201,6 +205,10 @@ export type ProductCatalogTuple = [
   price: number,
   priceOnRequest: boolean,
   hasImage: boolean,
+  packagingNote?: string | null,
+  minOrderQty?: number,
+  orderStep?: number,
+  enforceOrderStep?: boolean,
 ];
 
 export interface ProductCatalogResponse {

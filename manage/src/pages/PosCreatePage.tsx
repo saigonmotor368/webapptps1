@@ -6,6 +6,7 @@ import { printOrderSlip } from '../lib/printOrder';
 import QuickAddProductModal from '../components/QuickAddProductModal';
 import ProductSearchBox, { type SearchProductItem } from '../components/ProductSearchBox';
 import { getApiBase } from '../lib/apiBase';
+import { validateOrderQuantity, formatQuantityVN } from '../lib/quantityRules';
 import {
   Search, Plus, Tag, Truck, RefreshCw, ShoppingCart, User, X, CheckCircle2, AlertTriangle, PlusCircle, ClipboardEdit,
   Calendar, Clock, MapPin
@@ -37,6 +38,10 @@ interface CartItem {
   trackInventory?: boolean;
   stockQty?: number | null;
   lowStock?: boolean;
+  packagingNote?: string | null;
+  minOrderQty?: number;
+  orderStep?: number;
+  enforceOrderStep?: boolean;
 }
 
 export interface DeletedOriginalItem {
@@ -492,17 +497,22 @@ export default function PosCreatePage() {
     if (activeTab.cart.some(i => i.productId === p.id)) {
       alert('Sản phẩm đã có trong giỏ, hãy tăng số lượng!'); return;
     }
+    const initialQty = p.enforceOrderStep && p.minOrderQty ? p.minOrderQty : (p.orderStep || 1);
     updateActiveTab(t => ({
       cart: [...t.cart, {
         productId: p.id,
         name: p.name,
         unit: p.unit || 'Kg',
-        quantity: 1,
+        quantity: initialQty,
         price: Number(p.price),
         image_url: p.thumb_url || p.image_url || undefined,
         trackInventory: !!p.trackInventory,
         stockQty: p.stockQty ?? null,
         lowStock: !!p.lowStock,
+        packagingNote: p.packagingNote || null,
+        minOrderQty: p.minOrderQty != null ? Number(p.minOrderQty) : 1,
+        orderStep: p.orderStep != null ? Number(p.orderStep) : 1,
+        enforceOrderStep: Boolean(p.enforceOrderStep),
       }],
     }));
   };
@@ -646,6 +656,13 @@ export default function PosCreatePage() {
 
     // WP6: Kiểm tra lý do điều chỉnh cho các mặt hàng bị đổi SL hoặc thêm mới
     for (const it of cart) {
+      if (it.enforceOrderStep) {
+        const err = validateOrderQuantity(it.quantity, it.minOrderQty, it.orderStep, true);
+        if (err) {
+          alert(`❌ Mặt hàng "${it.name}" chưa đúng quy cách: ${err}`);
+          return;
+        }
+      }
       if (it.orderedQty != null && Math.abs(it.quantity - it.orderedQty) > 0.0001 && !it.changeReason) {
         alert(`Vui lòng chọn lý do điều chỉnh số lượng cho "${it.name}" (khách đặt: ${it.orderedQty}, số lượng mới: ${it.quantity})`);
         return;
@@ -777,6 +794,16 @@ export default function PosCreatePage() {
 
     if (!selectedCustomerId) { alert('Vui lòng chọn khách hàng!'); return; }
     if (cart.length === 0) { alert('Giỏ hàng đang trống!'); return; }
+
+    for (const item of cart) {
+      if (item.enforceOrderStep) {
+        const err = validateOrderQuantity(item.quantity, item.minOrderQty, item.orderStep, true);
+        if (err) {
+          alert(`❌ Sản phẩm "${item.name}" chưa đúng quy cách: ${err}`);
+          return;
+        }
+      }
+    }
 
     const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
     const creditLimit = Number(selectedCustomer?.credit_limit) || 0;
@@ -1211,6 +1238,16 @@ export default function PosCreatePage() {
                       </div>
                       <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                         <p className="text-xs text-slate-400">{item.productId ? item.productId.substring(0, 8) : 'Tùy chỉnh'} | {item.unit}</p>
+                        {item.packagingNote && (
+                          <span className="text-[11px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 font-medium">
+                            📦 {item.packagingNote}
+                          </span>
+                        )}
+                        {item.enforceOrderStep && (
+                          <span className="text-[10px] text-slate-500 font-medium">
+                            Min: {formatQuantityVN(item.minOrderQty || 1)} · Bước: {formatQuantityVN(item.orderStep || 1)} {item.unit}
+                          </span>
+                        )}
                         {activeTab.processingOrderId && item.orderedQty != null && (
                           <span className="text-[11px] font-semibold text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
                             Khách đặt: {item.orderedQty} {item.unit}
@@ -1222,19 +1259,42 @@ export default function PosCreatePage() {
                       <X size={15} />
                     </button>
                   </div>
-                  <div className="flex gap-2 items-center">
-                    <div className="w-20">
-                      <input type="number" min="0.001" step="0.001" value={item.quantity} onChange={e => updateQty(idx, Number(e.target.value))}
-                        title="Số lượng (hỗ trợ số thập phân)"
-                        className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs text-center focus:outline-none font-medium" />
-                    </div>
-                    <div className="flex-1">
-                      <input type="number" min="0" step="1000" value={item.price} onChange={e => updatePrice(idx, Number(e.target.value))}
-                        title="Đơn giá"
-                        className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs text-right focus:outline-none font-medium" />
-                    </div>
-                    <span className="text-xs font-semibold text-slate-700 py-1 min-w-[65px] text-right">{money(item.quantity * item.price)}</span>
-                  </div>
+                  {(() => {
+                    const itemErr = item.enforceOrderStep
+                      ? validateOrderQuantity(item.quantity, item.minOrderQty, item.orderStep, true)
+                      : null;
+                    const step = item.enforceOrderStep && item.orderStep ? item.orderStep : 0.001;
+                    return (
+                      <>
+                        <div className="flex gap-2 items-center">
+                          <div className="w-20">
+                            <input
+                              type="number"
+                              min={item.enforceOrderStep && item.minOrderQty ? item.minOrderQty : 0.001}
+                              step={step}
+                              value={item.quantity}
+                              onChange={e => updateQty(idx, Number(e.target.value))}
+                              title={`Số lượng (${item.unit})`}
+                              className={`w-full border rounded-lg px-2 py-1 text-xs text-center focus:outline-none font-medium ${
+                                itemErr ? 'border-red-400 bg-red-50 text-red-700 font-bold' : 'border-slate-200'
+                              }`}
+                            />
+                          </div>
+                          <div className="flex-1">
+                            <input type="number" min="0" step="1000" value={item.price} onChange={e => updatePrice(idx, Number(e.target.value))}
+                              title="Đơn giá"
+                              className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs text-right focus:outline-none font-medium" />
+                          </div>
+                          <span className="text-xs font-semibold text-slate-700 py-1 min-w-[65px] text-right">{money(item.quantity * item.price)}</span>
+                        </div>
+                        {itemErr && (
+                          <p className="text-[11px] text-red-600 font-medium mt-1">
+                            ⚠️ {itemErr}
+                          </p>
+                        )}
+                      </>
+                    );
+                  })()}
 
                   {/* WP6: Lý do điều chỉnh khi số lượng khác số khách đặt ban đầu */}
                   {activeTab.processingOrderId && item.orderedQty != null && Math.abs(item.quantity - item.orderedQty) > 0.0001 && (

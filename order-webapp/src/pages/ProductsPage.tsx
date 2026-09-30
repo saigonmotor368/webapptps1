@@ -9,6 +9,7 @@ import {
   type FrequentItem,
   ApiError,
 } from '../lib/api';
+import { validateOrderQuantity } from '../lib/quantityRules';
 import { useAuth } from '../contexts/AuthContext';
 
 import OrderTabsBar, { type OrderTab } from '../components/products/OrderTabsBar';
@@ -40,7 +41,7 @@ function normalizeSearch(value: string) {
 
 function decodeCatalog(catalog: ProductCatalogResponse): Product[] {
   const imageBaseUrl = catalog.imageBaseUrl.replace(/\/$/, '');
-  return catalog.items.map(([id, sku, name, category, unit, price, priceOnRequest, hasImage]) => {
+  return catalog.items.map(([id, sku, name, category, unit, price, priceOnRequest, hasImage, packagingNote, minOrderQty, orderStep, enforceOrderStep]) => {
     const imageUrl = hasImage && imageBaseUrl ? `${imageBaseUrl}/${id}.webp` : null;
     const product: Product = {
       id,
@@ -53,6 +54,10 @@ function decodeCatalog(catalog: ProductCatalogResponse): Product[] {
       imageUrl,
       thumbUrl: imageUrl,
       available: true,
+      packagingNote: packagingNote || null,
+      minOrderQty: minOrderQty != null ? Number(minOrderQty) : 1,
+      orderStep: orderStep != null ? Number(orderStep) : 1,
+      enforceOrderStep: Boolean(enforceOrderStep),
     };
     productSearchKeys.set(id, normalizeSearch(`${sku} ${name} ${category || ''}`));
     return product;
@@ -411,17 +416,20 @@ export default function ProductsPage() {
   // Thao tác Thêm / Sửa số lượng / Ghi chú dòng
   const handleAddProduct = (
     product: Product,
-    quantityToAdd: number = 1,
+    quantityToAdd?: number,
     options?: { resetSearch?: boolean; keepFocus?: boolean }
   ) => {
-    const qty = Math.max(0.1, Number(quantityToAdd) || 1);
+    const defaultQty = product.enforceOrderStep && product.minOrderQty ? product.minOrderQty : (product.orderStep || 1);
+    const qty = quantityToAdd != null && quantityToAdd > 0 ? quantityToAdd : defaultQty;
     updateActiveTab((tab) => {
       const existingIdx = tab.items.findIndex((item) => item.product.id === product.id);
       if (existingIdx >= 0) {
+        const step = product.orderStep || 1;
+        const addAmount = quantityToAdd != null && quantityToAdd > 0 ? quantityToAdd : step;
         const updated = [...tab.items];
         updated[existingIdx] = {
           ...updated[existingIdx],
-          quantity: Number((updated[existingIdx].quantity + qty).toFixed(2)),
+          quantity: Math.round((updated[existingIdx].quantity + addAmount) * 1000) / 1000,
         };
         return { ...tab, items: updated };
       } else {
@@ -639,6 +647,22 @@ export default function ProductsPage() {
     ) {
       setErrorMessage('Vui lòng điền đầy đủ Tên, SĐT và Địa chỉ giao hàng');
       return;
+    }
+
+    // Kiểm tra quy cách từng món trong giỏ
+    for (const item of activeTab.items) {
+      if (item.product.enforceOrderStep) {
+        const err = validateOrderQuantity(
+          item.quantity,
+          item.product.minOrderQty,
+          item.product.orderStep,
+          true
+        );
+        if (err) {
+          setErrorMessage(`Mặt hàng "${item.product.name}" chưa đúng quy cách: ${err}`);
+          return;
+        }
+      }
     }
 
     setSubmitting(true);
