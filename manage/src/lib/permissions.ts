@@ -8,6 +8,7 @@
 
 export type Role =
   | 'admin'
+  | 'ban_giam_doc'
   | 'truong_phong'
   | 'sale'
   | 'thu_mua'
@@ -17,7 +18,8 @@ export type Role =
 
 /** Nhãn hiển thị cho từng role. */
 export const ROLE_LABELS: Record<string, string> = {
-  admin: 'Quản trị / BGĐ',
+  admin: 'Quản trị hệ thống',
+  ban_giam_doc: 'Ban Giám đốc',
   truong_phong: 'Trưởng phòng',
   sale: 'Sale / CSKH',
   thu_mua: 'Thu mua',
@@ -26,7 +28,7 @@ export const ROLE_LABELS: Record<string, string> = {
   tai_xe: 'Tài xế',
 };
 
-const PERMISSIONS: Record<string, string[]> = {
+const BASE_PERMISSIONS: Record<string, string[]> = {
   'orders.view': ['admin', 'truong_phong', 'sale', 'thu_mua', 'kho', 'ke_toan'],
   'orders.create': ['admin', 'truong_phong', 'sale'],
   'orders.bulk_confirm': ['admin', 'truong_phong', 'sale'],
@@ -54,10 +56,61 @@ const PERMISSIONS: Record<string, string[]> = {
   'admin.manage_staff': ['admin'],
 };
 
+const PERMISSIONS: Record<string, string[]> = Object.fromEntries(
+  Object.entries(BASE_PERMISSIONS).map(([permission, roles]) => [
+    permission,
+    permission === 'admin.manage_staff' || roles.includes('ban_giam_doc')
+      ? roles
+      : roles.includes('admin')
+        ? [...roles, 'ban_giam_doc']
+        : roles,
+  ]),
+);
+
 /** Kiểm tra xem `role` có quyền `perm` không. */
 export function can(role: string | undefined | null, perm: string): boolean {
   if (!role) return false;
   const allowed = PERMISSIONS[perm];
   if (!allowed) return false;
   return allowed.includes(role);
+}
+
+export type StaffPermissionProfile = {
+  role?: string | null;
+  position?: string | null;
+  department?: { function_group?: string | null } | { function_group?: string | null }[] | null;
+  departments?: { function_group?: string | null } | { function_group?: string | null }[] | null;
+};
+
+/** Quyền theo hồ sơ đầy đủ, tách Ban Giám đốc khỏi Quản trị hệ thống. */
+export function canForProfile(profile: StaffPermissionProfile | null | undefined, perm: string): boolean {
+  if (!profile) return false;
+  if (profile.role === 'admin' || profile.role === 'ban_giam_doc') return can(profile.role, perm);
+
+  const rawDepartment = profile.department ?? profile.departments;
+  const department = Array.isArray(rawDepartment) ? rawDepartment[0] : rawDepartment;
+  const group = department?.function_group || null;
+
+  if (profile.position === 'ban_giam_doc' || group === 'executive') {
+    return can('ban_giam_doc', perm);
+  }
+
+  if (profile.position === 'truong_phong' && group) {
+    if (perm === 'orders.approve_adjustment') {
+      return group === 'operations' || group === 'procurement';
+    }
+    const inheritedRole = group === 'operations'
+      ? 'sale'
+      : group === 'procurement'
+        ? 'thu_mua'
+        : group === 'accounting'
+          ? 'ke_toan'
+          : group === 'business_marketing'
+            ? 'sale'
+            : null;
+    if (!inheritedRole) return false;
+    return can(inheritedRole, perm);
+  }
+
+  return can(profile.role, perm);
 }

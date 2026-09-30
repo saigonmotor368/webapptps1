@@ -7,7 +7,8 @@ import {
 } from 'lucide-react';
 
 export const ROLE_LABELS: Record<string, string> = {
-  admin: 'Quản trị / BGĐ',
+  admin: 'Quản trị hệ thống',
+  ban_giam_doc: 'Ban Giám đốc',
   truong_phong: 'Trưởng phòng',
   sale: 'NV Vận hành',
   thu_mua: 'Thu mua',
@@ -15,6 +16,12 @@ export const ROLE_LABELS: Record<string, string> = {
   ke_toan: 'Kế toán',
   tai_xe: 'Tài xế',
 };
+
+function accessLabel(user: Pick<AdminUser, 'role' | 'position'>): string {
+  if (user.role === 'ban_giam_doc' || user.position === 'ban_giam_doc') return 'Ban Giám đốc';
+  if (user.position === 'quan_tri_he_thong') return 'Quản trị hệ thống';
+  return ROLE_LABELS[user.role] || user.role;
+}
 
 export const POSITION_LABELS: Record<string, string> = {
   nhan_vien: 'Nhân viên',
@@ -27,6 +34,7 @@ export const POSITION_LABELS: Record<string, string> = {
 
 const ROLE_BADGE_COLORS: Record<string, string> = {
   admin: 'bg-red-50 text-red-700 border-red-200',
+  ban_giam_doc: 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200',
   truong_phong: 'bg-purple-50 text-purple-700 border-purple-200',
   sale: 'bg-emerald-50 text-emerald-700 border-emerald-200',
   thu_mua: 'bg-blue-50 text-blue-700 border-blue-200',
@@ -106,6 +114,33 @@ export default function UsersPage() {
     setTimeout(() => {
       setToast((cur) => (cur?.message === message ? null : cur));
     }, 4000);
+  };
+
+  const departmentByGroup = (group: string) =>
+    departments.find((department) => department.function_group === group)?.id || '';
+
+  const changeAddRole = (role: string) => {
+    if (role === 'ban_giam_doc') {
+      setAddForm({ ...addForm, role, position: 'ban_giam_doc', departmentId: departmentByGroup('executive') });
+      return;
+    }
+    if (role === 'admin') {
+      setAddForm({ ...addForm, role, position: 'quan_tri_he_thong', departmentId: '' });
+      return;
+    }
+    setAddForm({ ...addForm, role });
+  };
+
+  const changeEditRole = (role: string) => {
+    if (role === 'ban_giam_doc') {
+      setEditForm({ ...editForm, role, position: 'ban_giam_doc', departmentId: departmentByGroup('executive') });
+      return;
+    }
+    if (role === 'admin') {
+      setEditForm({ ...editForm, role, position: 'quan_tri_he_thong', departmentId: '' });
+      return;
+    }
+    setEditForm({ ...editForm, role });
   };
 
   const fetchUsers = useCallback(async () => {
@@ -525,7 +560,7 @@ export default function UsersPage() {
                       ROLE_BADGE_COLORS[u.role] || 'bg-slate-100 text-slate-600 border-slate-200'
                     }`}
                   >
-                    {ROLE_LABELS[u.role] || u.role}
+                    {accessLabel(u)}
                   </span>
                   <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-medium">
                     {POSITION_LABELS[u.position] || u.position || 'Nhân viên'}
@@ -615,7 +650,7 @@ export default function UsersPage() {
                         }`}
                       >
                         <Shield size={12} />
-                        {ROLE_LABELS[u.role] || u.role}
+                        {accessLabel(u)}
                       </span>
                     </td>
                     <td className="px-4 py-4">
@@ -772,7 +807,7 @@ export default function UsersPage() {
                   </label>
                   <select
                     value={addForm.role}
-                    onChange={(e) => setAddForm({ ...addForm, role: e.target.value })}
+                    onChange={(e) => changeAddRole(e.target.value)}
                     className="w-full px-3 py-2 border border-slate-200 bg-white rounded-xl focus:ring-2 focus:ring-green-500/20 focus:border-green-500"
                   >
                     {Object.entries(ROLE_LABELS).map(([k, v]) => (
@@ -908,7 +943,7 @@ export default function UsersPage() {
                   <label className="block text-xs font-semibold text-slate-600 mb-1">Vai trò nghiệp vụ</label>
                   <select
                     value={editForm.role}
-                    onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}
+                    onChange={(e) => changeEditRole(e.target.value)}
                     className="w-full px-3 py-2 border border-slate-200 bg-white rounded-xl focus:ring-2 focus:ring-green-500/20 focus:border-green-500"
                   >
                     {Object.entries(ROLE_LABELS).map(([k, v]) => (
