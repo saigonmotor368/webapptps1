@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { printOrderSlip } from '../lib/printOrder';
 import QuickAddProductModal from '../components/QuickAddProductModal';
+import { canForProfile } from '../lib/permissions';
 
 // Thực tế TPS1 chỉ có 2 hình thức thanh toán: COD (trả ngay khi giao) và
 // công nợ (trả sau) — không dùng tiền mặt/chuyển khoản như 2 mục riêng.
@@ -51,7 +52,7 @@ interface LineItem {
 
 export default function OrderDetailPage() {
   const { id } = useParams();
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const navigate = useNavigate();
   const [order, setOrder] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -404,6 +405,7 @@ export default function OrderDetailPage() {
   const totals = calcTotals();
 
   const isLocked = order && (['shipping', 'completed', 'canceled'].includes(order.status) || ['paid', 'refunded'].includes(order.payment_status) || !!order.delivery_confirmed_at);
+  const canFinalizePricing = user?.userType === 'staff' && canForProfile(user, 'orders.finalize_pricing');
   const isTerminalStatus = !!order && ['completed', 'canceled'].includes(order.status);
   // Cột delivery_confirmed_at chỉ có sau migration 20260920g — chưa chạy thì giữ luồng cũ.
   const reconcileAvailable = !!order && 'delivery_confirmed_at' in order && ['confirmed', 'preparing', 'shipping'].includes(order.status) && order.pricing_status === 'finalized';
@@ -453,6 +455,10 @@ export default function OrderDetailPage() {
   };
 
   const handleFinalize = async () => {
+    if (!canFinalizePricing) {
+      alert('Tài khoản này không có quyền chốt giá đơn hàng.');
+      return;
+    }
     if (!confirm(`Xác nhận bảng giá và chốt tổng đơn ${money(totals.total)}?`)) return;
     setSaving(true);
     try {
@@ -958,6 +964,7 @@ export default function OrderDetailPage() {
             </div>
             <div className="p-5 space-y-5">
               {isLocked && <div className="p-3 bg-slate-50 text-slate-500 text-sm rounded-lg border border-slate-200">⚠️ Đơn đã thanh toán/đang giao/hoàn thành nên không thể chỉnh giá.</div>}
+              {!isLocked && !canFinalizePricing && <div className="p-3 bg-amber-50 text-amber-800 text-sm rounded-lg border border-amber-200">Tài khoản này chỉ được theo dõi và bổ sung thông tin. Nhân viên Vận hành, Trưởng phòng phụ trách hoặc Quản trị hệ thống sẽ chốt giá cuối.</div>}
 
               {/* Pricing source — price books replace the old VIP classification flow. */}
               {customerInfo && order.pricing_status !== 'finalized' && (
@@ -986,14 +993,14 @@ export default function OrderDetailPage() {
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 mb-1.5">Cách chốt giá</label>
-                  <select value={pricingMode} onChange={e => setPricingMode(e.target.value)} disabled={isLocked}
+                  <select value={pricingMode} onChange={e => setPricingMode(e.target.value)} disabled={isLocked || !canFinalizePricing}
                     className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20 disabled:opacity-60">
                     {PRICING_MODES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 mb-1.5">Phí giao hàng</label>
-                  <input type="number" min="0" step="1000" value={shippingAmount} onChange={e => setShippingAmount(Number(e.target.value))} disabled={isLocked}
+                  <input type="number" min="0" step="1000" value={shippingAmount} onChange={e => setShippingAmount(Number(e.target.value))} disabled={isLocked || !canFinalizePricing}
                     className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20 disabled:opacity-60" />
                 </div>
               </div>
@@ -1007,7 +1014,7 @@ export default function OrderDetailPage() {
                       type="number" min="0" max="100" step="0.5"
                       value={orderDiscountPercent}
                       onChange={e => setOrderDiscountPercent(Number(e.target.value))}
-                      disabled={isLocked}
+                      disabled={isLocked || !canFinalizePricing}
                       placeholder="Nhập % chiết khấu (0–100)"
                       className="flex-1 border border-blue-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:opacity-60 bg-white"
                     />
@@ -1019,13 +1026,13 @@ export default function OrderDetailPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 mb-1.5">Ghi chú xử lý bảng giá</label>
-                  <textarea value={verificationNote} onChange={e => setVerificationNote(e.target.value)} disabled={isLocked} rows={2}
+                  <textarea value={verificationNote} onChange={e => setVerificationNote(e.target.value)} disabled={isLocked || !canFinalizePricing} rows={2}
                     placeholder="Trao đổi với thu mua, thiếu hàng, áp bảng giá nhóm..."
                     className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20 resize-none disabled:opacity-60" />
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 mb-1.5">Ghi chú xác nhận giá</label>
-                  <textarea value={pricingNote} onChange={e => setPricingNote(e.target.value)} disabled={isLocked} rows={2}
+                  <textarea value={pricingNote} onChange={e => setPricingNote(e.target.value)} disabled={isLocked || !canFinalizePricing} rows={2}
                     placeholder="Lý do điều chỉnh giá..."
                     className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20 resize-none disabled:opacity-60" />
                 </div>
@@ -1044,7 +1051,7 @@ export default function OrderDetailPage() {
                 </div>
               </div>
 
-              {!isLocked && (
+              {!isLocked && canFinalizePricing && (
                 <button onClick={handleFinalize} disabled={saving}
                   className="w-full flex items-center justify-center gap-2 py-3 bg-green-600 text-white rounded-xl font-semibold hover:bg-green-700 disabled:opacity-60 transition-colors shadow-lg shadow-green-900/20">
                   <Save size={18} />

@@ -1,7 +1,7 @@
 import { lazy, Suspense, type ComponentType } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { can } from './lib/permissions';
+import { canForProfile } from './lib/permissions';
 import SaleLayout from './layouts/SaleLayout';
 import LoginPage from './pages/LoginPage';
 const CHUNK_RELOAD_KEY = 'tps1_manage_chunk_reload';
@@ -68,7 +68,7 @@ const StaffOnlyRoute = ({ children, perm }: { children: React.ReactNode; perm?: 
   if (loading) return <LoadingScreen />;
   if (!user) return <Navigate to="/dang-nhap" />;
   if (user.userType !== 'staff') return <Navigate to="/" replace />;
-  if (perm && !can(user.role, perm)) return <Navigate to="/" replace />;
+  if (perm && !canForProfile(user, perm)) return <Navigate to="/" replace />;
   return <>{children}</>;
 };
 

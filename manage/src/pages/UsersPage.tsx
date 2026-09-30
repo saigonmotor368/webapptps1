@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import {
   Users, UserPlus, RefreshCw, Search, ShieldAlert,
   CheckCircle2, AlertCircle, Pencil, X, Check, Eye, EyeOff,
-  Building2, Lock, Unlock, Mail, Shield
+  Building2, Lock, Unlock, Mail, Shield, Key, Copy, Info
 } from 'lucide-react';
 
 export const ROLE_LABELS: Record<string, string> = {
@@ -42,6 +42,41 @@ const ROLE_BADGE_COLORS: Record<string, string> = {
   ke_toan: 'bg-indigo-50 text-indigo-700 border-indigo-200',
   tai_xe: 'bg-cyan-50 text-cyan-700 border-cyan-200',
 };
+
+function generateRandomPassword(): string {
+  const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const lower = 'abcdefghjkmnpqrstuvwxyz';
+  const digits = '23456789';
+  const special = '!@#$%';
+  const all = upper + lower + digits + special;
+  const randomIndex = (length: number) => {
+    const value = new Uint32Array(1);
+    crypto.getRandomValues(value);
+    return value[0] % length;
+  };
+  const pass = [
+    upper[randomIndex(upper.length)],
+    lower[randomIndex(lower.length)],
+    digits[randomIndex(digits.length)],
+    special[randomIndex(special.length)],
+  ];
+  for (let i = 0; i < 6; i++) {
+    pass.push(all[randomIndex(all.length)]);
+  }
+  for (let i = pass.length - 1; i > 0; i--) {
+    const j = randomIndex(i + 1);
+    [pass[i], pass[j]] = [pass[j], pass[i]];
+  }
+  return pass.join('');
+}
+
+function isStrongStaffPassword(password: string): boolean {
+  return password.length >= 10
+    && /[A-Z]/.test(password)
+    && /[a-z]/.test(password)
+    && /\d/.test(password)
+    && /[^A-Za-z0-9]/.test(password);
+}
 
 interface Department {
   id: string;
@@ -106,6 +141,16 @@ export default function UsersPage() {
   const [savingEdit, setSavingEdit] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
 
+  // Modal xác nhận khóa / mở khóa tài khoản
+  const [confirmStatusUser, setConfirmStatusUser] = useState<AdminUser | null>(null);
+  const [togglingStatus, setTogglingStatus] = useState(false);
+
+  // Modal đặt lại mật khẩu
+  const [resetUser, setResetUser] = useState<AdminUser | null>(null);
+  const [resetting, setResetting] = useState(false);
+  const [resetResult, setResetResult] = useState<{ email: string; name: string; tempPassword: string } | null>(null);
+  const [showResetPassword, setShowResetPassword] = useState(true);
+
   // Toast feedback
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
@@ -119,28 +164,63 @@ export default function UsersPage() {
   const departmentByGroup = (group: string) =>
     departments.find((department) => department.function_group === group)?.id || '';
 
+  const recommendedRoleForDepartment = (departmentId: string) => {
+    const group = departments.find((department) => department.id === departmentId)?.function_group;
+    if (group === 'executive') return 'Ban Giám đốc';
+    if (group === 'procurement') return 'Thu mua hoặc Trưởng phòng';
+    if (group === 'accounting') return 'Kế toán hoặc Trưởng phòng';
+    if (group === 'operations' || group === 'business_marketing') return 'NV Vận hành hoặc Trưởng phòng';
+    return '';
+  };
+
   const changeAddRole = (role: string) => {
     if (role === 'ban_giam_doc') {
-      setAddForm({ ...addForm, role, position: 'ban_giam_doc', departmentId: departmentByGroup('executive') });
+      setAddForm((prev) => ({
+        ...prev,
+        role,
+        position: 'ban_giam_doc',
+        departmentId: departmentByGroup('executive') || prev.departmentId,
+      }));
       return;
     }
     if (role === 'admin') {
-      setAddForm({ ...addForm, role, position: 'quan_tri_he_thong', departmentId: '' });
+      setAddForm((prev) => ({ ...prev, role, position: 'quan_tri_he_thong', departmentId: '' }));
       return;
     }
-    setAddForm({ ...addForm, role });
+    if (role === 'truong_phong') {
+      setAddForm((prev) => ({ ...prev, role, position: 'truong_phong' }));
+      return;
+    }
+    setAddForm((prev) => ({ ...prev, role }));
+  };
+
+  const changeAddDepartment = (deptId: string) => {
+    setAddForm((prev) => ({ ...prev, departmentId: deptId }));
   };
 
   const changeEditRole = (role: string) => {
     if (role === 'ban_giam_doc') {
-      setEditForm({ ...editForm, role, position: 'ban_giam_doc', departmentId: departmentByGroup('executive') });
+      setEditForm((prev) => ({
+        ...prev,
+        role,
+        position: 'ban_giam_doc',
+        departmentId: departmentByGroup('executive') || prev.departmentId,
+      }));
       return;
     }
     if (role === 'admin') {
-      setEditForm({ ...editForm, role, position: 'quan_tri_he_thong', departmentId: '' });
+      setEditForm((prev) => ({ ...prev, role, position: 'quan_tri_he_thong', departmentId: '' }));
       return;
     }
-    setEditForm({ ...editForm, role });
+    if (role === 'truong_phong') {
+      setEditForm((prev) => ({ ...prev, role, position: 'truong_phong' }));
+      return;
+    }
+    setEditForm((prev) => ({ ...prev, role }));
+  };
+
+  const changeEditDepartment = (deptId: string) => {
+    setEditForm((prev) => ({ ...prev, departmentId: deptId }));
   };
 
   const fetchUsers = useCallback(async () => {
@@ -163,6 +243,7 @@ export default function UsersPage() {
   }, [apiBase, authFetch]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- tải dữ liệu ban đầu khi màn hình được mở
     fetchUsers();
   }, [fetchUsers]);
 
@@ -171,7 +252,8 @@ export default function UsersPage() {
     const total = users.length;
     const active = users.filter((u) => u.is_active).length;
     const missingDept = users.filter((u) => u.is_active && !u.department_id && u.role !== 'admin').length;
-    return { total, active, missingDept, totalDepts: departments.length };
+    const activeAdmins = users.filter((u) => u.is_active && u.role === 'admin').length;
+    return { total, active, missingDept, totalDepts: departments.length, activeAdmins };
   }, [users, departments]);
 
   // Filtered users list
@@ -214,6 +296,21 @@ export default function UsersPage() {
     );
   }
 
+  // Open Add Modal with generated temp password
+  const openAddModal = () => {
+    setAddForm({
+      name: '',
+      email: '',
+      password: generateRandomPassword(),
+      role: 'sale',
+      position: 'nhan_vien',
+      departmentId: '',
+    });
+    setAddError(null);
+    setShowPassword(false);
+    setShowAddModal(true);
+  };
+
   // Handle Add User
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -223,12 +320,16 @@ export default function UsersPage() {
       setAddError('Vui lòng điền đầy đủ họ tên, email và mật khẩu');
       return;
     }
-    if (addForm.password.length < 6) {
-      setAddError('Mật khẩu phải có tối thiểu 6 ký tự');
+    if (!isStrongStaffPassword(addForm.password)) {
+      setAddError('Mật khẩu phải có ít nhất 10 ký tự, gồm chữ hoa, chữ thường, số và ký tự đặc biệt');
       return;
     }
     if (addForm.role !== 'admin' && !addForm.departmentId) {
-      setAddError('Vui lòng chọn phòng ban cho nhân viên');
+      setAddError('Vui lòng chọn phòng ban cho nhân viên nghiệp vụ');
+      return;
+    }
+    if (addForm.role === 'truong_phong' && addForm.position !== 'truong_phong') {
+      setAddError('Vai trò Trưởng phòng bắt buộc phải chọn chức vụ Trưởng phòng');
       return;
     }
 
@@ -253,14 +354,6 @@ export default function UsersPage() {
 
       showToast(`Đã tạo tài khoản cho nhân viên "${data.user?.name}" thành công`);
       setShowAddModal(false);
-      setAddForm({
-        name: '',
-        email: '',
-        password: '',
-        role: 'sale',
-        position: 'nhan_vien',
-        departmentId: '',
-      });
       fetchUsers();
     } catch (err: any) {
       setAddError(err.message || 'Lỗi khi tạo nhân viên');
@@ -288,6 +381,10 @@ export default function UsersPage() {
 
     if (editForm.role !== 'admin' && !editForm.departmentId) {
       setEditError('Nhân viên nghiệp vụ bắt buộc phải gán phòng ban');
+      return;
+    }
+    if (editForm.role === 'truong_phong' && editForm.position !== 'truong_phong') {
+      setEditError('Vai trò Trưởng phòng bắt buộc phải chọn chức vụ Trưởng phòng');
       return;
     }
 
@@ -319,29 +416,73 @@ export default function UsersPage() {
     }
   };
 
-  // Quick toggle active
-  const handleToggleActive = async (targetUser: AdminUser, e: React.MouseEvent) => {
-    e.stopPropagation();
-    const action = targetUser.is_active ? 'Khóa' : 'Kích hoạt';
-    if (!confirm(`Bạn có chắc muốn ${action.toLowerCase()} tài khoản "${targetUser.name}"?`)) return;
+  // Execute Toggle Active Status via Modal
+  const handleConfirmToggleActive = async () => {
+    if (!confirmStatusUser) return;
+    const actionText = confirmStatusUser.is_active ? 'Khóa' : 'Kích hoạt';
 
+    setTogglingStatus(true);
     try {
       const res = await authFetch(`${apiBase}/api/admin/users`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          userId: targetUser.id,
-          isActive: !targetUser.is_active,
+          userId: confirmStatusUser.id,
+          isActive: !confirmStatusUser.is_active,
         }),
       });
       const data = await res.json();
       if (!res.ok || !data.ok) {
         throw new Error(data.error || 'Không thể thay đổi trạng thái tài khoản');
       }
-      showToast(`Đã ${action.toLowerCase()} tài khoản "${targetUser.name}"`);
+      showToast(`Đã ${actionText.toLowerCase()} tài khoản "${confirmStatusUser.name}"`);
+      setConfirmStatusUser(null);
       fetchUsers();
     } catch (err: any) {
       showToast(err.message || 'Lỗi khi thao tác', 'error');
+    } finally {
+      setTogglingStatus(false);
+    }
+  };
+
+  // Handle Reset Password Request
+  const handleExecuteResetPassword = async () => {
+    if (!resetUser) return;
+    setResetting(true);
+    try {
+      const res = await authFetch(`${apiBase}/api/admin/users/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: resetUser.id }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || 'Không thể đặt lại mật khẩu');
+      }
+
+      setResetResult({
+        email: data.email || resetUser.email,
+        name: resetUser.name,
+        tempPassword: data.tempPassword,
+      });
+      setShowResetPassword(true);
+      setResetUser(null);
+      showToast(`Đã đặt lại mật khẩu cho "${resetUser.name}" thành công`);
+    } catch (err: any) {
+      showToast(err.message || 'Lỗi khi đặt lại mật khẩu', 'error');
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  const copyCredentials = async () => {
+    if (!resetResult) return;
+    const textToCopy = `Tài khoản: ${resetResult.email}\nMật khẩu tạm: ${resetResult.tempPassword}`;
+    try {
+      await navigator.clipboard.writeText(textToCopy);
+      showToast(`Đã sao chép thông tin đăng nhập của ${resetResult.name}`);
+    } catch {
+      showToast('Không thể sao chép tự động, vui lòng chọn và copy thủ công', 'error');
     }
   };
 
@@ -374,7 +515,7 @@ export default function UsersPage() {
         </div>
         <div className="flex gap-2 items-center flex-wrap">
           <button
-            onClick={() => setShowAddModal(true)}
+            onClick={openAddModal}
             className="px-4 py-2 bg-green-600 text-white rounded-xl text-sm font-semibold hover:bg-green-700 flex items-center gap-1.5 shadow-sm shadow-green-600/20"
           >
             <UserPlus size={16} /> Thêm nhân viên mới
@@ -435,7 +576,7 @@ export default function UsersPage() {
         </div>
       </div>
 
-      {/* Cảnh báo tài khoản chưa gán phòng ban (G4) */}
+      {/* Cảnh báo tài khoản chưa gán phòng ban */}
       {stats.missingDept > 0 && (
         <div className="bg-amber-50 border border-amber-200/80 rounded-2xl p-4 flex items-start sm:items-center justify-between gap-3 text-amber-900 animate-in fade-in">
           <div className="flex items-start sm:items-center gap-3">
@@ -529,7 +670,10 @@ export default function UsersPage() {
         {/* Mobile View */}
         <div className="md:hidden divide-y divide-slate-100">
           {loading ? (
-            <div className="text-center py-10 text-slate-500">Đang tải dữ liệu...</div>
+            <div className="p-8 text-center text-slate-500 space-y-2">
+              <RefreshCw size={24} className="mx-auto animate-spin text-slate-400" />
+              <p className="text-sm">Đang tải danh sách nhân viên...</p>
+            </div>
           ) : filteredUsers.length === 0 ? (
             <div className="text-center py-12 text-slate-400">
               <Users size={32} className="mx-auto mb-2 opacity-40" />
@@ -586,18 +730,25 @@ export default function UsersPage() {
                 <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-50">
                   <button
                     onClick={() => openEditModal(u)}
-                    className="px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-medium hover:bg-emerald-100 flex items-center gap-1"
+                    className="px-2.5 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-medium hover:bg-emerald-100 flex items-center gap-1"
                   >
                     <Pencil size={13} /> Sửa
                   </button>
                   <button
-                    onClick={(e) => handleToggleActive(u, e)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 ${
+                    onClick={() => setResetUser(u)}
+                    className="px-2.5 py-1.5 bg-slate-100 text-slate-700 rounded-lg text-xs font-medium hover:bg-slate-200 flex items-center gap-1"
+                    title="Đặt lại mật khẩu"
+                  >
+                    <Key size={13} /> Mật khẩu
+                  </button>
+                  <button
+                    onClick={() => setConfirmStatusUser(u)}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 ${
                       u.is_active ? 'bg-rose-50 text-rose-700 hover:bg-rose-100' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                     }`}
                   >
                     {u.is_active ? <Lock size={13} /> : <Unlock size={13} />}
-                    {u.is_active ? 'Khóa' : 'Kích hoạt'}
+                    {u.is_active ? 'Khóa' : 'Mở khóa'}
                   </button>
                 </div>
               </article>
@@ -694,7 +845,14 @@ export default function UsersPage() {
                           <Pencil size={13} /> Sửa
                         </button>
                         <button
-                          onClick={(e) => handleToggleActive(u, e)}
+                          onClick={() => setResetUser(u)}
+                          className="px-2.5 py-1.5 rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 text-xs font-medium flex items-center gap-1 transition-colors"
+                          title="Đặt lại mật khẩu tạm"
+                        >
+                          <Key size={13} /> Đặt lại MK
+                        </button>
+                        <button
+                          onClick={() => setConfirmStatusUser(u)}
                           className={`p-1.5 rounded-lg text-xs transition-colors ${
                             u.is_active
                               ? 'bg-rose-50 text-rose-600 hover:bg-rose-100'
@@ -714,7 +872,7 @@ export default function UsersPage() {
         </div>
       </div>
 
-      {/* Modal Thêm nhân viên mới (G4) */}
+      {/* Modal Thêm nhân viên mới */}
       {showAddModal && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/50 backdrop-blur-xs"
@@ -777,18 +935,27 @@ export default function UsersPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">
-                  Mật khẩu khởi tạo <span className="text-rose-500">*</span>
-                  <span className="text-slate-400 font-normal"> (tối thiểu 6 ký tự)</span>
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-semibold text-slate-600">
+                    Mật khẩu khởi tạo <span className="text-rose-500">*</span>
+                    <span className="text-slate-400 font-normal"> (ít nhất 10 ký tự, đủ hoa/thường/số/ký tự đặc biệt)</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setAddForm({ ...addForm, password: generateRandomPassword() })}
+                    className="text-xs text-green-700 hover:text-green-800 font-medium underline flex items-center gap-1"
+                  >
+                    <RefreshCw size={11} /> Tạo ngẫu nhiên
+                  </button>
+                </div>
                 <div className="relative">
                   <input
                     type={showPassword ? 'text' : 'password'}
                     required
                     value={addForm.password}
                     onChange={(e) => setAddForm({ ...addForm, password: e.target.value })}
-                    placeholder="Nhập mật khẩu an toàn..."
-                    className="w-full px-3 py-2 pr-10 border border-slate-200 rounded-xl focus:ring-2 focus:ring-green-500/20 focus:border-green-500"
+                    placeholder="Nhập hoặc tạo mật khẩu..."
+                    className="w-full px-3 py-2 pr-10 border border-slate-200 rounded-xl focus:ring-2 focus:ring-green-500/20 focus:border-green-500 font-mono text-sm"
                   />
                   <button
                     type="button"
@@ -842,7 +1009,7 @@ export default function UsersPage() {
                 </label>
                 <select
                   value={addForm.departmentId}
-                  onChange={(e) => setAddForm({ ...addForm, departmentId: e.target.value })}
+                  onChange={(e) => changeAddDepartment(e.target.value)}
                   className={`w-full px-3 py-2 border bg-white rounded-xl focus:ring-2 focus:outline-none ${
                     addForm.role !== 'admin' && !addForm.departmentId
                       ? 'border-amber-300 focus:border-amber-500'
@@ -862,7 +1029,12 @@ export default function UsersPage() {
                   </p>
                 ) : (
                   <p className="text-[11px] text-slate-400 mt-1">
-                    Tài khoản Quản trị viên (Admin) có thể để trống phòng ban
+                    Tài khoản Quản trị hệ thống (Admin) có thể để trống phòng ban
+                  </p>
+                )}
+                {recommendedRoleForDepartment(addForm.departmentId) && (
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Gợi ý vai trò phù hợp: {recommendedRoleForDepartment(addForm.departmentId)}. Hệ thống không tự đổi lựa chọn của anh/chị.
                   </p>
                 )}
               </div>
@@ -896,7 +1068,7 @@ export default function UsersPage() {
         </div>
       )}
 
-      {/* Modal Sửa nhân viên (G4) */}
+      {/* Modal Sửa nhân viên */}
       {editingUser && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/50 backdrop-blur-xs"
@@ -976,7 +1148,7 @@ export default function UsersPage() {
                 </label>
                 <select
                   value={editForm.departmentId}
-                  onChange={(e) => setEditForm({ ...editForm, departmentId: e.target.value })}
+                  onChange={(e) => changeEditDepartment(e.target.value)}
                   className={`w-full px-3 py-2 border bg-white rounded-xl focus:ring-2 focus:outline-none ${
                     editForm.role !== 'admin' && !editForm.departmentId
                       ? 'border-amber-300 focus:border-amber-500'
@@ -993,6 +1165,11 @@ export default function UsersPage() {
                 {editForm.role !== 'admin' && !editForm.departmentId && (
                   <p className="text-[11px] text-amber-600 mt-1">
                     * Lưu ý: Cần gán phòng ban cho nhân viên nghiệp vụ
+                  </p>
+                )}
+                {recommendedRoleForDepartment(editForm.departmentId) && (
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Gợi ý vai trò phù hợp: {recommendedRoleForDepartment(editForm.departmentId)}. Hệ thống không tự đổi vai trò hiện tại.
                   </p>
                 )}
               </div>
@@ -1048,6 +1225,230 @@ export default function UsersPage() {
                   </>
                 )}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Xác nhận Khóa / Kích hoạt tài khoản */}
+      {confirmStatusUser && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/50 backdrop-blur-xs"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="p-6 space-y-4">
+              <div className="flex items-center gap-3">
+                <div
+                  className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${
+                    confirmStatusUser.is_active ? 'bg-rose-100 text-rose-600' : 'bg-emerald-100 text-emerald-600'
+                  }`}
+                >
+                  {confirmStatusUser.is_active ? <Lock size={24} /> : <Unlock size={24} />}
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-slate-800">
+                    {confirmStatusUser.is_active ? 'Xác nhận khóa tài khoản' : 'Xác nhận kích hoạt tài khoản'}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    {confirmStatusUser.name} ({confirmStatusUser.email})
+                  </p>
+                </div>
+              </div>
+
+              {/* Kiểm tra trường hợp tự khóa chính mình */}
+              {user?.id === confirmStatusUser.id && confirmStatusUser.is_active ? (
+                <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 flex items-start gap-2">
+                  <AlertCircle size={16} className="text-rose-600 shrink-0 mt-0.5" />
+                  <span>Bạn đang đăng nhập bằng tài khoản này. Không thể tự khóa tài khoản của chính mình.</span>
+                </div>
+              ) : confirmStatusUser.role === 'admin' && confirmStatusUser.is_active && stats.activeAdmins <= 1 ? (
+                <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 flex items-start gap-2">
+                  <AlertCircle size={16} className="text-rose-600 shrink-0 mt-0.5" />
+                  <span>Đây là tài khoản Quản trị hệ thống đang hoạt động duy nhất. Không thể khóa tài khoản này.</span>
+                </div>
+              ) : (
+                <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-xl text-xs text-slate-600 space-y-1.5">
+                  <p className="font-semibold text-slate-700">Tác động khi thực hiện:</p>
+                  {confirmStatusUser.is_active ? (
+                    <p>
+                      Tài khoản sẽ bị vô hiệu hóa ngay lập tức. Nhân viên sẽ không thể đăng nhập hoặc thực hiện bất kỳ thao tác nào trên hệ thống cho đến khi được mở lại.
+                    </p>
+                  ) : (
+                    <p>
+                      Tài khoản sẽ được kích hoạt lại và nhân viên có thể sử dụng email &amp; mật khẩu hiện tại để đăng nhập hệ thống bình thường.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setConfirmStatusUser(null)}
+                  className="px-4 py-2 border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 font-medium text-sm transition-colors"
+                >
+                  Hủy bỏ
+                </button>
+                <button
+                  type="button"
+                  disabled={
+                    togglingStatus ||
+                    (user?.id === confirmStatusUser.id && confirmStatusUser.is_active) ||
+                    (confirmStatusUser.role === 'admin' && confirmStatusUser.is_active && stats.activeAdmins <= 1)
+                  }
+                  onClick={handleConfirmToggleActive}
+                  className={`px-4 py-2 rounded-xl font-semibold text-sm transition-colors disabled:opacity-50 flex items-center gap-1.5 ${
+                    confirmStatusUser.is_active
+                      ? 'bg-rose-600 text-white hover:bg-rose-700'
+                      : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                  }`}
+                >
+                  {togglingStatus ? (
+                    <>
+                      <RefreshCw size={15} className="animate-spin" /> Đang xử lý...
+                    </>
+                  ) : confirmStatusUser.is_active ? (
+                    <>
+                      <Lock size={15} /> Khóa tài khoản
+                    </>
+                  ) : (
+                    <>
+                      <Unlock size={15} /> Mở khóa ngay
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Xác nhận Đặt lại mật khẩu */}
+      {resetUser && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/50 backdrop-blur-xs"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="p-6 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-600 flex items-center justify-center shrink-0">
+                  <Key size={24} />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-slate-800">Đặt lại mật khẩu nhân viên</h3>
+                  <p className="text-xs text-slate-500">
+                    {resetUser.name} · <span className="font-mono">{resetUser.email}</span>
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-xl text-xs text-slate-600 space-y-1.5">
+                <p className="font-semibold text-slate-700">Quy trình cấp lại mật khẩu an toàn:</p>
+                <p>
+                  Hệ thống sẽ sinh một mật khẩu tạm ngẫu nhiên mới và vô hiệu hóa mật khẩu cũ. Mật khẩu mới sẽ hiển thị trực tiếp để bạn sao chép và gửi cho nhân viên.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setResetUser(null)}
+                  className="px-4 py-2 border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 font-medium text-sm transition-colors"
+                >
+                  Hủy bỏ
+                </button>
+                <button
+                  type="button"
+                  disabled={resetting}
+                  onClick={handleExecuteResetPassword}
+                  className="px-4 py-2 bg-amber-600 text-white rounded-xl hover:bg-amber-700 font-semibold text-sm transition-colors disabled:opacity-50 flex items-center gap-1.5 shadow-sm shadow-amber-600/20"
+                >
+                  {resetting ? (
+                    <>
+                      <RefreshCw size={15} className="animate-spin" /> Đang cập nhật...
+                    </>
+                  ) : (
+                    <>
+                      <Key size={15} /> Tạo mật khẩu mới
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Kết quả Đặt lại mật khẩu */}
+      {resetResult && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/50 backdrop-blur-xs"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="p-6 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                  <CheckCircle2 size={26} />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-slate-800">Đặt lại mật khẩu thành công</h3>
+                  <p className="text-xs text-slate-500">Thông tin đăng nhập mới cho {resetResult.name}</p>
+                </div>
+              </div>
+
+              <div className="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-200/80 text-sm">
+                <div>
+                  <span className="text-xs text-slate-500 block mb-0.5">Tên đăng nhập / Email</span>
+                  <div className="font-mono font-semibold text-slate-800 select-all">{resetResult.email}</div>
+                </div>
+
+                <div>
+                  <span className="text-xs text-slate-500 block mb-0.5">Mật khẩu tạm thời</span>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-base font-bold text-green-700 tracking-wider select-all">
+                      {showResetPassword ? resetResult.tempPassword : '••••••••••••'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowResetPassword(!showResetPassword)}
+                      className="p-1 text-slate-400 hover:text-slate-600"
+                      title={showResetPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
+                    >
+                      {showResetPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-3 bg-blue-50 border border-blue-200/80 rounded-xl text-xs text-blue-800 flex items-start gap-2">
+                <Info size={16} className="text-blue-600 shrink-0 mt-0.5" />
+                <span>
+                  Vui lòng gửi thông tin này cho nhân viên qua kênh liên lạc an toàn và nhắc nhân viên đổi mật khẩu ngay sau khi đăng nhập lần đầu.
+                </span>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setResetResult(null)}
+                  className="px-4 py-2 border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-100 font-medium text-sm transition-colors"
+                >
+                  Đóng
+                </button>
+                <button
+                  type="button"
+                  onClick={copyCredentials}
+                  className="px-4 py-2 bg-green-600 text-white rounded-xl hover:bg-green-700 font-semibold text-sm transition-colors flex items-center gap-1.5 shadow-sm shadow-green-600/20"
+                >
+                  <Copy size={15} /> Sao chép thông tin đăng nhập
+                </button>
+              </div>
             </div>
           </div>
         </div>
