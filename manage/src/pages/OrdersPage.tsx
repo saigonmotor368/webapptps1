@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { printOrderSlip, printBatchOrderSlips } from '../lib/printOrder';
 import MergeOrdersModal from '../components/MergeOrdersModal';
@@ -151,83 +150,27 @@ export default function OrdersPage() {
           .catch((e) => console.warn('Lỗi tải order-change-requests:', e));
       }
 
-      let query = supabase
-        .from('orders')
-        .select(`
-          id, order_code, status, payment_status, payment_method, source,
-          subtotal, discount_amount, discount_percent, shipping_amount, grand_total,
-          paid_amount, debt_amount,
-          voucher_code, voucher_discount, manual_discount_percent,
-          note, pricing_note, created_at, updated_at, confirmed_at,
-          customer_id, customer_code, customer_name, customer_phone, customer_company,
-          customer_tier, pricing_status, price_revision, confirmation_document_status,
-          delivery_type, delivery_date, delivery_shift, delivery_address, delivery_name,
-          delivery_phone, delivery_alias, sales_rep_id, item_count, merged_into_order_id
-        `, { count: 'exact' })
-        .order('created_at', { ascending: false })
-        .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
-
-      let statsQuery = supabase
-        .from('orders')
-        .select('status, grand_total')
-        .limit(10000);
-
-      if (dateFrom) { query = query.gte('created_at', dateFrom); statsQuery = statsQuery.gte('created_at', dateFrom); }
-      if (dateTo) { query = query.lt('created_at', `${dateTo}T23:59:59.999`); statsQuery = statsQuery.lt('created_at', `${dateTo}T23:59:59.999`); }
-      if (filterStatus) query = query.eq('status', filterStatus);
-      if (filterPayment) query = query.eq('payment_status', filterPayment);
-      if (debouncedSearch) {
-        const safe = debouncedSearch.replace(/[,%()]/g, ' ').trim();
-        if (safe) query = query.or(`order_code.ilike.%${safe}%,customer_code.ilike.%${safe}%,customer_name.ilike.%${safe}%,customer_phone.ilike.%${safe}%,customer_company.ilike.%${safe}%`);
-      }
-
-      if (user?.role === 'sale' && user.id && user.id !== 'legacy-admin') {
-        const { data: myCustomers } = await supabase
-          .from('vip_accounts')
-          .select('id, partner_code')
-          .eq('sales_rep_id', user.id);
-        const myCodes = (myCustomers || []).map((c: any) => c.partner_code).filter(Boolean);
-        if (myCodes.length > 0) {
-          query = query.in('customer_code', myCodes);
-          statsQuery = statsQuery.in('customer_code', myCodes);
-        } else {
-          setOrders([]); setLoading(false); return;
-        }
-      }
-
-      const statsPromise = Promise.resolve(statsQuery);
-      const { data, error, count } = await query;
-      if (error) throw error;
-      setTotalCount(count || 0);
-      setOrders(data || []);
-      setLoading(false);
-
-      const salesRepIds = [...new Set((data || []).map((o: any) => o.sales_rep_id).filter(Boolean))];
-      const [{ data: statsRows, error: statsError }, { data: reps }] = await Promise.all([
-        statsPromise,
-        salesRepIds.length
-          ? supabase.from('admin_profiles').select('id, name').in('id', salesRepIds)
-          : Promise.resolve({ data: [] as { id: string; name: string }[] }),
-      ]);
-      if (statsError) console.warn('Lỗi tải thống kê đơn hàng:', statsError);
-      const summary = (statsRows || []).reduce((acc: any, order: any) => {
-        if (order.status === 'pending') acc.pending += 1;
-        if (order.status === 'preparing') acc.preparing += 1;
-        if (order.status === 'shipping') acc.shipping += 1;
-        if (order.status === 'completed') acc.completed += 1;
-        if (order.status !== 'canceled' && order.status !== 'merged') acc.revenue += Number(order.grand_total) || 0;
-        return acc;
-      }, { pending: 0, preparing: 0, shipping: 0, completed: 0, revenue: 0 });
-      setStats(summary);
-      const repMap = new Map((reps || []).map((r: any) => [r.id, r.name]));
-
-      setOrders((data || []).map((o: any) => ({ ...o, sales_rep_name: repMap.get(o.sales_rep_id) || null })));
+      if (!token) throw new Error('Phiên đăng nhập đã hết hạn');
+      const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+      if (dateFrom) params.set('from', dateFrom);
+      if (dateTo) params.set('to', `${dateTo}T23:59:59.999`);
+      if (filterStatus) params.set('status', filterStatus);
+      if (filterPayment) params.set('paymentStatus', filterPayment);
+      if (debouncedSearch) params.set('search', debouncedSearch);
+      const response = await fetch(`${apiBase}/api/admin/orders?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result?.ok) throw new Error(result?.error || 'Không tải được danh sách đơn hàng');
+      setTotalCount(Number(result.count) || 0);
+      setOrders(Array.isArray(result.orders) ? result.orders : []);
+      setStats(result.stats || { pending: 0, preparing: 0, shipping: 0, completed: 0, revenue: 0 });
     } catch (err) {
       console.error('Lỗi tải đơn hàng:', err);
     } finally {
       setLoading(false);
     }
-  }, [user, dateFrom, dateTo, filterStatus, filterPayment, debouncedSearch, page, token, apiBase]);
+  }, [dateFrom, dateTo, filterStatus, filterPayment, debouncedSearch, page, token, apiBase]);
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
 
@@ -276,13 +219,14 @@ export default function OrdersPage() {
   const changeStatus = async (order: any, newStatus: string) => {
     setUpdatingId(order.id);
     try {
-      const updateData: any = { status: newStatus };
-      if (newStatus === 'confirmed' && !order.confirmed_at) {
-        updateData.confirmed_at = new Date().toISOString();
-      }
-      const { error } = await supabase.from('orders').update(updateData).eq('id', order.id);
-      if (error) throw error;
-      setOrders(orders.map(o => o.id === order.id ? { ...o, ...updateData } : o));
+      const response = await fetch(`${apiBase}/api/admin/orders`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ orderId: order.id, status: newStatus }),
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result?.ok) throw new Error(result?.error || 'Không cập nhật được trạng thái');
+      await fetchOrders();
     } catch (err: any) {
       alert('Không cập nhật được trạng thái: ' + (err.message || 'Lỗi không xác định'));
     } finally {
@@ -293,9 +237,14 @@ export default function OrdersPage() {
   const changePayment = async (order: any, newPayment: string) => {
     setUpdatingId(order.id);
     try {
-      const { error } = await supabase.from('orders').update({ payment_status: newPayment }).eq('id', order.id);
-      if (error) throw error;
-      setOrders(orders.map(o => o.id === order.id ? { ...o, payment_status: newPayment } : o));
+      const response = await fetch(`${apiBase}/api/admin/orders`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ orderId: order.id, paymentStatus: newPayment }),
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result?.ok) throw new Error(result?.error || 'Không cập nhật được thanh toán');
+      await fetchOrders();
     } catch (err: any) {
       alert('Không cập nhật được thanh toán: ' + (err.message || 'Lỗi không xác định'));
     } finally {
@@ -306,22 +255,12 @@ export default function OrdersPage() {
   const handlePrint = async (order: any, e: React.MouseEvent) => {
     e.stopPropagation();
     try {
-      const { data: fullOrder, error } = await supabase
-        .from('orders')
-        .select(`
-          order_code, customer_name, customer_phone, customer_company, delivery_address,
-          delivery_name, delivery_phone, created_at, note, subtotal, discount_amount,
-          shipping_amount, grand_total, cod_collect_amount, assigned_driver,
-          package_weight_g, package_dimensions, sales_rep_id,
-          order_items (
-            name, sku, unit, quantity, base_unit_price, unit_price, line_total
-          )
-        `)
-        .eq('id', order.id)
-        .single();
-
-      if (error || !fullOrder) throw error || new Error('Không tải được chi tiết đơn');
-      printOrderSlip(fullOrder as any, 'temporary');
+      const response = await fetch(`${apiBase}/api/admin/orders?id=${encodeURIComponent(order.id)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result?.ok || !result.order) throw new Error(result?.error || 'Không tải được chi tiết đơn');
+      printOrderSlip(result.order, 'temporary');
     } catch (err: any) {
       alert('Lỗi in phiếu: ' + (err.message || 'Không thể in phiếu tạm'));
     }
@@ -405,20 +344,18 @@ export default function OrdersPage() {
     setExportDropdownOpen(false);
     try {
       const ids = Array.from(selectedOrderIds);
-      const { data: fullOrders, error } = await supabase
-        .from('orders')
-        .select(`
-          order_code, customer_name, customer_phone, customer_company, delivery_address,
-          delivery_name, delivery_phone, created_at, note, subtotal, discount_amount,
-          shipping_amount, grand_total, cod_collect_amount, assigned_driver,
-          package_weight_g, package_dimensions, sales_rep_id,
-          order_items (
-            name, sku, unit, quantity, base_unit_price, unit_price, line_total
-          )
-        `)
-        .in('id', ids);
+      const fullOrders = await Promise.all(ids.map(async (orderId) => {
+        const response = await fetch(`${apiBase}/api/admin/orders?id=${encodeURIComponent(orderId)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const result = await response.json().catch(() => null);
+        if (!response.ok || !result?.ok || !result.order) {
+          throw new Error(result?.error || 'Không tải được chi tiết đơn hàng');
+        }
+        return result.order;
+      }));
 
-      if (error || !fullOrders || fullOrders.length === 0) {
+      if (fullOrders.length === 0) {
         throw new Error('Không thể tải chi tiết các đơn hàng được chọn');
       }
 
