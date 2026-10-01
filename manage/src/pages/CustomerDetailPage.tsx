@@ -38,7 +38,11 @@ const TIERS = [
 // (js/vip-accounts.js) — không tạo RPC mới, tránh trùng logic 2 nơi.
 export default function CustomerDetailPage() {
   const { id } = useParams();
-  const isNew = id === 'moi';
+  // Route tạo mới là `/khach-hang/moi` (không có tham số `:id`), vì vậy
+  // useParams() trả về id = undefined. Điều kiện cũ chỉ kiểm tra id === 'moi'
+  // làm trang hiểu nhầm đây là khách cũ, bật loading rồi loadCustomer() thoát
+  // sớm vì thiếu id mà không tắt loading => quay vô hạn.
+  const isNew = !id || id === 'moi';
   const navigate = useNavigate();
   const { user, token, authFetch } = useAuth();
   const apiBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
