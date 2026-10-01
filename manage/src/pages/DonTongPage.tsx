@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { getApiBase } from '../lib/apiBase';
 import {
   FileSpreadsheet, Download, RefreshCw, Calendar, AlertTriangle, CheckCircle2,
-  Clock, ChevronDown, ChevronRight, Copy, Check, Package, Eye
+  Clock, ChevronDown, ChevronRight, Copy, Check, Package, Eye, Boxes, PackageCheck
 } from 'lucide-react';
 
 interface CustomerLine {
@@ -82,7 +83,7 @@ function formatTime(isoStr?: string | null) {
 export default function DonTongPage() {
   const { token } = useAuth();
   const navigate = useNavigate();
-  const apiBase = import.meta.env.VITE_API_BASE_URL || '';
+  const apiBase = getApiBase();
 
   // 1. Bộ lọc ngày giao và phạm vi
   const [deliveryDate, setDeliveryDate] = useState<string>(() => {
@@ -126,8 +127,14 @@ export default function DonTongPage() {
       const res = await fetch(`${apiBase}/api/admin/procurement/summary?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error || 'Không thể tải dữ liệu tổng hợp');
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        let errJson: any;
+        try { errJson = JSON.parse(text); } catch {}
+        throw new Error(errJson?.error || `Lỗi máy chủ (${res.status} ${res.statusText || 'Không có phản hồi'})`);
+      }
+      const data = await res.json().catch(() => null);
+      if (!data || !data.ok) throw new Error(data?.error || 'Dữ liệu phản hồi từ máy chủ không hợp lệ');
 
       setGroups(data.groups || []);
       setOrders(data.orders || []);
@@ -263,8 +270,14 @@ export default function DonTongPage() {
           },
           body: JSON.stringify({ orderIds: chunk }),
         });
-        const data = await res.json();
-        if (data.ok) {
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          let errJson: any;
+          try { errJson = JSON.parse(text); } catch {}
+          throw new Error(errJson?.error || `Lỗi duyệt đơn (${res.status})`);
+        }
+        const data = await res.json().catch(() => null);
+        if (data?.ok) {
           totalConfirmed += (data.confirmed || []).length;
           if (Array.isArray(data.skipped)) {
             allSkipped.push(...data.skipped);
@@ -289,7 +302,27 @@ export default function DonTongPage() {
   const cleanPendingOrders = useMemo(() => orders.filter((o) => o.status === 'pending' && !o.isLate), [orders]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
+      {/* 0. Thanh chuyển đổi phân hệ Thu mua & Soạn hàng */}
+      <div className="flex items-center gap-1.5 p-1 bg-white rounded-2xl border border-slate-200/80 shadow-2xs w-fit">
+        <button
+          type="button"
+          onClick={() => navigate('/don-tong')}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-bold bg-slate-900 text-white shadow-xs"
+        >
+          <Boxes size={16} />
+          <span>1. Đơn tổng thu mua (Gom hàng)</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => navigate('/soan-hang')}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100/70 transition-colors"
+        >
+          <PackageCheck size={16} />
+          <span>2. Soạn hàng theo đơn (Chia hàng)</span>
+        </button>
+      </div>
+
       {/* 1. Header & Điều khiển */}
       <header className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>

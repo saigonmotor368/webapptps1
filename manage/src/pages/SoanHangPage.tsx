@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { AlertCircle, RefreshCw, ChevronDown, ChevronUp, BarChart3, ListChecks, FileSpreadsheet, UserCheck, CheckCircle2, Undo2, PackageCheck } from 'lucide-react';
+import { getApiBase } from '../lib/apiBase';
+import { AlertCircle, RefreshCw, ChevronDown, ChevronUp, BarChart3, ListChecks, FileSpreadsheet, UserCheck, CheckCircle2, Undo2, PackageCheck, Boxes } from 'lucide-react';
 
 // LƯU Ý (Giai đoạn C, 2026-09-10): trang này trước đây chỉ gom từ bảng
 // "quotes" (status='won') — bỏ sót toàn bộ đơn tạo qua orders/order_items
@@ -13,10 +15,31 @@ const PACKING_STATUSES = ['confirmed', 'preparing', 'shipping'];
 function money(v: number) { return new Intl.NumberFormat('vi-VN').format(Math.round(Number(v) || 0)) + 'đ'; }
 
 export default function SoanHangPage() {
+  const navigate = useNavigate();
   const [mode, setMode] = useState<'pack' | 'report'>('pack');
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
+      {/* 0. Thanh chuyển đổi phân hệ Thu mua & Soạn hàng */}
+      <div className="flex items-center gap-1.5 p-1 bg-white rounded-2xl border border-slate-200/80 shadow-2xs w-fit">
+        <button
+          type="button"
+          onClick={() => navigate('/don-tong')}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100/70 transition-colors"
+        >
+          <Boxes size={16} />
+          <span>1. Đơn tổng thu mua (Gom hàng)</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => navigate('/soan-hang')}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-bold bg-slate-900 text-white shadow-xs"
+        >
+          <PackageCheck size={16} />
+          <span>2. Soạn hàng theo đơn (Chia hàng)</span>
+        </button>
+      </div>
+
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Xử lý đơn hàng</h1>
@@ -66,7 +89,7 @@ interface PackingOrder {
 // tình trạng 2 người cùng soạn 1 đơn hoặc không rõ ai đang phụ trách đơn nào.
 function OrderPackingWorkflow() {
   const { user, token } = useAuth();
-  const apiBase = import.meta.env.VITE_API_BASE_URL || '';
+  const apiBase = getApiBase();
   const [deliveryDate, setDeliveryDate] = useState<string>('');
   const [orders, setOrders] = useState<PackingOrder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -142,8 +165,14 @@ function OrderPackingWorkflow() {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ orderIds, action }),
       });
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error);
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        let errJson: any;
+        try { errJson = JSON.parse(text); } catch {}
+        throw new Error(errJson?.error || `Lỗi cập nhật soạn hàng (${res.status})`);
+      }
+      const data = await res.json().catch(() => null);
+      if (!data || !data.ok) throw new Error(data?.error || 'Không thể cập nhật trạng thái');
 
       const updatedIds = orderIds.filter((id) => !(data.skipped || []).some((s: any) => orders.find((o) => o.id === id)?.order_code === s.orderCode));
       if (andExport && updatedIds.length) {
@@ -325,7 +354,7 @@ type RangePreset = 'day' | 'month' | 'year' | 'custom';
 // làm ngay hôm nay.
 function SalesReport() {
   const { token } = useAuth();
-  const apiBase = import.meta.env.VITE_API_BASE_URL || '';
+  const apiBase = getApiBase();
 
   const [preset, setPreset] = useState<RangePreset>('day');
   const [anchor, setAnchor] = useState(todayStr()); // ngày mốc để suy ra khoảng theo preset
@@ -362,8 +391,14 @@ function SalesReport() {
       const res = await fetch(`${apiBase}/api/admin/reports/sales-detail?from=${from}&to=${to}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      const data = await res.json();
-      if (data.ok) setReport(data);
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        let errJson: any;
+        try { errJson = JSON.parse(text); } catch {}
+        throw new Error(errJson?.error || `Lỗi tải báo cáo (${res.status})`);
+      }
+      const data = await res.json().catch(() => null);
+      if (data?.ok) setReport(data);
     } finally { setLoading(false); }
   }, [apiBase, token, computeRange]);
 

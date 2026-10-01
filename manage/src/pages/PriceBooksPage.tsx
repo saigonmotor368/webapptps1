@@ -1,126 +1,326 @@
-import { useState, useEffect, useCallback, useId } from 'react';
+import { useState, useEffect, useCallback, useId, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { can } from '../lib/permissions';
 import {
   FileSpreadsheet, Upload, CheckCircle2, AlertCircle,
-  Eye, Save, RefreshCw, Layers,
-  Download, Filter, ChevronLeft, ChevronRight
+  Eye, Save, RefreshCw, Plus, Check, X,
+  ChevronLeft, ChevronRight, SlidersHorizontal, ArrowLeft
 } from 'lucide-react';
 
-function money(v: number) {
-  return new Intl.NumberFormat('vi-VN').format(Math.round(Number(v) || 0)) + 'đ';
+function money(v: number | null | undefined) {
+  if (v == null || !Number.isFinite(Number(v))) return '—';
+  return new Intl.NumberFormat('vi-VN').format(Math.round(Number(v))) + ' đ';
+}
+
+interface PriceBook {
+  id: string;
+  code: string;
+  name: string;
+  kind: 'general' | 'customer' | 'group' | 'department';
+  status: 'draft' | 'pending_approval' | 'active' | 'expired' | 'archived';
+  version: number;
+  valid_from?: string | null;
+  valid_to?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  created_by?: string | null;
+  approved_by?: string | null;
+}
+
+interface GridProduct {
+  id: string;
+  sku: string;
+  name: string;
+  unit: string;
+  category: string;
+  cost_price: number | null;
+  last_import_price: number | null;
+  price_retail: number | null;
+  min_order_qty: number;
+  order_step: number;
+  packaging_note: string;
+  is_active: boolean;
+  prices: Record<string, number | null>;
+  priceDetails: Record<string, any>;
 }
 
 export default function PriceBooksPage() {
   const fileInputId = useId();
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const apiBase = import.meta.env.VITE_API_BASE_URL || '';
 
-  // Tab: 'list' | 'import'
-  const [activeTab, setActiveTab] = useState<'list' | 'import' | 'matrix'>('matrix');
-  const [matrixBooks, setMatrixBooks] = useState<any[]>([]);
-  const [matrixRows, setMatrixRows] = useState<any[]>([]);
-  const [matrixSearch, setMatrixSearch] = useState('');
-  const [loadingMatrix, setLoadingMatrix] = useState(false);
+  const canEditPricing = can(user?.role, 'pricing.edit');
 
-  // List of price books
-  const [priceBooks, setPriceBooks] = useState<any[]>([]);
-  const [loadingList, setLoadingList] = useState(false);
-  const [selectedPriceBook, setSelectedPriceBook] = useState<any | null>(null);
-  const [loadingPriceBook, setLoadingPriceBook] = useState(false);
+  // Navigation tab: 'grid' (Thiết lập giá) | 'list' (Danh sách bảng giá) | 'import' (Nhập từ Excel)
+  const [activeTab, setActiveTab] = useState<'grid' | 'list' | 'import'>('grid');
 
-  const openPriceBook = async (pb: any) => {
-    setSelectedPriceBook({ ...pb, items: [] });
-    setLoadingPriceBook(true);
-    try {
-      const res = await fetch(`${apiBase}/api/admin/price-books/${pb.id}`, { headers: { Authorization: `Bearer ${token}` } });
-      const data = await res.json();
-      if (res.ok && data.data) setSelectedPriceBook(data.data);
-      else setMessage({ type: 'error', text: data.error || 'Không tải được chi tiết bảng giá' });
-    } finally { setLoadingPriceBook(false); }
-  };
+  // ─── GRID (THIẾT LẬP GIÁ) STATE ────────────────────────────────────
+  const [gridProducts, setGridProducts] = useState<GridProduct[]>([]);
+  const [displayedBooks, setDisplayedBooks] = useState<PriceBook[]>([]);
+  const [allPriceBooks, setAllPriceBooks] = useState<PriceBook[]>([]);
+  const [selectedBookIds, setSelectedBookIds] = useState<string[]>([]);
+  const [loadingGrid, setLoadingGrid] = useState(false);
 
-  // Import Wizard Steps: 1 (Upload) | 2 (Mapping) | 3 (Preview) | 4 (Done)
+  // Filters & Search
+  const [skuSearch, setSkuSearch] = useState('');
+  const [nameSearch, setNameSearch] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [customerGroupFilter, setCustomerGroupFilter] = useState('');
+  const [customerFilter, setCustomerFilter] = useState('');
+  const [categories, setCategories] = useState<string[]>([]);
+  const [customerGroups, setCustomerGroups] = useState<string[]>([]);
+  const [customers, setCustomers] = useState<any[]>([]);
+
+  // Pagination
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [totalProducts, setTotalProducts] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+
+  // Column picker popover
+  const [showColumnPicker, setShowColumnPicker] = useState(false);
+  const [pendingBookIds, setPendingBookIds] = useState<string[]>([]);
+  const [priceBookSearch, setPriceBookSearch] = useState('');
+  const columnPickerRef = useRef<HTMLDivElement>(null);
+
+  // Inline cell editing: { productId, priceBookId, currentVal, isNew }
+  const [editingCell, setEditingCell] = useState<{ productId: string; priceBookId: string; value: string } | null>(null);
+  const [savingCellKey, setSavingCellKey] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ type: 'success' | 'error' | 'warning'; text: string; action?: { label: string; onClick: () => void } } | null>(null);
+
+  // ─── MODAL TẠO BẢNG GIÁ MỚI ────────────────────────────────────────
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [creatingBook, setCreatingBook] = useState(false);
+  const [newBookForm, setNewBookForm] = useState({
+    name: '',
+    code: '',
+    kind: 'customer',
+    sourcePriceBookId: '',
+  });
+
+  // ─── IMPORT WIZARD STATE ───────────────────────────────────────────
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
-
-  // File state
   const [file, setFile] = useState<File | null>(null);
   const [inspecting, setInspecting] = useState(false);
   const [inspection, setInspection] = useState<any>(null);
   const [detectedMappings, setDetectedMappings] = useState<Record<string, any>>({});
   const [selectedSheet, setSelectedSheet] = useState<string>('');
-
-  // Mapping state
   const [mappingConfig, setMappingConfig] = useState<any>(null);
   const [allowZeroPrice, setAllowZeroPrice] = useState(false);
-
-  // Preview state
   const [previewing, setPreviewing] = useState(false);
   const [previewData, setPreviewData] = useState<any>(null);
-  const [previewPage, setPreviewPage] = useState(1);
-  const [previewFilter, setPreviewFilter] = useState<'all' | 'valid' | 'errors' | 'zero'>('all');
-
-  // Commit state
+  const [previewChangeFilter, setPreviewChangeFilter] = useState<'all' | 'changed' | 'increase' | 'decrease' | 'errors'>('all');
   const [committing, setCommitting] = useState(false);
-  const [commitResult, setCommitResult] = useState<any>(null);
-  const [validOnly, setValidOnly] = useState(true);
-
-  // Activation state
+  const validOnly = true;
   const [activatingId, setActivatingId] = useState<string | null>(null);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Load existing price books
-  const fetchPriceBooks = useCallback(async () => {
-    setLoadingList(true);
+  // Auto-dismiss toast after 4s
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 5000);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
+  // Click outside to close column picker
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (columnPickerRef.current && !columnPickerRef.current.contains(e.target as Node)) {
+        setShowColumnPicker(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Load distinct categories for filter
+  useEffect(() => {
+    if (!token) return;
+    fetch(`${apiBase}/api/admin/products?meta=1`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json())
+      .then((d) => { if (d.ok && d.categories) setCategories(d.categories); })
+      .catch(() => {});
+  }, [apiBase, token]);
+
+  // ─── FETCH GRID DATA ───────────────────────────────────────────────
+  const fetchGridData = useCallback(async () => {
+    setLoadingGrid(true);
     try {
-      const res = await fetch(`${apiBase}/api/admin/price-books`, {
+      const params = new URLSearchParams({
+        page: String(page),
+        pageSize: String(pageSize),
+      });
+
+      if (skuSearch.trim()) params.set('sku', skuSearch.trim());
+      if (nameSearch.trim()) params.set('name', nameSearch.trim());
+      if (categoryFilter) params.set('category', categoryFilter);
+      if (customerGroupFilter) params.set('groupName', customerGroupFilter);
+      if (customerFilter) params.set('customerId', customerFilter);
+
+      // Selected price books
+      if (selectedBookIds.length > 0) params.set('priceBookIds', selectedBookIds.join(','));
+
+      const res = await fetch(`${apiBase}/api/admin/price-books/grid?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
-      if (data.ok) {
-        setPriceBooks(data.data || []);
+
+      if (data.ok && data.data) {
+        setGridProducts(data.data.products || []);
+        setDisplayedBooks(data.data.priceBooks || []);
+        setAllPriceBooks(data.data.allPriceBooks || []);
+        setCustomerGroups(data.data.customerGroups || []);
+        setCustomers(data.data.customers || []);
+        setTotalProducts(data.data.pagination?.total || 0);
+        setTotalPages(data.data.pagination?.totalPages || 1);
+
+        // Initialize selectedBookIds if empty
+        if (selectedBookIds.length === 0 && data.data.priceBooks?.length > 0) {
+          setSelectedBookIds(data.data.priceBooks.map((b: any) => b.id));
+        }
+      } else {
+        setToast({ type: 'error', text: data.error || 'Không tải được dữ liệu bảng giá' });
       }
     } catch {
-      // Fallback: list will be fetched when API is mounted
+      setToast({ type: 'error', text: 'Lỗi kết nối máy chủ thiết lập giá' });
     } finally {
-      setLoadingList(false);
+      setLoadingGrid(false);
     }
-  }, [apiBase, token]);
+  }, [apiBase, token, page, pageSize, skuSearch, nameSearch, categoryFilter, customerGroupFilter, customerFilter, selectedBookIds]);
 
   useEffect(() => {
-    if (activeTab === 'list' || activeTab === 'matrix') {
-      fetchPriceBooks();
+    if (activeTab === 'grid') {
+      fetchGridData();
     }
-  }, [activeTab, fetchPriceBooks]);
+  }, [activeTab, fetchGridData]);
 
-  useEffect(() => {
-    if (activeTab !== 'matrix' || !priceBooks.length) return;
-    let cancelled = false;
-    (async () => {
-      setLoadingMatrix(true);
-      try {
-        const books = await Promise.all(priceBooks.filter((p) => p.status === 'active' || p.kind === 'general').slice(0, 8).map(async (pb) => {
-          const res = await fetch(`${apiBase}/api/admin/price-books/${pb.id}`, { headers: { Authorization: `Bearer ${token}` } });
-          const data = await res.json();
-          return data.data || pb;
-        }));
-        if (cancelled) return;
-        const byProduct = new Map<string, any>();
-        books.forEach((book) => (book.items || []).forEach((item: any) => {
-          const row = byProduct.get(item.product_id) || { product_id: item.product_id, sku: item.sku_snapshot, name: item.name_snapshot, unit: item.unit_snapshot, prices: {} };
-          row.prices[book.id] = item.price;
-          byProduct.set(item.product_id, row);
-        }));
-        setMatrixBooks(books); setMatrixRows(Array.from(byProduct.values()));
-      } finally { if (!cancelled) setLoadingMatrix(false); }
-    })();
-    return () => { cancelled = true; };
-  }, [activeTab, priceBooks, apiBase, token]);
+  // ─── INLINE PRICE UPDATE & ADD ─────────────────────────────────────
+  const handleSavePriceCell = async (productId: string, priceBookId: string, rawVal: string) => {
+    const book = allPriceBooks.find((b) => b.id === priceBookId) || displayedBooks.find((b) => b.id === priceBookId);
+    const priceNum = Math.round(Number(rawVal.replace(/[^0-9]/g, '')));
 
-  // Step 1: Upload & Inspect
+    if (isNaN(priceNum) || priceNum < 0) {
+      setToast({ type: 'error', text: 'Vui lòng nhập đơn giá hợp lệ (>= 0đ)' });
+      return;
+    }
+
+    const cellKey = `${productId}_${priceBookId}`;
+    setSavingCellKey(cellKey);
+
+    try {
+      const res = await fetch(`${apiBase}/api/admin/price-books/${priceBookId}/items`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          productId,
+          price: priceNum,
+          reason: 'Cập nhật trực tiếp trên màn hình Thiết lập giá',
+        }),
+      });
+
+      const data = await res.json();
+
+      if (res.status === 409) {
+        // Active price book conflict: need to create draft
+        setToast({
+          type: 'warning',
+          text: `Bảng giá "${book?.name}" đang áp dụng. Hãy tạo bản nháp mới để sửa an toàn.`,
+          action: {
+            label: 'Tạo bản nháp mới',
+            onClick: () => handleCreateDraftFromActive(priceBookId),
+          },
+        });
+        setEditingCell(null);
+        return;
+      }
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || 'Không lưu được đơn giá');
+      }
+
+      // Update local state immediately for fast feedback
+      setGridProducts((prev) =>
+        prev.map((p) => {
+          if (p.id !== productId) return p;
+          return {
+            ...p,
+            prices: { ...p.prices, [priceBookId]: priceNum },
+          };
+        })
+      );
+
+      setToast({ type: 'success', text: `Đã lưu giá ${money(priceNum)} cho bảng giá "${book?.name}"` });
+      setEditingCell(null);
+    } catch (err: any) {
+      setToast({ type: 'error', text: err.message || 'Lỗi khi lưu đơn giá' });
+    } finally {
+      setSavingCellKey(null);
+    }
+  };
+
+  // ─── CREATE DRAFT FROM ACTIVE PRICE BOOK ───────────────────────────
+  const handleCreateDraftFromActive = async (sourceBookId: string) => {
+    try {
+      setToast({ type: 'warning', text: 'Đang tạo bản nháp mới...' });
+      const res = await fetch(`${apiBase}/api/admin/price-books/${sourceBookId}/create-draft`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Không tạo được bản nháp');
+
+      setToast({ type: 'success', text: `✅ ${data.message}! Bạn có thể chuyển sang bản nháp để sửa.` });
+      // Refresh list
+      fetchGridData();
+    } catch (err: any) {
+      setToast({ type: 'error', text: err.message });
+    }
+  };
+
+  // ─── CREATE NEW PRICE BOOK ─────────────────────────────────────────
+  const handleCreatePriceBook = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newBookForm.name.trim()) {
+      alert('Vui lòng nhập tên bảng giá');
+      return;
+    }
+
+    setCreatingBook(true);
+    try {
+      const res = await fetch(`${apiBase}/api/admin/price-books`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(newBookForm),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Lỗi tạo bảng giá');
+
+      setToast({ type: 'success', text: `✅ Đã tạo thành công bảng giá: ${data.data.name}` });
+      setShowCreateModal(false);
+      setNewBookForm({ name: '', code: '', kind: 'customer', sourcePriceBookId: '' });
+
+      // Refresh and auto-select new book
+      await fetchGridData();
+      if (data.data?.id) {
+        setSelectedBookIds((prev) => [...prev, data.data.id]);
+      }
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setCreatingBook(false);
+    }
+  };
+
+  // ─── IMPORT WIZARD HANDLERS ────────────────────────────────────────
   const handleFileSelected = async (selectedFile: File) => {
     setFile(selectedFile);
     setInspecting(true);
-    setMessage(null);
+    setToast(null);
 
     const formData = new FormData();
     formData.append('file', selectedFile);
@@ -132,9 +332,7 @@ export default function PriceBooksPage() {
         body: formData,
       });
       const data = await res.json();
-      if (!res.ok || !data.ok) {
-        throw new Error(data.error || 'Không thể đọc file Excel');
-      }
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Không thể đọc file Excel');
 
       setInspection(data.inspection);
       setDetectedMappings(data.detectedMappings || {});
@@ -143,29 +341,22 @@ export default function PriceBooksPage() {
       setMappingConfig(data.detectedMappings[firstSheet] || null);
       setStep(2);
     } catch (err: any) {
-      setMessage({ type: 'error', text: err.message });
+      setToast({ type: 'error', text: err.message });
     } finally {
       setInspecting(false);
     }
   };
 
-  // Change sheet
-  const handleSheetChange = (sheetName: string) => {
-    setSelectedSheet(sheetName);
-    setMappingConfig(detectedMappings[sheetName] || null);
-  };
-
-  // Step 2 -> 3: Generate Preview
-  const handleRunPreview = async (page: number = 1) => {
+  const handleRunPreview = async (pageToPreview: number = 1) => {
     if (!file || !selectedSheet) return;
     setPreviewing(true);
-    setMessage(null);
+    setToast(null);
 
     const formData = new FormData();
     formData.append('file', file);
     formData.append('sheetName', selectedSheet);
     formData.append('mappingConfig', JSON.stringify(mappingConfig));
-    formData.append('page', String(page));
+    formData.append('page', String(pageToPreview));
     formData.append('pageSize', '50');
     formData.append('allowZeroPrice', String(allowZeroPrice));
 
@@ -176,25 +367,21 @@ export default function PriceBooksPage() {
         body: formData,
       });
       const data = await res.json();
-      if (!res.ok || !data.ok) {
-        throw new Error(data.error || 'Lỗi kiểm tra bảng giá');
-      }
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Lỗi kiểm tra bảng giá');
 
       setPreviewData(data.preview);
-      setPreviewPage(page);
       setStep(3);
     } catch (err: any) {
-      setMessage({ type: 'error', text: err.message });
+      setToast({ type: 'error', text: err.message });
     } finally {
       setPreviewing(false);
     }
   };
 
-  // Step 3 -> 4: Commit to Draft
   const handleCommit = async () => {
     if (!file || !selectedSheet || !mappingConfig) return;
     setCommitting(true);
-    setMessage(null);
+    setToast(null);
 
     const formData = new FormData();
     formData.append('file', file);
@@ -210,637 +397,959 @@ export default function PriceBooksPage() {
         body: formData,
       });
       const data = await res.json();
-      if (!res.ok || !data.ok) {
-        throw new Error(data.error || 'Lỗi lưu bảng giá vào hệ thống');
-      }
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Lỗi lưu bảng giá vào hệ thống');
 
-      setCommitResult(data);
       setStep(4);
-      setMessage({ type: 'success', text: data.message });
+      setToast({ type: 'success', text: data.message });
     } catch (err: any) {
-      setMessage({ type: 'error', text: err.message });
+      setToast({ type: 'error', text: err.message });
     } finally {
       setCommitting(false);
     }
   };
 
-  // Activate Price Book
   const handleActivate = async (priceBookId: string) => {
-    if (!confirm('Bạn có chắc chắn muốn KÍCH HOẠT bảng giá này thành ACTIVE? Các bảng giá cũ cùng mã sẽ được chuyển thành ARCHIVED.')) {
+    if (!confirm('Bạn có chắc chắn muốn KÍCH HOẠT bảng giá này thành chính thức? Bảng giá cũ cùng nhóm sẽ được lưu trữ.')) {
       return;
     }
 
     setActivatingId(priceBookId);
-    setMessage(null);
+    setToast(null);
 
     try {
       const res = await fetch(`${apiBase}/api/admin/price-books/activate`, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ priceBookId }),
       });
       const data = await res.json();
-      if (!res.ok || !data.ok) {
-        throw new Error(data.error || 'Lỗi kích hoạt bảng giá');
-      }
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Lỗi kích hoạt bảng giá');
 
-      setMessage({ type: 'success', text: data.message });
-      if (activeTab === 'list') {
-        fetchPriceBooks();
-      }
+      setToast({ type: 'success', text: data.message });
+      fetchGridData();
     } catch (err: any) {
-      setMessage({ type: 'error', text: err.message });
+      setToast({ type: 'error', text: err.message });
     } finally {
       setActivatingId(null);
     }
   };
 
-  // Download error report JSON
-  const handleDownloadErrors = () => {
-    if (!previewData || !previewData.rows) return;
-    const errorRows = previewData.rows.filter((r: any) => !r.isValid);
-    const blob = new Blob([JSON.stringify(errorRows, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `tps1_import_errors_${selectedSheet}_${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const generalBookId = allPriceBooks.find((b) => b.kind === 'general' && b.status === 'active')?.id
+    || allPriceBooks.find((b) => b.kind === 'general')?.id;
+
+  const openBookPicker = () => {
+    setPendingBookIds(selectedBookIds.length ? selectedBookIds : (generalBookId ? [generalBookId] : []));
+    setPriceBookSearch('');
+    setShowColumnPicker(true);
   };
 
-  // Filter preview rows
-  const filteredRows = (previewData?.rows || []).filter((r: any) => {
-    if (previewFilter === 'valid') return r.isValid;
-    if (previewFilter === 'errors') return !r.isValid && r.matchResult.status !== 'skipped_category';
-    if (previewFilter === 'zero') {
-      return Object.values(r.prices || {}).some((p: any) => p.status === 'zero_price');
-    }
-    return true;
-  });
+  // Chỉ cập nhật lựa chọn tạm; dữ liệu được tải khi người dùng bấm Áp dụng.
+  const toggleBookColumn = (bookId: string) => {
+    setPendingBookIds((prev) => {
+      if (prev.includes(bookId)) {
+        if (bookId === generalBookId) return prev;
+        return prev.filter((id) => id !== bookId);
+      } else {
+        return [...prev, bookId];
+      }
+    });
+  };
+
+  const applyBookColumns = () => {
+    const next = Array.from(new Set([generalBookId, ...pendingBookIds].filter(Boolean) as string[]));
+    setSelectedBookIds(next);
+    setPage(1);
+    setShowColumnPicker(false);
+  };
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="p-2 bg-emerald-100 text-emerald-800 rounded-xl">
-              <FileSpreadsheet size={24} />
-            </span>
-            <h1 className="text-2xl font-black text-slate-800 tracking-tight">Quản Lý & Nhập Bảng Giá (G2)</h1>
-          </div>
-          <p className="text-sm text-slate-500 mt-1">
-            Hỗ trợ template KiotViet chuẩn và bảng giá đa tầng nhiều bếp. Tuyệt đối an toàn, preview trước khi lưu.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-xl self-start">
-          <button
-            onClick={() => setActiveTab('import')}
-            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
-              activeTab === 'import' ? 'bg-white text-emerald-800 shadow-sm' : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            Nhập Excel Mới
-          </button>
-          <button
-            onClick={() => setActiveTab('list')}
-            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
-              activeTab === 'list' ? 'bg-white text-emerald-800 shadow-sm' : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            Danh Sách Bảng Giá
-          </button>
-          <button onClick={() => setActiveTab('matrix')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'matrix' ? 'bg-white text-emerald-800 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>
-            Ma trận giá
-          </button>
-        </div>
-      </div>
-
-      {/* Global Alerts */}
-      {message && (
+    <div className="space-y-5">
+      {/* Toast Alert */}
+      {toast && (
         <div
-          className={`p-4 rounded-xl flex items-center gap-3 text-sm font-semibold border ${
-            message.type === 'success'
-              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-              : 'bg-rose-50 text-rose-800 border-rose-200'
+          className={`p-4 rounded-xl flex items-center justify-between shadow-md border animate-in fade-in slide-in-from-top-2 duration-200 ${
+            toast.type === 'success'
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+              : toast.type === 'warning'
+              ? 'bg-amber-50 border-amber-200 text-amber-900'
+              : 'bg-red-50 border-red-200 text-red-900'
           }`}
         >
-          {message.type === 'success' ? <CheckCircle2 size={20} /> : <AlertCircle size={20} />}
-          <span>{message.text}</span>
+          <div className="flex items-center gap-3">
+            {toast.type === 'success' ? (
+              <CheckCircle2 className="text-emerald-600 shrink-0" size={20} />
+            ) : (
+              <AlertCircle className="text-amber-600 shrink-0" size={20} />
+            )}
+            <span className="text-sm font-semibold">{toast.text}</span>
+            {toast.action && (
+              <button
+                onClick={toast.action.onClick}
+                className="ml-3 px-3 py-1 bg-amber-600 text-white rounded-lg text-xs font-bold hover:bg-amber-700 shadow-sm"
+              >
+                {toast.action.label}
+              </button>
+            )}
+          </div>
+          <button onClick={() => setToast(null)} className="p-1 hover:bg-black/5 rounded-lg text-slate-400">
+            <X size={16} />
+          </button>
         </div>
       )}
 
-      {/* ==================== TAB 1: IMPORT WIZARD ==================== */}
-      {activeTab === 'import' && (
-        <div className="space-y-6">
-          {/* Stepper Bar */}
-          <div className="grid grid-cols-4 gap-2 bg-white p-3 rounded-2xl shadow-sm border border-slate-100 text-xs font-bold">
-            <div className={`flex items-center gap-2 p-2 rounded-xl ${step >= 1 ? 'bg-emerald-50 text-emerald-800' : 'text-slate-400'}`}>
-              <span className={`w-6 h-6 rounded-full flex items-center justify-center ${step >= 1 ? 'bg-emerald-600 text-white' : 'bg-slate-200'}`}>1</span>
-              <span>1. Tải File & Kiểm Tra</span>
+      {/* HEADER SECTION */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+        <div>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shadow-inner">
+              <FileSpreadsheet size={22} />
             </div>
-            <div className={`flex items-center gap-2 p-2 rounded-xl ${step >= 2 ? 'bg-emerald-50 text-emerald-800' : 'text-slate-400'}`}>
-              <span className={`w-6 h-6 rounded-full flex items-center justify-center ${step >= 2 ? 'bg-emerald-600 text-white' : 'bg-slate-200'}`}>2</span>
-              <span>2. Cấu Hình Mapping</span>
-            </div>
-            <div className={`flex items-center gap-2 p-2 rounded-xl ${step >= 3 ? 'bg-emerald-50 text-emerald-800' : 'text-slate-400'}`}>
-              <span className={`w-6 h-6 rounded-full flex items-center justify-center ${step >= 3 ? 'bg-emerald-600 text-white' : 'bg-slate-200'}`}>3</span>
-              <span>3. Preview & Rà Soát</span>
-            </div>
-            <div className={`flex items-center gap-2 p-2 rounded-xl ${step >= 4 ? 'bg-emerald-50 text-emerald-800' : 'text-slate-400'}`}>
-              <span className={`w-6 h-6 rounded-full flex items-center justify-center ${step >= 4 ? 'bg-emerald-600 text-white' : 'bg-slate-200'}`}>4</span>
-              <span>4. Hoàn Tất (DRAFT)</span>
+            <div>
+              <div className="flex items-center gap-2">
+                <h1 className="text-2xl font-black text-slate-800 tracking-tight">Thiết lập giá</h1>
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800">
+                  {allPriceBooks.length} bảng giá
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Quản lý và áp dụng giá bán theo từng bảng giá, nhóm bếp và khách hàng
+              </p>
             </div>
           </div>
+        </div>
 
-          {/* STEP 1: UPLOAD */}
-          {step === 1 && (
-            <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 text-center">
-              <div className="max-w-xl mx-auto space-y-4">
-                <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto shadow-inner">
-                  <Upload size={32} />
-                </div>
-                <h3 className="text-xl font-bold text-slate-800">Tải Lên Bảng Giá Excel</h3>
-                <p className="text-sm text-slate-500">
-                  Hệ thống hỗ trợ cả định dạng chuẩn đơn giản (MauFileBangGia) và bảng giá phức tạp nhiều bếp (BẢNG TÍNH GIÁ CÁC BẾP TP 09.26).
-                </p>
+        {/* Tab Controls & Main Actions */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="bg-slate-100 p-1 rounded-xl flex items-center gap-1 border border-slate-200">
+            <button
+              onClick={() => setActiveTab('grid')}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                activeTab === 'grid' ? 'bg-white text-emerald-800 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Thiết lập giá
+            </button>
+            <button
+              onClick={() => setActiveTab('list')}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                activeTab === 'list' ? 'bg-white text-emerald-800 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Danh sách bảng giá
+            </button>
+            <button
+              onClick={() => { setActiveTab('import'); setStep(1); }}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                activeTab === 'import' ? 'bg-white text-emerald-800 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Nhập từ Excel
+            </button>
+          </div>
 
-                <div className="border-2 border-dashed border-slate-200 rounded-2xl p-8 hover:border-emerald-500 transition-colors bg-slate-50">
-                  <input
-                    type="file"
-                    accept=".xlsx,.xls"
-                    id={fileInputId}
-                    className="hidden"
-                    onChange={(e) => {
-                      if (e.target.files && e.target.files[0]) {
-                        handleFileSelected(e.target.files[0]);
-                      }
-                    }}
-                  />
-                  <label htmlFor={fileInputId} className="cursor-pointer block space-y-2">
-                    <span className="inline-block px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md transition-all">
-                      Chọn File Từ Máy Tính
-                    </span>
-                    <p className="text-xs text-slate-400">Chấp nhận định dạng .xlsx, .xls (Tối đa 15MB)</p>
-                  </label>
-                </div>
+          {canEditPricing && (
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm flex items-center gap-1.5 transition-colors"
+            >
+              <Plus size={16} /> Thêm bảng giá
+            </button>
+          )}
+        </div>
+      </div>
 
-                {inspecting && (
-                  <div className="flex items-center justify-center gap-2 text-sm text-emerald-700 font-semibold pt-4">
-                    <RefreshCw className="animate-spin" size={18} />
-                    <span>Đang đọc cấu trúc các Sheet và tính Checksum...</span>
+      {/* ───────────────────────────────────────────────────────────────── */}
+      {/* TAB 1: THIẾT LẬP GIÁ (KIOTVIET GRID)                               */}
+      {/* ───────────────────────────────────────────────────────────────── */}
+      {activeTab === 'grid' && (
+        <div className="space-y-4">
+          {/* Filter Bar */}
+          <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-2.5 flex-1">
+              <input
+                type="text"
+                placeholder="Tìm mã hàng..."
+                value={skuSearch}
+                onChange={(e) => { setSkuSearch(e.target.value); setPage(1); }}
+                className="border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-emerald-500"
+              />
+              <input
+                type="text"
+                placeholder="Tìm tên hàng..."
+                value={nameSearch}
+                onChange={(e) => { setNameSearch(e.target.value); setPage(1); }}
+                className="border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-emerald-500"
+              />
+              <select
+                value={categoryFilter}
+                onChange={(e) => { setCategoryFilter(e.target.value); setPage(1); }}
+                className="border border-slate-200 rounded-xl px-3 py-2 text-xs bg-white text-slate-700 focus:outline-none focus:border-emerald-500"
+              >
+                <option value="">Tất cả nhóm hàng</option>
+                {categories.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+              <div className="relative" ref={columnPickerRef}>
+                <button
+                  type="button"
+                  onClick={() => showColumnPicker ? setShowColumnPicker(false) : openBookPicker()}
+                  className="w-full h-full min-h-9 border border-slate-200 rounded-xl px-3 py-2 text-xs bg-white text-slate-700 hover:border-emerald-400 focus:outline-none focus:border-emerald-500 flex items-center justify-between gap-2"
+                >
+                  <span className="truncate font-medium">
+                    {selectedBookIds.length > 1
+                      ? `${selectedBookIds.length} bảng giá đã chọn`
+                      : (allPriceBooks.find((b) => b.id === selectedBookIds[0])?.name || 'Bảng giá chung')}
+                  </span>
+                  <SlidersHorizontal size={14} className="shrink-0 text-slate-400" />
+                </button>
+
+                {showColumnPicker && (
+                  <div className="absolute left-0 top-full mt-2 w-80 bg-white rounded-2xl shadow-2xl border border-slate-200 z-50 overflow-hidden">
+                    <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+                      <span className="text-sm font-extrabold text-slate-800">Bảng giá</span>
+                      {canEditPricing && (
+                        <button
+                          type="button"
+                          onClick={() => { setShowColumnPicker(false); setShowCreateModal(true); }}
+                          className="text-xs font-bold text-emerald-700 hover:text-emerald-800 flex items-center gap-1"
+                        >
+                          <Plus size={14} /> Tạo mới
+                        </button>
+                      )}
+                    </div>
+                    <div className="p-3 border-b border-slate-100">
+                      <input
+                        autoFocus
+                        value={priceBookSearch}
+                        onChange={(e) => setPriceBookSearch(e.target.value)}
+                        placeholder="Tìm bảng giá..."
+                        className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-xs focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                    <div className="max-h-72 overflow-y-auto p-2">
+                      {allPriceBooks
+                        .filter((b) => `${b.name} ${b.code}`.toLocaleLowerCase('vi').includes(priceBookSearch.trim().toLocaleLowerCase('vi')))
+                        .map((b) => {
+                          const checked = pendingBookIds.includes(b.id);
+                          const isGeneral = b.id === generalBookId;
+                          return (
+                            <label key={b.id} className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl hover:bg-slate-50 cursor-pointer">
+                              <span className="flex items-center gap-2 min-w-0">
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  disabled={isGeneral}
+                                  onChange={() => toggleBookColumn(b.id)}
+                                  className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 disabled:opacity-70"
+                                />
+                                <span className="text-xs font-semibold text-slate-800 truncate">{b.name}</span>
+                              </span>
+                              <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold shrink-0 ${b.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                {b.status === 'active' ? 'Đang áp dụng' : 'Bản nháp'}
+                              </span>
+                            </label>
+                          );
+                        })}
+                    </div>
+                    <div className="flex items-center justify-between gap-3 p-3 border-t border-slate-100 bg-slate-50">
+                      <button
+                        type="button"
+                        onClick={() => setPendingBookIds(generalBookId ? [generalBookId] : [])}
+                        className="px-2 py-2 text-xs font-bold text-slate-600 hover:text-slate-900"
+                      >
+                        Bỏ chọn tất cả
+                      </button>
+                      <button
+                        type="button"
+                        onClick={applyBookColumns}
+                        className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm"
+                      >
+                        Áp dụng ({pendingBookIds.length})
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
+              <select
+                value={customerGroupFilter}
+                onChange={(e) => { setCustomerGroupFilter(e.target.value); setCustomerFilter(''); setSelectedBookIds([]); setPage(1); }}
+                className="border border-slate-200 rounded-xl px-3 py-2 text-xs bg-white text-slate-700 focus:outline-none focus:border-emerald-500"
+              >
+                <option value="">Tất cả nhóm bếp</option>
+                {customerGroups.map((group) => <option key={group} value={group}>{group}</option>)}
+              </select>
+              <select
+                value={customerFilter}
+                onChange={(e) => { setCustomerFilter(e.target.value); setSelectedBookIds([]); setPage(1); }}
+                className="border border-slate-200 rounded-xl px-3 py-2 text-xs bg-white text-slate-700 focus:outline-none focus:border-emerald-500"
+              >
+                <option value="">Tất cả khách hàng</option>
+                {customers.filter((c) => !customerGroupFilter || c.customer_group === customerGroupFilter).map((c) => (
+                  <option key={c.id} value={c.id}>{c.partner_code} · {c.company || c.name}</option>
+                ))}
+              </select>
             </div>
-          )}
 
-          {/* STEP 2: MAPPING */}
-          {step === 2 && inspection && (
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 space-y-6">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-100 gap-3">
-                <div>
-                  <h3 className="text-lg font-bold text-slate-800">Cấu Hình Nhận Diện Bảng Giá</h3>
-                  <p className="text-xs text-slate-500">
-                    File: <span className="font-semibold text-slate-700">{inspection.fileName}</span> ({(inspection.fileSize / 1024).toFixed(1)} KB) — Checksum: <code className="text-emerald-700 font-mono text-[11px]">{inspection.checksum.slice(0, 16)}...</code>
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setStep(1)}
-                    className="px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg"
-                  >
-                    Chọn file khác
-                  </button>
-                  <button
-                    onClick={() => handleRunPreview(1)}
-                    disabled={previewing}
-                    className="flex items-center gap-2 px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md transition-all disabled:opacity-50"
-                  >
-                    {previewing ? <RefreshCw className="animate-spin" size={16} /> : <Eye size={16} />}
-                    <span>Chạy Kiểm Tra & Xem Preview</span>
-                  </button>
-                </div>
-              </div>
+            {/* Tải lại dữ liệu */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => fetchGridData()}
+                disabled={loadingGrid}
+                className="p-2.5 border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 transition-colors"
+                title="Tải lại dữ liệu"
+              >
+                <RefreshCw size={16} className={loadingGrid ? 'animate-spin' : ''} />
+              </button>
 
-              {/* Sheet selector */}
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">Chọn Sheet Cần Nhập:</label>
-                <div className="flex flex-wrap gap-2">
-                  {inspection.sheets.map((s: any) => (
-                    <button
-                      key={s.name}
-                      onClick={() => handleSheetChange(s.name)}
-                      className={`px-4 py-2 rounded-xl text-sm font-bold border transition-all ${
-                        selectedSheet === s.name
-                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
-                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                      }`}
-                    >
-                      {s.name} ({s.rowCount} dòng)
-                    </button>
-                  ))}
-                </div>
-              </div>
+            </div>
+          </div>
 
-              {/* Detected Price Books */}
-              {mappingConfig && (
-                <div className="space-y-4 pt-2">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-sm font-extrabold text-slate-700 uppercase tracking-wider flex items-center gap-2">
-                      <Layers size={16} className="text-emerald-600" />
-                      <span>Các Bảng Giá / Bếp Được Nhận Diện ({mappingConfig.priceBooks?.length || 0}):</span>
-                    </h4>
-                    <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={allowZeroPrice}
-                        onChange={(e) => setAllowZeroPrice(e.target.checked)}
-                        className="rounded text-emerald-600 focus:ring-emerald-500"
-                      />
-                      <span>Chấp nhận giá 0đ có chủ ý</span>
-                    </label>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {(mappingConfig.priceBooks || []).map((pb: any, idx: number) => (
-                      <div key={idx} className="p-3.5 rounded-xl border border-slate-200 bg-slate-50 space-y-1.5 text-xs">
-                        <div className="flex items-center justify-between font-bold text-slate-800">
-                          <span className="truncate pr-2">{pb.name}</span>
-                          <span className="px-2 py-0.5 bg-slate-200 text-slate-700 rounded text-[10px] uppercase font-mono">
-                            {pb.kind}
+          {/* TABLE CONTAINER */}
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+            <div className="overflow-x-auto min-h-[400px]">
+              <table className="w-full text-left text-xs whitespace-nowrap border-collapse">
+                <thead className="bg-slate-50 border-b border-slate-200/80 sticky top-0 z-10 text-slate-600 font-bold uppercase text-[11px] tracking-wider">
+                  <tr>
+                    <th className="px-4 py-3.5 w-28 bg-slate-50">Mã hàng</th>
+                    <th className="px-4 py-3.5 min-w-64 bg-slate-50">Tên hàng</th>
+                    <th className="px-3 py-3.5 w-16 bg-slate-50 text-center">ĐVT</th>
+                    <th className="px-4 py-3.5 w-32 bg-slate-50 text-right text-slate-500">Giá vốn</th>
+                    <th className="px-4 py-3.5 w-32 bg-slate-50 text-right text-slate-500">Giá nhập cuối</th>
+                    {displayedBooks.map((b) => (
+                      <th key={b.id} className="px-4 py-3.5 text-right min-w-36 bg-slate-50">
+                        <div className="flex flex-col items-end">
+                          <span className="text-slate-800 font-extrabold">{b.name}</span>
+                          <span
+                            className={`text-[9px] px-1.5 py-0.2 rounded font-bold mt-0.5 ${
+                              b.status === 'active'
+                                ? 'bg-emerald-100 text-emerald-700'
+                                : 'bg-amber-100 text-amber-800'
+                            }`}
+                          >
+                            {b.status === 'active' ? 'Đang áp dụng' : 'Bản nháp'}
                           </span>
                         </div>
-                        <div className="text-slate-500 font-mono text-[11px]">Mã: {pb.code}</div>
-                        <div className="flex items-center justify-between text-slate-600 pt-1 border-t border-slate-200/60">
-                          <span>Cột Giá: <b>Cột {pb.priceColIndex + 1}</b></span>
-                          {pb.discountColIndex !== undefined && (
-                            <span>Cột CK: <b>Cột {pb.discountColIndex + 1}</b></span>
-                          )}
-                        </div>
-                      </div>
+                      </th>
                     ))}
-                  </div>
-                </div>
-              )}
+                  </tr>
+                </thead>
+
+                <tbody className="divide-y divide-slate-100">
+                  {loadingGrid ? (
+                    <tr>
+                      <td colSpan={5 + displayedBooks.length} className="text-center py-20 text-slate-400">
+                        <RefreshCw className="animate-spin inline-block mr-2" size={18} /> Đang tải bảng giá hàng hóa...
+                      </td>
+                    </tr>
+                  ) : gridProducts.length === 0 ? (
+                    <tr>
+                      <td colSpan={5 + displayedBooks.length} className="text-center py-20 text-slate-400">
+                        Không tìm thấy mặt hàng nào phù hợp với bộ lọc.
+                      </td>
+                    </tr>
+                  ) : (
+                    gridProducts.map((p) => (
+                      <tr key={p.id} className="hover:bg-emerald-50/20 transition-colors">
+                        {/* Mã hàng */}
+                        <td className="px-4 py-3 font-mono font-bold text-slate-700">{p.sku || '—'}</td>
+
+                        {/* Tên hàng */}
+                        <td className="px-4 py-3 font-medium text-slate-900">
+                          <div>{p.name}</div>
+                          {(p.packaging_note || (p.min_order_qty && p.min_order_qty > 1)) && (
+                            <div className="text-[10px] text-slate-400 mt-0.5 font-normal">
+                              {p.packaging_note ? `Quy cách: ${p.packaging_note}` : ''}
+                              {p.min_order_qty && p.min_order_qty > 1 ? ` · Tối thiểu: ${p.min_order_qty}` : ''}
+                            </div>
+                          )}
+                        </td>
+
+                        {/* ĐVT */}
+                        <td className="px-3 py-3 text-center text-slate-500 font-medium">{p.unit || '—'}</td>
+
+                        {/* Giá vốn (chỉ xem) */}
+                        <td className="px-4 py-3 text-right font-medium text-slate-500">
+                          {money(p.cost_price)}
+                        </td>
+
+                        {/* Giá nhập cuối (chỉ xem) */}
+                        <td className="px-4 py-3 text-right font-medium text-slate-500">
+                          {money(p.last_import_price)}
+                        </td>
+
+                        {/* Các cột Bảng giá */}
+                        {displayedBooks.map((b) => {
+                          const hasPrice = p.prices[b.id] != null;
+                          const currentVal = p.prices[b.id];
+                          const isEditing = editingCell?.productId === p.id && editingCell?.priceBookId === b.id;
+                          const isSaving = savingCellKey === `${p.id}_${b.id}`;
+
+                          return (
+                            <td key={b.id} className="px-4 py-2.5 text-right font-semibold">
+                              {isEditing ? (
+                                <div className="flex items-center justify-end gap-1">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="500"
+                                    autoFocus
+                                    disabled={isSaving}
+                                    value={editingCell.value}
+                                    onChange={(e) =>
+                                      setEditingCell({ ...editingCell, value: e.target.value })
+                                    }
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        handleSavePriceCell(p.id, b.id, editingCell.value);
+                                      } else if (e.key === 'Escape') {
+                                        setEditingCell(null);
+                                      }
+                                    }}
+                                    className="w-28 border border-emerald-500 rounded-lg px-2 py-1 text-right text-xs font-bold text-emerald-800 bg-emerald-50/50 focus:outline-none"
+                                    placeholder="Nhập giá..."
+                                  />
+                                  <button
+                                    onClick={() => handleSavePriceCell(p.id, b.id, editingCell.value)}
+                                    disabled={isSaving}
+                                    className="p-1.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+                                    title="Lưu (Enter)"
+                                  >
+                                    <Check size={13} />
+                                  </button>
+                                  <button
+                                    onClick={() => setEditingCell(null)}
+                                    disabled={isSaving}
+                                    className="p-1.5 bg-slate-200 text-slate-600 rounded-lg hover:bg-slate-300"
+                                    title="Hủy (Esc)"
+                                  >
+                                    <X size={13} />
+                                  </button>
+                                </div>
+                              ) : hasPrice ? (
+                                <div
+                                  onClick={() => {
+                                    if (canEditPricing) {
+                                      setEditingCell({
+                                        productId: p.id,
+                                        priceBookId: b.id,
+                                        value: String(currentVal),
+                                      });
+                                    }
+                                  }}
+                                  className={`inline-block px-2.5 py-1 rounded-lg text-emerald-800 font-bold transition-all ${
+                                    canEditPricing
+                                      ? 'cursor-pointer hover:bg-emerald-100 hover:ring-1 hover:ring-emerald-400'
+                                      : ''
+                                  }`}
+                                  title={canEditPricing ? 'Bấm để chỉnh giá' : undefined}
+                                >
+                                  {money(currentVal)}
+                                </div>
+                              ) : (
+                                <div className="flex justify-end">
+                                  {canEditPricing ? (
+                                    <button
+                                      onClick={() =>
+                                        setEditingCell({
+                                          productId: p.id,
+                                          priceBookId: b.id,
+                                          value: '',
+                                        })
+                                      }
+                                      className="w-7 h-7 rounded-full bg-slate-100 hover:bg-emerald-100 text-slate-400 hover:text-emerald-700 flex items-center justify-center font-bold text-sm cursor-pointer transition-colors shadow-sm"
+                                      title="Thêm giá cho mặt hàng này"
+                                    >
+                                      +
+                                    </button>
+                                  ) : (
+                                    <span className="text-slate-300">—</span>
+                                  )}
+                                </div>
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination Controls */}
+            <div className="p-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-600">
+              <div className="flex items-center gap-2">
+                <span>Hiển thị</span>
+                <select
+                  value={pageSize}
+                  onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
+                  className="border border-slate-200 rounded-lg px-2 py-1 bg-white focus:outline-none"
+                >
+                  <option value={10}>10 dòng</option>
+                  <option value={20}>20 dòng</option>
+                  <option value={50}>50 dòng</option>
+                  <option value={100}>100 dòng</option>
+                </select>
+                <span>mỗi trang · Tổng số: <b>{new Intl.NumberFormat('vi-VN').format(totalProducts)}</b> hàng hóa</span>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page <= 1 || loadingGrid}
+                  className="px-3 py-1.5 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-40 flex items-center gap-1 font-semibold"
+                >
+                  <ChevronLeft size={14} /> Trước
+                </button>
+                <span className="px-3 py-1 font-bold text-slate-800">
+                  Trang {page} / {totalPages}
+                </span>
+                <button
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page >= totalPages || loadingGrid}
+                  className="px-3 py-1.5 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-40 flex items-center gap-1 font-semibold"
+                >
+                  Sau <ChevronRight size={14} />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ───────────────────────────────────────────────────────────────── */}
+      {/* TAB 2: DANH SÁCH BẢNG GIÁ                                          */}
+      {/* ───────────────────────────────────────────────────────────────── */}
+      {activeTab === 'list' && (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold text-slate-800">Danh sách các bảng giá trong hệ thống</h2>
+            <button
+              onClick={() => fetchGridData()}
+              className="p-2 border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50"
+            >
+              <RefreshCw size={16} />
+            </button>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs whitespace-nowrap">
+              <thead className="bg-slate-50 text-slate-500 uppercase font-bold text-[11px]">
+                <tr>
+                  <th className="px-4 py-3">Mã bảng giá</th>
+                  <th className="px-4 py-3">Tên bảng giá</th>
+                  <th className="px-4 py-3">Phân loại</th>
+                  <th className="px-4 py-3 text-center">Trạng thái</th>
+                  <th className="px-4 py-3">Phiên bản / thời gian</th>
+                  <th className="px-4 py-3">Người cập nhật</th>
+                  <th className="px-4 py-3 text-right">Thao tác</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {allPriceBooks.map((b) => (
+                  <tr key={b.id} className="hover:bg-slate-50/50">
+                    <td className="px-4 py-3 font-mono font-bold text-slate-700">{b.code}</td>
+                    <td className="px-4 py-3 font-semibold text-slate-900">{b.name}</td>
+                    <td className="px-4 py-3">
+                      <span className="capitalize text-slate-600">
+                        {b.kind === 'general' ? 'Bảng giá chung' : b.kind === 'customer' ? 'Khách hàng' : 'Nhóm khách'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <span
+                        className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
+                          b.status === 'active'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : b.status === 'draft'
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-slate-100 text-slate-600'
+                        }`}
+                      >
+                        {b.status === 'active' ? 'Đang áp dụng' : b.status === 'draft' ? 'Bản nháp' : b.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      <div className="font-bold text-slate-700">Phiên bản {b.version}</div>
+                      <div className="text-[10px] mt-0.5">
+                        {b.status === 'active'
+                          ? `Áp dụng từ ${b.valid_from ? new Date(b.valid_from).toLocaleDateString('vi-VN') : 'chưa xác định'}`
+                          : `Cập nhật ${new Date(b.updated_at || b.created_at || Date.now()).toLocaleString('vi-VN')}`}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {b.status === 'active' ? (b.approved_by || b.created_by || '—') : (b.created_by || '—')}
+                    </td>
+                    <td className="px-4 py-3 text-right space-x-2">
+                      {b.status === 'active' && canEditPricing && (
+                        <button
+                          onClick={() => handleCreateDraftFromActive(b.id)}
+                          className="px-2.5 py-1 bg-amber-50 text-amber-800 rounded-lg text-xs font-semibold hover:bg-amber-100"
+                        >
+                          Tạo bản nháp mới
+                        </button>
+                      )}
+                      {b.status === 'draft' && can(user?.role, 'pricing.edit') && (
+                        <button
+                          onClick={() => handleActivate(b.id)}
+                          disabled={activatingId === b.id}
+                          className="px-2.5 py-1 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-700 disabled:opacity-50"
+                        >
+                          {activatingId === b.id ? 'Đang kích hoạt...' : 'Kích hoạt'}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ───────────────────────────────────────────────────────────────── */}
+      {/* TAB 3: NHẬP TỪ EXCEL (G4)                                          */}
+      {/* ───────────────────────────────────────────────────────────────── */}
+      {activeTab === 'import' && (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 space-y-6">
+          <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+            <div>
+              <h2 className="text-lg font-bold text-slate-800">Nhập bảng giá từ Excel</h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Kiểm tra đối chiếu theo SKU, hiển thị xem trước và lưu thành bản nháp an toàn
+              </p>
+            </div>
+            <button
+              onClick={() => setActiveTab('grid')}
+              className="px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl flex items-center gap-1"
+            >
+              <ArrowLeft size={14} /> Quay lại Thiết lập giá
+            </button>
+          </div>
+
+          {/* Step 1: Upload */}
+          {step === 1 && (
+            <div className="border-2 border-dashed border-slate-200 rounded-2xl p-12 text-center space-y-4 hover:border-emerald-500 transition-colors">
+              <input
+                id={fileInputId}
+                type="file"
+                accept=".xlsx,.xls"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handleFileSelected(f);
+                }}
+              />
+              <div className="w-14 h-14 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto shadow-inner">
+                <Upload size={28} />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-slate-800">Chọn file Excel bảng giá để tải lên</p>
+                <p className="text-xs text-slate-400 mt-1">Định dạng file .xlsx hoặc .xls (dung lượng tối đa 15MB)</p>
+              </div>
+              <label
+                htmlFor={fileInputId}
+                className="inline-block px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md cursor-pointer transition-colors"
+              >
+                {inspecting ? 'Đang đọc cấu trúc file...' : 'Chọn file Excel'}
+              </label>
             </div>
           )}
 
-          {/* STEP 3: PREVIEW & STATS */}
-          {step === 3 && previewData && (
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 space-y-6">
-              {/* Header & Stats Badges */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-100 gap-3">
-                <div>
-                  <h3 className="text-lg font-bold text-slate-800">Kết Quả Kiểm Tra Preview ({selectedSheet})</h3>
-                  <p className="text-xs text-slate-500">
-                    Rà soát kỹ trước khi lưu vào hệ thống. Các dòng lỗi sẽ không làm hỏng dữ liệu bảng giá hiện tại.
-                  </p>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700 cursor-pointer mr-2">
-                    <input
-                      type="checkbox"
-                      checked={validOnly}
-                      onChange={(e) => setValidOnly(e.target.checked)}
-                      className="rounded text-emerald-600 focus:ring-emerald-500"
-                    />
-                    <span>Chỉ lưu dòng hợp lệ</span>
-                  </label>
-                  <button
-                    onClick={handleDownloadErrors}
-                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all"
-                  >
-                    <Download size={14} />
-                    <span>Tải File Lỗi</span>
-                  </button>
-                  <button
-                    onClick={() => setStep(2)}
-                    className="px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
-                  >
-                    Sửa Mapping
-                  </button>
-                  <button
-                    onClick={handleCommit}
-                    disabled={committing}
-                    className="flex items-center gap-2 px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md transition-all disabled:opacity-50"
-                  >
-                    {committing ? <RefreshCw className="animate-spin" size={16} /> : <Save size={16} />}
-                    <span>Lưu Vào Hệ Thống (DRAFT)</span>
-                  </button>
-                </div>
+          {/* Step 2: Mapping Configuration */}
+          {step === 2 && inspection && (
+            <div className="space-y-4">
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-xs flex justify-between items-center">
+                <span>File: <b>{file?.name}</b> · {inspection.sheets?.length} trang tính</span>
+                <button onClick={() => setStep(1)} className="text-emerald-700 font-bold hover:underline">
+                  Đổi file khác
+                </button>
               </div>
 
-              {/* Badges Grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5">
-                <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 text-center">
-                  <div className="text-xl font-black text-slate-800">{previewData.stats.totalRows}</div>
-                  <div className="text-[11px] font-bold text-slate-500 uppercase mt-0.5">Tổng dòng</div>
-                </div>
-                <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-100 text-center">
-                  <div className="text-xl font-black text-emerald-700">{previewData.stats.validRows}</div>
-                  <div className="text-[11px] font-bold text-emerald-600 uppercase mt-0.5">Hợp lệ</div>
-                </div>
-                <div className="p-3 bg-rose-50 rounded-xl border border-rose-100 text-center">
-                  <div className="text-xl font-black text-rose-700">{previewData.stats.unmatchedRows}</div>
-                  <div className="text-[11px] font-bold text-rose-600 uppercase mt-0.5">Chưa khớp</div>
-                </div>
-                <div className="p-3 bg-amber-50 rounded-xl border border-amber-100 text-center">
-                  <div className="text-xl font-black text-amber-700">{previewData.stats.ambiguousRows}</div>
-                  <div className="text-[11px] font-bold text-amber-600 uppercase mt-0.5">Trùng tên</div>
-                </div>
-                <div className="p-3 bg-indigo-50 rounded-xl border border-indigo-100 text-center">
-                  <div className="text-xl font-black text-indigo-700">{previewData.stats.zeroPriceRows}</div>
-                  <div className="text-[11px] font-bold text-indigo-600 uppercase mt-0.5">Giá 0đ</div>
-                </div>
-                <div className="p-3 bg-purple-50 rounded-xl border border-purple-100 text-center">
-                  <div className="text-xl font-black text-purple-700">{previewData.stats.blankPriceRows}</div>
-                  <div className="text-[11px] font-bold text-purple-600 uppercase mt-0.5">Thiếu giá</div>
-                </div>
-                <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 text-center">
-                  <div className="text-xl font-black text-slate-600">{previewData.stats.skippedCategoryRows}</div>
-                  <div className="text-[11px] font-bold text-slate-400 uppercase mt-0.5">Bỏ qua</div>
-                </div>
-              </div>
-
-              {/* Filter tabs */}
-              <div className="flex items-center justify-between pt-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-slate-500 flex items-center gap-1">
-                    <Filter size={14} /> Lọc:
-                  </span>
-                  {(['all', 'valid', 'errors', 'zero'] as const).map((mode) => (
-                    <button
-                      key={mode}
-                      onClick={() => setPreviewFilter(mode)}
-                      className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                        previewFilter === mode ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                      }`}
-                    >
-                      {mode === 'all' && 'Tất cả'}
-                      {mode === 'valid' && 'Hợp lệ'}
-                      {mode === 'errors' && 'Lỗi / Cần sửa'}
-                      {mode === 'zero' && 'Có giá 0đ'}
-                    </button>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Chọn trang tính (Sheet)</label>
+                <select
+                  value={selectedSheet}
+                  onChange={(e) => {
+                    const sheet = e.target.value;
+                    setSelectedSheet(sheet);
+                    setMappingConfig(detectedMappings[sheet] || null);
+                  }}
+                  className="w-full border border-slate-200 rounded-xl p-2.5 text-xs bg-white focus:outline-none"
+                >
+                  {inspection.sheets?.map((s: any) => (
+                    <option key={s.name} value={s.name}>
+                      {s.name} ({s.rowCount} dòng)
+                    </option>
                   ))}
-                </div>
+                </select>
+              </div>
 
-                <div className="text-xs text-slate-500">
-                  Hiển thị trang <b>{previewPage}</b> / {previewData.pagination.totalPages} ({filteredRows.length} dòng)
+              <div className="flex items-center gap-2 pt-2">
+                <input
+                  type="checkbox"
+                  id="allowZero"
+                  checked={allowZeroPrice}
+                  onChange={(e) => setAllowZeroPrice(e.target.checked)}
+                  className="rounded text-emerald-600"
+                />
+                <label htmlFor="allowZero" className="text-xs text-slate-700 cursor-pointer">
+                  Chấp nhận sản phẩm có giá 0đ (báo giá tại chỗ sau)
+                </label>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4">
+                <button
+                  onClick={() => handleRunPreview(1)}
+                  disabled={previewing}
+                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md flex items-center gap-1.5"
+                >
+                  {previewing ? <RefreshCw className="animate-spin" size={14} /> : <Eye size={14} />}
+                  Xem trước dữ liệu (Preview)
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 3: Preview */}
+          {step === 3 && previewData && (
+            <div className="space-y-4">
+              {/* Summary Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 gap-3 text-center">
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                  <div className="text-lg font-black text-slate-800">{previewData.stats?.totalRows || 0}</div>
+                  <div className="text-[10px] text-slate-500 font-bold uppercase">Tổng dòng</div>
+                </div>
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
+                  <div className="text-lg font-black text-emerald-700">{previewData.stats?.validRows || 0}</div>
+                  <div className="text-[10px] text-emerald-600 font-bold uppercase">Khớp SKU hợp lệ</div>
+                </div>
+                <div className="p-3 bg-red-50 border border-red-200 rounded-xl">
+                  <div className="text-lg font-black text-red-700">{previewData.comparison?.increased || 0}</div>
+                  <div className="text-[10px] text-red-600 font-bold uppercase">Giá tăng</div>
+                </div>
+                <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl">
+                  <div className="text-lg font-black text-blue-700">{previewData.comparison?.decreased || 0}</div>
+                  <div className="text-[10px] text-blue-600 font-bold uppercase">Giá giảm</div>
+                </div>
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                  <div className="text-lg font-black text-slate-700">{previewData.comparison?.unchanged || 0}</div>
+                  <div className="text-[10px] text-slate-500 font-bold uppercase">Không đổi</div>
+                </div>
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl">
+                  <div className="text-lg font-black text-amber-700">{previewData.stats?.zeroPriceRows || 0}</div>
+                  <div className="text-[10px] text-amber-600 font-bold uppercase">Giá bằng 0đ</div>
+                </div>
+                <div className="p-3 bg-red-50 border border-red-200 rounded-xl">
+                  <div className="text-lg font-black text-red-700">{previewData.stats?.unmatchedRows || 0}</div>
+                  <div className="text-[10px] text-red-600 font-bold uppercase">SKU không khớp</div>
                 </div>
               </div>
 
-              {/* Preview Table */}
-              <div className="overflow-x-auto border border-slate-200 rounded-xl">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead className="bg-slate-50 text-slate-600 font-extrabold border-b border-slate-200">
+              <div className="flex flex-wrap items-center gap-2">
+                {([
+                  ['all', 'Tất cả'], ['changed', 'Chỉ xem giá thay đổi'], ['increase', 'Giá tăng'],
+                  ['decrease', 'Giá giảm'], ['errors', 'Dữ liệu cần kiểm tra'],
+                ] as const).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setPreviewChangeFilter(value)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${previewChangeFilter === value ? 'bg-emerald-600 border-emerald-600 text-white' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Rows Preview Table */}
+              <div className="overflow-x-auto max-h-96 border border-slate-200 rounded-xl">
+                <table className="w-full text-left text-xs whitespace-nowrap">
+                  <thead className="bg-slate-50 sticky top-0 text-slate-600 font-bold">
                     <tr>
-                      <th className="py-2.5 px-3 w-14">Dòng</th>
-                      <th className="py-2.5 px-3">Mã Nguồn</th>
-                      <th className="py-2.5 px-3">Tên Nguồn</th>
-                      <th className="py-2.5 px-3">ĐVT</th>
-                      <th className="py-2.5 px-3">Khớp Hệ Thống</th>
-                      <th className="py-2.5 px-3">Trạng Thái</th>
-                      <th className="py-2.5 px-3 text-right">Giá Mẫu</th>
+                      <th className="p-3">Dòng</th>
+                      <th className="p-3">Mã SKU</th>
+                      <th className="p-3">Tên sản phẩm</th>
+                      <th className="p-3">Bảng giá</th>
+                      <th className="p-3 text-right">Giá đang áp dụng</th>
+                      <th className="p-3 text-right">Giá mới tải lên</th>
+                      <th className="p-3 text-right">Chênh lệch</th>
+                      <th className="p-3 text-center">Kết quả</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {filteredRows.map((r: any, idx: number) => {
-                      const firstPrice = Object.values(r.prices || {})[0] as any;
-                      return (
-                        <tr key={idx} className={r.isValid ? 'hover:bg-emerald-50/40' : 'bg-rose-50/20 hover:bg-rose-50/50'}>
-                          <td className="py-2.5 px-3 text-slate-400 font-mono">{r.rowIndex}</td>
-                          <td className="py-2.5 px-3 font-mono font-semibold text-slate-800">{r.rawSku || '—'}</td>
-                          <td className="py-2.5 px-3 font-medium text-slate-800">{r.rawName}</td>
-                          <td className="py-2.5 px-3 text-slate-600">{r.rawUnit || '—'}</td>
-                          <td className="py-2.5 px-3">
-                            {r.matchResult.product ? (
-                              <span className="text-emerald-700 font-medium">
-                                [{r.matchResult.product.sku}] {r.matchResult.product.name}
+                    {previewData.rows?.flatMap((r: any) => previewData.priceBooks.map((pb: any) => ({ row: r, pb, price: r.prices?.[pb.key] })))
+                      .filter(({ row, price }: any) => {
+                        if (previewChangeFilter === 'changed') return ['increase', 'decrease', 'new'].includes(price?.comparisonStatus);
+                        if (previewChangeFilter === 'increase') return price?.comparisonStatus === 'increase';
+                        if (previewChangeFilter === 'decrease') return price?.comparisonStatus === 'decrease';
+                        if (previewChangeFilter === 'errors') return !row.isValid || ['zero_price', 'invalid_price', 'invalid_format'].includes(price?.status);
+                        return true;
+                      })
+                      .slice(0, 200)
+                      .map(({ row: r, pb, price }: any) => {
+                        const status = !r.isValid ? 'error' : price?.comparisonStatus;
+                        const labels: Record<string, string> = { increase: 'Tăng', decrease: 'Giảm', unchanged: 'Không đổi', new: 'Giá mới', missing: 'Thiếu giá', error: 'Cần kiểm tra' };
+                        return (
+                          <tr key={`${r.rowIndex}-${pb.key}`} className={status === 'error' ? 'bg-red-50/40' : ''}>
+                            <td className="p-3 font-mono text-slate-400">{r.rowIndex}</td>
+                            <td className="p-3 font-mono font-bold text-slate-800">{r.rawSku || '—'}</td>
+                            <td className="p-3 text-slate-700">{r.rawName || '—'}</td>
+                            <td className="p-3 font-semibold text-slate-700">{pb.name}</td>
+                            <td className="p-3 text-right text-slate-600">{money(price?.previousPrice)}</td>
+                            <td className="p-3 text-right font-extrabold text-slate-900">{money(price?.finalPrice)}</td>
+                            <td className={`p-3 text-right font-bold ${Number(price?.differenceAmount) > 0 ? 'text-red-600' : Number(price?.differenceAmount) < 0 ? 'text-blue-600' : 'text-slate-400'}`}>
+                              {price?.differenceAmount == null ? '—' : `${price.differenceAmount > 0 ? '+' : ''}${money(price.differenceAmount)}`}
+                              {price?.differencePercent != null && <span className="block text-[10px]">{price.differencePercent > 0 ? '+' : ''}{price.differencePercent.toFixed(1)}%</span>}
+                            </td>
+                            <td className="p-3 text-center">
+                              <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${status === 'increase' || status === 'error' ? 'bg-red-100 text-red-700' : status === 'decrease' ? 'bg-blue-100 text-blue-700' : status === 'new' ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-600'}`}>
+                                {labels[status] || price?.status || '—'}
                               </span>
-                            ) : (
-                              <span className="text-slate-400 italic">Chưa khớp</span>
-                            )}
-                          </td>
-                          <td className="py-2.5 px-3">
-                            {r.matchResult.status === 'exact_sku' && (
-                              <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">Khớp SKU</span>
-                            )}
-                            {r.matchResult.status === 'exact_name_unit' && (
-                              <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 text-[10px] font-bold">Khớp Tên+ĐVT</span>
-                            )}
-                            {r.matchResult.status === 'unmatched' && (
-                              <span className="px-2 py-0.5 rounded bg-rose-100 text-rose-800 text-[10px] font-bold">Không tìm thấy</span>
-                            )}
-                            {r.matchResult.status === 'ambiguous' && (
-                              <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold">Trùng lặp</span>
-                            )}
-                            {r.matchResult.status === 'skipped_category' && (
-                              <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] font-bold">Danh mục</span>
-                            )}
-                          </td>
-                          <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-800">
-                            {firstPrice?.finalPrice != null ? money(firstPrice.finalPrice) : '—'}
-                          </td>
-                        </tr>
-                      );
-                    })}
+                            </td>
+                          </tr>
+                        );
+                      })}
                   </tbody>
                 </table>
               </div>
 
-              {/* Pagination controls */}
-              <div className="flex items-center justify-between pt-2">
+              <div className="flex justify-between items-center pt-2">
                 <button
-                  onClick={() => handleRunPreview(Math.max(1, previewPage - 1))}
-                  disabled={previewPage <= 1 || previewing}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                  onClick={() => setStep(2)}
+                  className="px-4 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-50"
                 >
-                  <ChevronLeft size={16} /> Trang trước
+                  Quay lại
                 </button>
-                <span className="text-xs font-semibold text-slate-600">Trang {previewPage}</span>
                 <button
-                  onClick={() => handleRunPreview(previewPage + 1)}
-                  disabled={previewPage >= previewData.pagination.totalPages || previewing}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                  onClick={handleCommit}
+                  disabled={committing}
+                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md flex items-center gap-1.5"
                 >
-                  Trang sau <ChevronRight size={16} />
+                  {committing ? <RefreshCw className="animate-spin" size={14} /> : <Save size={14} />}
+                  Xác nhận lưu vào bản nháp
                 </button>
               </div>
             </div>
           )}
 
-          {/* STEP 4: DONE & ACTIVATE */}
-          {step === 4 && commitResult && (
-            <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 text-center space-y-6">
-              <div className="w-16 h-16 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center mx-auto shadow-inner">
+          {/* Step 4: Done */}
+          {step === 4 && (
+            <div className="text-center py-12 space-y-4">
+              <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-inner">
                 <CheckCircle2 size={36} />
               </div>
-              <div className="max-w-md mx-auto space-y-2">
-                <h3 className="text-2xl font-black text-slate-800">Lưu Bảng Giá Thành Công!</h3>
-                <p className="text-sm text-slate-600">
-                  Dữ liệu đã được lưu trữ an toàn ở trạng thái <b>DRAFT</b>. Bảng giá cũ của khách hàng vẫn đang hoạt động bình thường, không bị gián đoạn.
-                </p>
-                <div className="p-3 bg-slate-50 rounded-xl text-xs font-mono text-slate-600 text-left space-y-1">
-                  <div>Job ID: {commitResult.jobId}</div>
-                  <div>Số bảng giá tạo mới: {commitResult.priceBookIds?.length}</div>
-                  <div>Trạng thái: <span className="font-bold text-amber-700 uppercase">DRAFT</span></div>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center justify-center gap-3 pt-4">
-                <button
-                  onClick={() => {
-                    setStep(1);
-                    setFile(null);
-                    setPreviewData(null);
-                  }}
-                  className="px-5 py-2.5 rounded-xl border border-slate-200 text-sm font-bold text-slate-700 hover:bg-slate-50"
-                >
-                  Nhập file khác
-                </button>
-                <button
-                  onClick={() => setActiveTab('list')}
-                  className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md transition-all flex items-center gap-2"
-                >
-                  <Eye size={18} />
-                  <span>Xem Danh Sách & Phê Duyệt Kích Hoạt</span>
-                </button>
-              </div>
+              <h3 className="text-xl font-black text-slate-800">Đã lưu bảng giá vào bản nháp thành công!</h3>
+              <p className="text-xs text-slate-500 max-w-md mx-auto">
+                Bảng giá đã được nạp an toàn dưới dạng bản nháp (Draft). Bạn có thể quay lại màn Thiết lập giá để xem và tinh chỉnh trước khi duyệt kích hoạt.
+              </p>
+              <button
+                onClick={() => { setActiveTab('grid'); setStep(1); fetchGridData(); }}
+                className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md"
+              >
+                Về màn hình Thiết lập giá
+              </button>
             </div>
           )}
         </div>
       )}
 
-      {activeTab === 'matrix' && (
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-          <div className="p-5 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-3">
-            <div><h3 className="text-lg font-bold text-slate-800">Ma trận giá hàng hóa</h3><p className="text-xs text-slate-500 mt-1">So sánh giá chung, giá theo nhóm và giá riêng từng khách hàng trên cùng một bảng.</p></div>
-            <input value={matrixSearch} onChange={(e) => setMatrixSearch(e.target.value)} placeholder="Tìm mã hoặc tên hàng..." className="border border-slate-200 rounded-xl px-3 py-2 text-sm w-full md:w-72" />
-          </div>
-          <div className="overflow-auto max-h-[650px]">
-            {loadingMatrix ? <div className="p-12 text-center text-slate-400">Đang tải ma trận giá...</div> : <table className="w-full text-xs border-collapse min-w-[900px]"><thead className="sticky top-0 z-10 bg-slate-50"><tr><th className="p-3 text-left">Mã hàng</th><th className="p-3 text-left min-w-64">Tên hàng</th><th className="p-3 text-left">ĐVT</th>{matrixBooks.map((b) => <th key={b.id} className="p-3 text-right min-w-32">{b.name}</th>)}</tr></thead><tbody className="divide-y divide-slate-100">{matrixRows.filter((r) => !matrixSearch || `${r.sku} ${r.name}`.toLowerCase().includes(matrixSearch.toLowerCase())).map((r) => <tr key={r.product_id} className="hover:bg-emerald-50/30"><td className="p-3 font-mono">{r.sku || '—'}</td><td className="p-3 font-semibold text-slate-800">{r.name}</td><td className="p-3">{r.unit || '—'}</td>{matrixBooks.map((b) => <td key={b.id} className="p-3 text-right font-bold text-emerald-700">{r.prices[b.id] != null ? money(r.prices[b.id]) : <span className="text-slate-300">+</span>}</td>)}</tr>)}</tbody></table>}
-          </div>
-        </div>
-      )}
+      {/* ───────────────────────────────────────────────────────────────── */}
+      {/* MODAL: THÊM BẢNG GIÁ MỚI                                          */}
+      {/* ───────────────────────────────────────────────────────────────── */}
+      {showCreateModal && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden border border-slate-100 animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                  <Plus size={18} />
+                </div>
+                <h3 className="font-bold text-slate-800 text-base">Thêm bảng giá mới</h3>
+              </div>
+              <button onClick={() => setShowCreateModal(false)} className="p-1 text-slate-400 hover:bg-slate-50 rounded-lg">
+                <X size={18} />
+              </button>
+            </div>
 
-      {/* ==================== TAB 2: PRICE BOOKS LIST ==================== */}
-      {activeTab === 'list' && (
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-            <h3 className="text-lg font-bold text-slate-800">Danh Sách Bảng Giá Trong Hệ Thống</h3>
-            <button
-              onClick={fetchPriceBooks}
-              disabled={loadingList}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50"
-            >
-              <RefreshCw className={loadingList ? 'animate-spin' : ''} size={14} />
-              <span>Làm mới</span>
-            </button>
-          </div>
+            <form onSubmit={handleCreatePriceBook} className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Tên bảng giá <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ví dụ: Bảng giá Bếp Cơ Quan, Bảng giá HPF..."
+                  value={newBookForm.name}
+                  onChange={(e) => setNewBookForm({ ...newBookForm, name: e.target.value })}
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-emerald-500"
+                />
+              </div>
 
-          {selectedPriceBook && (
-            <div className="rounded-2xl border border-emerald-200 bg-emerald-50/40 overflow-hidden">
-              <div className="p-4 flex items-center justify-between border-b border-emerald-100">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <p className="text-xs font-bold uppercase tracking-wider text-emerald-700">Chi tiết bảng giá</p>
-                  <h4 className="font-extrabold text-slate-800">{selectedPriceBook.name} <span className="text-xs font-mono text-slate-500">{selectedPriceBook.code}</span></h4>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Mã bảng giá (tùy chọn)</label>
+                  <input
+                    type="text"
+                    placeholder="Tự sinh nếu để trống"
+                    value={newBookForm.code}
+                    onChange={(e) => setNewBookForm({ ...newBookForm, code: e.target.value })}
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono uppercase focus:outline-none focus:border-emerald-500"
+                  />
                 </div>
-                <button onClick={() => setSelectedPriceBook(null)} className="text-xs font-semibold text-slate-500 hover:text-slate-800">Đóng</button>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Phân loại áp dụng</label>
+                  <select
+                    value={newBookForm.kind}
+                    onChange={(e) => setNewBookForm({ ...newBookForm, kind: e.target.value as any })}
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs bg-white focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="customer">Khách hàng cụ thể</option>
+                    <option value="group">Nhóm khách hàng / Bếp</option>
+                    <option value="general">Bảng giá chung</option>
+                  </select>
+                </div>
               </div>
-              <div className="p-4 grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
-                <div><span className="text-slate-500 block">Phạm vi</span><b>{selectedPriceBook.kind === 'general' ? 'Toàn hệ thống' : selectedPriceBook.kind === 'group' ? 'Theo nhóm/bếp' : 'Theo khách hàng'}</b></div>
-                <div><span className="text-slate-500 block">Phiên bản</span><b>v{selectedPriceBook.version}</b></div>
-                <div><span className="text-slate-500 block">Trạng thái</span><b>{selectedPriceBook.status}</b></div>
-                <div><span className="text-slate-500 block">Từ ngày</span><b>{selectedPriceBook.valid_from ? new Date(selectedPriceBook.valid_from).toLocaleDateString('vi-VN') : 'Không giới hạn'}</b></div>
-                <div><span className="text-slate-500 block">Số mặt hàng</span><b>{selectedPriceBook.items?.length || 0}</b></div>
-              </div>
-              <div className="max-h-[420px] overflow-auto border-t border-emerald-100 bg-white">
-                {loadingPriceBook ? <div className="p-8 text-center text-slate-400">Đang tải bảng giá...</div> : (
-                  <table className="w-full text-xs"><thead className="sticky top-0 bg-slate-50 text-slate-600"><tr><th className="p-3 text-left">SKU</th><th className="p-3 text-left">Sản phẩm</th><th className="p-3 text-left">ĐVT</th><th className="p-3 text-right">Giá áp dụng</th><th className="p-3 text-right">Giá gốc</th></tr></thead>
-                    <tbody className="divide-y divide-slate-100">{(selectedPriceBook.items || []).map((item: any) => <tr key={item.product_id} className="hover:bg-emerald-50/30"><td className="p-3 font-mono">{item.sku_snapshot || '—'}</td><td className="p-3 font-semibold">{item.name_snapshot || '—'}</td><td className="p-3">{item.unit_snapshot || '—'}</td><td className="p-3 text-right font-bold text-emerald-700">{money(item.price)}</td><td className="p-3 text-right text-slate-500">{money(item.base_price)}</td></tr>)}</tbody>
-                  </table>
-                )}
-              </div>
-            </div>
-          )}
 
-          <div className="overflow-x-auto border border-slate-200 rounded-xl">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead className="bg-slate-50 text-slate-600 font-extrabold border-b border-slate-200">
-                <tr>
-                  <th className="py-3 px-4">Mã Bảng Giá</th>
-                  <th className="py-3 px-4">Tên Bảng Giá</th>
-                  <th className="py-3 px-4">Loại</th>
-                  <th className="py-3 px-4">Phiên Bản</th>
-                  <th className="py-3 px-4">Trạng Thái</th>
-                  <th className="py-3 px-4">Hiệu Lực</th>
-                  <th className="py-3 px-4 text-right">Thao Tác</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {priceBooks.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="py-8 text-center text-slate-400 italic">
-                      {loadingList ? 'Đang tải danh sách bảng giá...' : 'Chưa có bảng giá nào trong hệ thống.'}
-                    </td>
-                  </tr>
-                ) : (
-                  priceBooks.map((pb) => (
-                    <tr key={pb.id} onClick={() => openPriceBook(pb)} className="hover:bg-emerald-50/40 cursor-pointer">
-                      <td className="py-3 px-4 font-mono font-bold text-slate-800">{pb.code}</td>
-                      <td className="py-3 px-4 font-semibold text-slate-800">{pb.name}</td>
-                      <td className="py-3 px-4">
-                        <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-bold uppercase font-mono">
-                          {pb.kind}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 font-mono">v{pb.version}</td>
-                      <td className="py-3 px-4">
-                        {pb.status === 'active' && (
-                          <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold uppercase flex items-center gap-1 w-fit">
-                            <CheckCircle2 size={12} /> Active
-                          </span>
-                        )}
-                        {pb.status === 'draft' && (
-                          <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold uppercase w-fit block">
-                            Draft
-                          </span>
-                        )}
-                        {pb.status === 'expired' && (
-                          <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-bold uppercase w-fit block">
-                            Hết hạn
-                          </span>
-                        )}
-                        {pb.status === 'archived' && (
-                          <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-400 text-[10px] font-bold uppercase w-fit block">
-                            Archived
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-3 px-4 text-slate-500">
-                        {pb.valid_from ? new Date(pb.valid_from).toLocaleDateString('vi-VN') : '—'}
-                      </td>
-                      <td className="py-3 px-4 text-right">
-                        {pb.status === 'draft' && (
-                          <button
-                            onClick={() => handleActivate(pb.id)}
-                            disabled={activatingId === pb.id}
-                            className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold rounded-lg shadow-sm transition-all disabled:opacity-50"
-                          >
-                            {activatingId === pb.id ? 'Đang kích hoạt...' : 'Kích hoạt'}
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Sao chép giá từ bảng giá nguồn (tùy chọn)
+                </label>
+                <select
+                  value={newBookForm.sourcePriceBookId}
+                  onChange={(e) => setNewBookForm({ ...newBookForm, sourcePriceBookId: e.target.value })}
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs bg-white focus:outline-none focus:border-emerald-500"
+                >
+                  <option value="">Không sao chép (tạo bảng giá trống)</option>
+                  {allPriceBooks.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name} ({b.status === 'active' ? 'Đang áp dụng' : 'Bản nháp'})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Nếu chọn bảng giá nguồn, toàn bộ danh mục sản phẩm và giá sẽ được sao chép sang bản nháp mới.
+                </p>
+              </div>
+
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateModal(false)}
+                  className="px-4 py-2 border border-slate-200 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-50"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  disabled={creatingBook}
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md disabled:opacity-50"
+                >
+                  {creatingBook ? 'Đang tạo...' : 'Tạo bản nháp mới'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

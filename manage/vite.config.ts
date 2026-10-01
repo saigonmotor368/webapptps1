@@ -10,8 +10,9 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
-      // Dọn cache của các bản deploy cũ và nhận service worker mới ngay. Tránh
-      // index cũ tiếp tục gọi lazy chunk đã đổi tên sau deploy rồi treo loading.
+      // Dọn cache của các bản deploy cũ và nhận service worker mới ngay.
+      // Điều này ngăn index cũ tiếp tục gọi một lazy chunk đã bị Vercel thay
+      // tên — nguyên nhân phổ biến khiến route chỉ hiện "Đang tải..." mãi.
       workbox: {
         cleanupOutdatedCaches: true,
         clientsClaim: true,

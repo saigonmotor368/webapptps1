@@ -1,7 +1,7 @@
 import { lazy, Suspense, type ComponentType } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { canForProfile } from './lib/permissions';
+import { can } from './lib/permissions';
 import SaleLayout from './layouts/SaleLayout';
 import LoginPage from './pages/LoginPage';
 const CHUNK_RELOAD_KEY = 'tps1_manage_chunk_reload';
@@ -43,8 +43,6 @@ const DatHangPage = lazyPage(() => import('./pages/DatHangPage'));
 const DatHangExcelPage = lazyPage(() => import('./pages/DatHangExcelPage'));
 const DonTongPage = lazyPage(() => import('./pages/DonTongPage'));
 const PriceBooksPage = lazyPage(() => import('./pages/PriceBooksPage'));
-const CatalogPage = lazyPage(() => import('./pages/CatalogPage'));
-const UsersPage = lazyPage(() => import('./pages/UsersPage'));
 
 const LoadingScreen = () => (
   <div className="min-h-screen flex items-center justify-center bg-[#0B130E] text-white">Đang tải...</div>
@@ -68,7 +66,7 @@ const StaffOnlyRoute = ({ children, perm }: { children: React.ReactNode; perm?: 
   if (loading) return <LoadingScreen />;
   if (!user) return <Navigate to="/dang-nhap" />;
   if (user.userType !== 'staff') return <Navigate to="/" replace />;
-  if (perm && !canForProfile(user, perm)) return <Navigate to="/" replace />;
+  if (perm && !can(user.role, perm)) return <Navigate to="/" replace />;
   return <>{children}</>;
 };
 
@@ -106,16 +104,18 @@ function App() {
             <Route path="khach-hang/moi" element={<StaffOnlyRoute perm="customers.edit"><CustomerDetailPage /></StaffOnlyRoute>} />
             <Route path="khach-hang/:id" element={<StaffOnlyRoute perm="customers.view"><CustomerDetailPage /></StaffOnlyRoute>} />
             <Route path="hang-hoa" element={<StaffOnlyRoute perm="products.view"><ProductsPage /></StaffOnlyRoute>} />
-            <Route path="catalog" element={<StaffOnlyRoute perm="products.view"><CatalogPage /></StaffOnlyRoute>} />
             <Route path="hang-hoa/:id" element={<StaffOnlyRoute perm="products.view"><ProductDetailPage /></StaffOnlyRoute>} />
+            <Route path="thiet-lap-gia" element={<StaffOnlyRoute perm="pricing.view"><PriceBooksPage /></StaffOnlyRoute>} />
+            <Route path="bang-gia" element={<Navigate to="/thiet-lap-gia" replace />} />
+            <Route path="catalog" element={<Navigate to="/hang-hoa" replace />} />
+            <Route path="catalog/hang-hoa" element={<Navigate to="/hang-hoa" replace />} />
+            <Route path="catalog/*" element={<Navigate to="/hang-hoa" replace />} />
             <Route path="soan-hang" element={<StaffOnlyRoute perm="orders.packing"><SoanHangPage /></StaffOnlyRoute>} />
             <Route path="ap-gia-hang-ngay" element={<StaffOnlyRoute perm="pricing.edit"><BulkPricingPage /></StaffOnlyRoute>} />
-            <Route path="bang-gia" element={<StaffOnlyRoute perm="pricing.edit"><PriceBooksPage /></StaffOnlyRoute>} />
             {/* /don-tong: WP5 - Đơn tổng & tổng hợp soạn hàng cho Thu mua */}
             <Route path="don-tong" element={<StaffOnlyRoute perm="procurement.view"><DonTongPage /></StaffOnlyRoute>} />
             <Route path="cong-no" element={<StaffOnlyRoute perm="finance.view"><CongNoPage /></StaffOnlyRoute>} />
             <Route path="bao-cao" element={<StaffOnlyRoute perm="reports.view"><BaoCaoPage /></StaffOnlyRoute>} />
-            <Route path="nhan-vien" element={<StaffOnlyRoute perm="admin.manage_staff"><UsersPage /></StaffOnlyRoute>} />
             <Route path="don-hang-cua-toi" element={<CustomerOnlyRoute><MyOrdersPage /></CustomerOnlyRoute>} />
             <Route path="don-hang-cua-toi/:id" element={<CustomerOnlyRoute><MyOrderDetailPage /></CustomerOnlyRoute>} />
             <Route path="dat-hang/excel" element={<CustomerOnlyRoute><DatHangExcelPage /></CustomerOnlyRoute>} />

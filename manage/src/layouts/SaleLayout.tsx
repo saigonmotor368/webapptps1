@@ -1,15 +1,16 @@
 import { useState } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { canForProfile, ROLE_LABELS } from '../lib/permissions';
+import { can, ROLE_LABELS } from '../lib/permissions';
 import {
   LayoutDashboard, ShoppingCart, Users, PackageOpen, LogOut, PlusSquare, Package,
-  Wallet, BarChart3, MoreHorizontal, X, ClipboardList, Tag, Truck, UserCheck,
+  Wallet, BarChart3, MoreHorizontal, X, ClipboardList, Tag, FileSpreadsheet,
 } from 'lucide-react';
 
 const NAV_GROUPS = [
   { key: 'overview', label: 'Tổng quan' },
   { key: 'sales', label: 'Bán hàng & khách' },
+  { key: 'products', label: 'Quản lý Hàng hóa' },
   { key: 'operations', label: 'Thu mua & vận hành' },
   { key: 'finance', label: 'Tài chính & báo cáo' },
 ];
@@ -19,9 +20,9 @@ const NAV_GROUP_BY_PATH: Record<string, string> = {
   '/don-hang': 'sales',
   '/tao-don-hang': 'sales',
   '/khach-hang': 'sales',
-  '/catalog': 'sales',
   '/ap-gia-hang-ngay': 'sales',
-  '/bang-gia': 'sales',
+  '/hang-hoa': 'products',
+  '/thiet-lap-gia': 'products',
   '/don-tong': 'operations',
   '/soan-hang': 'operations',
   '/cong-no': 'finance',
@@ -40,14 +41,6 @@ export default function SaleLayout() {
   const isCustomer = user?.userType === 'customer';
   const role = user?.role ?? '';
 
-  const displayRoleLabel = isCustomer
-    ? `Khách hàng ${user?.tier || ''}`.trim()
-    : user?.role === 'ban_giam_doc' || user?.position === 'ban_giam_doc'
-      ? 'Ban Giám đốc'
-      : user?.role === 'admin' || user?.position === 'quan_tri_he_thong'
-        ? 'Quản trị hệ thống'
-        : (ROLE_LABELS[role] || role);
-
   const navItems = isCustomer
     ? [
         { path: '/', icon: <ShoppingCart size={20} />, label: 'Đặt hàng' },
@@ -57,33 +50,40 @@ export default function SaleLayout() {
         // Dashboard — mọi nhân viên
         { path: '/', icon: <LayoutDashboard size={20} />, label: 'Dashboard', perm: null },
         // Đơn hàng — mọi nhân viên có quyền xem
-        canForProfile(user, 'orders.view') && { path: '/don-hang', icon: <ShoppingCart size={20} />, label: 'Quản lý Đơn hàng', perm: 'orders.view' },
+        can(role, 'orders.view') && { path: '/don-hang', icon: <ShoppingCart size={20} />, label: 'Quản lý Đơn hàng', perm: 'orders.view' },
         // Tạo đơn POS — chỉ sale/admin/truong_phong
-        canForProfile(user, 'orders.create') && { path: '/tao-don-hang', icon: <PlusSquare size={20} />, label: 'Tạo đơn (POS)', perm: 'orders.create' },
+        can(role, 'orders.create') && { path: '/tao-don-hang', icon: <PlusSquare size={20} />, label: 'Tạo đơn (POS)', perm: 'orders.create' },
         // Áp giá — admin/truong_phong/sale/thu_mua (Thu mua báo giá lại, sale áp giá rồi soạn đơn ra phiếu tạm)
-        canForProfile(user, 'pricing.edit') && { path: '/ap-gia-hang-ngay', icon: <Tag size={20} />, label: 'Áp giá hàng ngày', perm: 'pricing.edit' },
-        // Đơn tổng (Thu mua) — admin/truong_phong/sale/thu_mua/kho (yêu cầu 2026-09-20)
-        canForProfile(user, 'procurement.view') && { path: '/don-tong', icon: <Truck size={20} />, label: 'Đơn tổng', perm: 'procurement.view' },
+        can(role, 'pricing.edit') && { path: '/ap-gia-hang-ngay', icon: <Tag size={20} />, label: 'Áp giá hàng ngày', perm: 'pricing.edit' },
+        // Thu mua & Soạn hàng (hợp nhất Đơn tổng gom hàng & Soạn hàng từng đơn)
+        (can(role, 'procurement.view') || can(role, 'orders.packing')) && {
+          path: '/don-tong',
+          icon: <PackageOpen size={20} />,
+          label: 'Thu mua & Soạn hàng',
+          perm: 'procurement.view',
+        },
         // Khách hàng
-        canForProfile(user, 'customers.view') && { path: '/khach-hang', icon: <Users size={20} />, label: 'Quản lý Khách hàng', perm: 'customers.view' },
-        // Hàng hóa
-        canForProfile(user, 'products.view') && { path: '/catalog', icon: <Package size={20} />, label: 'Quản lý Hàng hóa', perm: 'products.view' },
-        // Soạn hàng — admin/truong_phong/sale/thu_mua/kho (sale soạn đơn ra phiếu tạm)
-        canForProfile(user, 'orders.packing') && { path: '/soan-hang', icon: <PackageOpen size={20} />, label: 'Xử lý đơn hàng', perm: 'orders.packing' },
+        can(role, 'customers.view') && { path: '/khach-hang', icon: <Users size={20} />, label: 'Quản lý Khách hàng', perm: 'customers.view' },
+        // Quản lý Hàng hóa: chỉ có 2 mục Danh sách hàng hóa và Thiết lập giá
+        can(role, 'products.view') && { path: '/hang-hoa', icon: <Package size={20} />, label: 'Danh sách hàng hóa', perm: 'products.view' },
+        can(role, 'pricing.view') && { path: '/thiet-lap-gia', icon: <FileSpreadsheet size={20} />, label: 'Thiết lập giá', perm: 'pricing.view' },
         // Công nợ — admin/truong_phong/ke_toan
-        canForProfile(user, 'finance.view') && { path: '/cong-no', icon: <Wallet size={20} />, label: 'Công nợ', perm: 'finance.view' },
+        can(role, 'finance.view') && { path: '/cong-no', icon: <Wallet size={20} />, label: 'Công nợ', perm: 'finance.view' },
         // Báo cáo — admin/truong_phong/ke_toan
-        canForProfile(user, 'reports.view') && { path: '/bao-cao', icon: <BarChart3 size={20} />, label: 'Báo cáo', perm: 'reports.view' },
-        // Nhân viên & phòng ban — chỉ Admin
-        canForProfile(user, 'admin.manage_staff') && { path: '/nhan-vien', icon: <UserCheck size={20} />, label: 'Nhân viên & phân quyền', perm: 'admin.manage_staff' },
+        can(role, 'reports.view') && { path: '/bao-cao', icon: <BarChart3 size={20} />, label: 'Báo cáo', perm: 'reports.view' },
       ].filter(Boolean) as { path: string; icon: React.ReactNode; label: string; perm: string | null }[];
 
   // Mobile: chỉ hiện 4 mục dùng nhiều nhất, còn lại gom vào nút "Thêm".
-  const MOBILE_PRIMARY_PATHS = ['/', '/don-hang', '/tao-don-hang', '/catalog'];
+  const MOBILE_PRIMARY_PATHS = ['/', '/don-hang', '/tao-don-hang', '/hang-hoa'];
   const primaryItems = isCustomer ? navItems : navItems.filter((i) => MOBILE_PRIMARY_PATHS.includes(i.path));
   const moreItems = isCustomer ? [] : navItems.filter((i) => !MOBILE_PRIMARY_PATHS.includes(i.path));
 
-  const isActivePath = (path: string) => location.pathname === path || (path !== '/' && location.pathname.startsWith(path));
+  const isActivePath = (path: string) => {
+    if (path === '/don-tong') {
+      return location.pathname === '/don-tong' || location.pathname === '/soan-hang';
+    }
+    return location.pathname === path || (path !== '/' && location.pathname.startsWith(path));
+  };
 
   return (
     <div className="flex h-screen bg-[#F4F7F6] text-slate-800 overflow-hidden font-sans">
@@ -100,12 +100,12 @@ export default function SaleLayout() {
           <div className={`min-w-[150px] transition-opacity duration-150 ${sidebarExpanded ? 'opacity-100' : 'opacity-0'}`}>
             <h1 className="font-extrabold text-green-900 leading-tight tracking-tight">TPS1 Quản lý</h1>
             <p className="text-[11px] text-slate-500 mt-0.5">
-              {displayRoleLabel}
+              {isCustomer ? `Khách hàng ${user?.tier || ''}`.trim() : (ROLE_LABELS[role] || role)}
             </p>
           </div>
         </div>
 
-        <nav className={`flex-1 space-y-1 overflow-y-auto overflow-x-hidden transition-[padding] duration-200 ${sidebarExpanded ? 'p-4' : 'px-2.5 py-4'}`}>
+        <nav className={`flex-1 space-y-1 overflow-y-auto overflow-x-hidden no-scrollbar transition-[padding] duration-200 ${sidebarExpanded ? 'p-4' : 'px-2.5 py-4'}`}>
           {NAV_GROUPS.map((group) => {
             const groupItems = navItems.filter((item) => (NAV_GROUP_BY_PATH[item.path] || 'sales') === group.key);
             if (groupItems.length === 0) return null;
@@ -153,7 +153,7 @@ export default function SaleLayout() {
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 min-w-0 flex flex-col relative h-full overflow-y-auto overflow-x-hidden bg-[#f5f8f7]">
+      <main className="flex-1 min-w-0 flex flex-col relative h-full overflow-y-auto overflow-x-hidden sleek-scrollbar bg-[#f5f8f7]">
         <div className="md:hidden sticky top-0 z-20 flex items-center justify-between gap-3 px-4 py-3 bg-white/95 backdrop-blur border-b border-slate-200">
           <div className="flex items-center gap-2.5 min-w-0">
             <img src="/tps1-logo-transparent.png" alt="TPS1" className="w-9 h-9 object-contain shrink-0" />

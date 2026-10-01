@@ -14,3 +14,60 @@
   --color-brand-red: #c7372f;
   --font-brand: "Be Vietnam Pro", "Segoe UI", Arial, sans-serif;
 }
+
+/* ══════════════════════════════════════════════════════════════════ */
+/* CHUẨN HÓA THANH CUỘN (SCROLLBAR) HIỆN ĐẠI, LOẠI BỎ THANH XÁM NGUYÊN BẢN */
+/* ══════════════════════════════════════════════════════════════════ */
+
+/* 1. Loại bỏ các nút mũi tên tam giác xấu xí của trình duyệt mặc định */
+*::-webkit-scrollbar-button {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+/* 2. Thanh cuộn mặc định thanh mảnh, bo tròn tinh tế (chuẩn Mac / Figma) */
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 9999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.6);
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* 3. Lớp ẩn hoàn toàn thanh cuộn nhưng vẫn cuộn chuột / touchpad / vuốt ngón tay mượt mà */
+.no-scrollbar::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+.no-scrollbar {
+  -ms-overflow-style: none !important;  /* IE and Edge */
+  scrollbar-width: none !important;  /* Firefox */
+}
+
+/* 4. Thanh cuộn siêu mảnh bán trong suốt cho vùng nội dung chính */
+.sleek-scrollbar::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+.sleek-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sleek-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.3);
+  border-radius: 9999px;
+}
+.sleek-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.55);
+}
