@@ -56,6 +56,24 @@ export const useAuth = () => useContext(AuthContext);
 const STORAGE_USER_KEY = 'tps1_sale_user';
 const STORAGE_CUSTOMER_TOKEN_KEY = 'tps1_sale_customer_token';
 
+// Supabase Auth có thể chờ Web Lock/session refresh của một tab cũ. Nếu lời
+// gọi này không kết thúc, route guard sẽ chỉ hiện "Đang tải..." vô hạn.
+// Giới hạn thời gian khôi phục để người dùng luôn quay lại được màn hình đăng
+// nhập thay vì phải xóa cache trình duyệt thủ công.
+async function withAuthTimeout<T>(promise: PromiseLike<T>, timeoutMs = 8000): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      Promise.resolve(promise),
+      new Promise<T>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('Khôi phục phiên đăng nhập quá thời gian')), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
 // LƯU Ý BẢO MẬT (2026-09-09): trước đây file này tự tạo một phiên "admin"
 // giả mặc định khi localStorage trống, nghĩa là bất kỳ ai mở app này lần đầu
 // (localStorage rỗng) đều tự động thành admin toàn quyền mà không cần đăng
@@ -77,7 +95,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let mounted = true;
 
     const restore = async () => {
-      let { data: { session } } = await supabase.auth.getSession();
+      try {
+      let { data: { session } } = await withAuthTimeout(supabase.auth.getSession());
 
       if (session?.user) {
         // Có phiên Supabase Auth thật -> chỉ có thể là nhân viên.
@@ -85,7 +104,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const expiresAt = session.expires_at ? session.expires_at * 1000 : 0;
         if (expiresAt && expiresAt < Date.now() + 120000) {
           try {
-            const { data: refreshed } = await supabase.auth.refreshSession();
+            const { data: refreshed } = await withAuthTimeout(supabase.auth.refreshSession(), 6000);
             if (refreshed?.session) {
               session = refreshed.session;
             }
@@ -133,7 +152,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
-      if (mounted) setLoading(false);
+      } catch (error) {
+        console.error('Không thể khôi phục phiên đăng nhập:', error);
+        if (mounted) {
+          setUser(null);
+          setToken(null);
+        }
+      } finally {
+        if (mounted) setLoading(false);
+      }
     };
 
     restore();

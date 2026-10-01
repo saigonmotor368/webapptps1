@@ -178,6 +178,29 @@ export default function CustomersPage() {
     fetchCustomers();
   }, [fetchCustomers]);
 
+  // Nạp trước màn hình tạo/sửa khách khi trình duyệt rảnh. Danh sách vẫn hiện
+  // ngay, nhưng lúc bấm "Thêm khách hàng" chunk đã nằm trong cache nên không
+  // còn thêm một vòng chờ tải route riêng.
+  useEffect(() => {
+    let cancelled = false;
+    const preload = () => {
+      if (!cancelled) void import('./CustomerDetailPage');
+    };
+    const win = window as Window & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    const usesIdleCallback = typeof win.requestIdleCallback === 'function';
+    const idleId = usesIdleCallback
+      ? win.requestIdleCallback!(preload, { timeout: 1500 })
+      : window.setTimeout(preload, 250);
+    return () => {
+      cancelled = true;
+      if (usesIdleCallback && win.cancelIdleCallback) win.cancelIdleCallback(idleId);
+      else window.clearTimeout(idleId);
+    };
+  }, []);
+
   const staffMap = new Map(staffList.map((s) => [s.id, s.name]));
 
   // Row selection
@@ -497,6 +520,8 @@ export default function CustomersPage() {
             <FileSpreadsheet size={16} /> {exporting ? 'Đang xuất...' : 'Xuất Excel'}
           </button>
           <button
+            onMouseEnter={() => { void import('./CustomerDetailPage'); }}
+            onFocus={() => { void import('./CustomerDetailPage'); }}
             onClick={() => navigate('/khach-hang/moi')}
             className="px-4 py-2 bg-green-600 text-white rounded-xl text-sm font-semibold hover:bg-green-700 flex items-center gap-1.5 shadow-sm shadow-green-600/20"
           >

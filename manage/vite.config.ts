@@ -10,6 +10,14 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
+      // Dọn cache của các bản deploy cũ và nhận service worker mới ngay. Tránh
+      // index cũ tiếp tục gọi lazy chunk đã đổi tên sau deploy rồi treo loading.
+      workbox: {
+        cleanupOutdatedCaches: true,
+        clientsClaim: true,
+        skipWaiting: true,
+        navigateFallbackDenylist: [/^\/api\//],
+      },
       devOptions: {
         enabled: true
       },
