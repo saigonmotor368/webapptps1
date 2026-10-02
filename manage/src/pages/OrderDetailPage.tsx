@@ -1078,6 +1078,12 @@ export default function OrderDetailPage() {
               {order.sales_rep_name && (
                 <p className="text-xs text-slate-400">Sale phụ trách: <span className="text-slate-600 font-medium">{order.sales_rep_name}</span></p>
               )}
+              <p className="text-xs text-slate-400">
+                Nhân viên xử lý:{' '}
+                <span className={`font-medium ${order.processing_by_name ? 'text-blue-700' : 'text-amber-700'}`}>
+                  {order.processing_by_name || 'Chưa có người tiếp nhận'}
+                </span>
+              </p>
               {order.note && <div className="p-3 bg-amber-50 text-amber-800 rounded-lg text-xs border border-amber-100">{order.note}</div>}
             </dl>
           </div>

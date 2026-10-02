@@ -81,7 +81,7 @@ function dt(val: string | null | undefined) {
   });
 }
 
-export default function OrdersPage() {
+export default function OrdersPage({ view = 'orders' }: { view?: 'orders' | 'invoices' }) {
   const { user, token } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -151,10 +151,10 @@ export default function OrdersPage() {
       }
 
       if (!token) throw new Error('Phiên đăng nhập đã hết hạn');
-      const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+      const params = new URLSearchParams({ mode: view, page: String(page), pageSize: String(PAGE_SIZE) });
       if (dateFrom) params.set('from', dateFrom);
       if (dateTo) params.set('to', `${dateTo}T23:59:59.999`);
-      if (filterStatus) params.set('status', filterStatus);
+      if (view === 'orders' && filterStatus) params.set('status', filterStatus);
       if (filterPayment) params.set('paymentStatus', filterPayment);
       if (debouncedSearch) params.set('search', debouncedSearch);
       const response = await fetch(`${apiBase}/api/admin/orders?${params.toString()}`, {
@@ -170,7 +170,7 @@ export default function OrdersPage() {
     } finally {
       setLoading(false);
     }
-  }, [dateFrom, dateTo, filterStatus, filterPayment, debouncedSearch, page, token, apiBase]);
+  }, [dateFrom, dateTo, filterStatus, filterPayment, debouncedSearch, page, token, apiBase, view]);
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
 
@@ -266,9 +266,24 @@ export default function OrdersPage() {
     }
   };
 
-  const handleProcess = (order: any, e: React.MouseEvent) => {
+  const handleProcess = async (order: any, e: React.MouseEvent) => {
     e.stopPropagation();
-    navigate(`/tao-don-hang?processOrderId=${order.id}`);
+    setUpdatingId(order.id);
+    try {
+      const res = await fetch(`${apiBase}/api/admin/orders`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ orderId: order.id, claimOrder: true }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Không tiếp nhận được đơn hàng');
+      navigate(`/tao-don-hang?processOrderId=${order.id}`);
+    } catch (err: any) {
+      alert(err.message || 'Không tiếp nhận được đơn hàng');
+      await fetchOrders();
+    } finally {
+      setUpdatingId(null);
+    }
   };
 
   const deleteOrder = async (order: any, e: React.MouseEvent) => {
@@ -375,12 +390,13 @@ export default function OrdersPage() {
   };
 
   // Status Chip list for quick mobile/desktop tabs
-  const statusChips = [
+  const statusChips = view === 'invoices' ? [
+    { key: '', label: 'Tất cả hóa đơn', count: totalCount, dot: STATUS_DOT_COLORS.completed },
+  ] : [
     { key: '', label: 'Tất cả', count: totalCount },
     { key: 'pending', label: 'Chờ xác nhận', count: stats.pending, dot: STATUS_DOT_COLORS.pending },
     { key: 'preparing', label: 'Đang chuẩn bị', count: stats.preparing, dot: STATUS_DOT_COLORS.preparing },
     { key: 'shipping', label: 'Đang giao', count: stats.shipping, dot: STATUS_DOT_COLORS.shipping },
-    { key: 'completed', label: 'Hoàn thành', count: stats.completed, dot: STATUS_DOT_COLORS.completed },
   ];
 
   return (
@@ -393,7 +409,7 @@ export default function OrdersPage() {
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <h1 className="text-lg sm:text-2xl font-extrabold text-slate-900 tracking-tight">
-              Quản lý Đơn hàng
+              {view === 'invoices' ? 'Hóa đơn bán hàng' : 'Đặt hàng'}
             </h1>
             <span className="hidden sm:inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-600">
               {totalCount} đơn
@@ -413,7 +429,7 @@ export default function OrdersPage() {
         <div className="flex items-center gap-1.5 sm:gap-2">
 
           {/* NÚT 1: TẠO ĐƠN HÀNG (+) */}
-          <div className="relative group">
+          {view === 'orders' && <div className="relative group">
             <button
               onClick={() => navigate('/tao-don-hang')}
               className="h-10 sm:h-auto sm:px-3.5 sm:py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-xs sm:text-sm font-bold shadow-xs flex items-center justify-center gap-1.5 transition-all"
@@ -427,10 +443,10 @@ export default function OrdersPage() {
             <div className="absolute -bottom-9 right-0 sm:left-1/2 sm:-translate-x-1/2 px-2.5 py-1 bg-slate-900/90 text-white text-[11px] font-medium rounded-lg shadow-lg pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap z-50">
               Tạo đơn hàng mới (POS)
             </div>
-          </div>
+          </div>}
 
           {/* NÚT 2: GỘP ĐƠN (Theo khách hàng chuẩn KiotViet) */}
-          <div className="relative group">
+          {view === 'orders' && <div className="relative group">
             <button
               onClick={() => setIsMergeModalOpen(true)}
               className="h-10 sm:h-auto sm:px-3.5 sm:py-2.5 px-3 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-xl text-xs sm:text-sm font-bold shadow-xs flex items-center justify-center gap-1.5 transition-all relative"
@@ -453,7 +469,7 @@ export default function OrdersPage() {
             <div className="absolute -bottom-9 right-0 sm:left-1/2 sm:-translate-x-1/2 px-2.5 py-1 bg-slate-900/90 text-white text-[11px] font-medium rounded-lg shadow-lg pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap z-50">
               Gộp đơn theo khách hàng
             </div>
-          </div>
+          </div>}
 
           {/* NÚT 3: XUẤT FILE & IN PHIẾU (Dropdown) */}
           <div className="relative group" ref={exportDropdownRef}>
@@ -807,6 +823,11 @@ export default function OrdersPage() {
                       {order.customer_code}{order.customer_company ? ` · ${order.customer_company}` : ''}
                       {order.customer_phone ? ` · ${order.customer_phone}` : ''}
                     </p>
+                    {view === 'orders' && (
+                      <p className={`text-[11px] mt-1 font-semibold ${order.processing_by_name ? 'text-blue-700' : 'text-amber-700'}`}>
+                        {order.processing_by_name ? `Đang xử lý: ${order.processing_by_name}` : 'Chưa có nhân viên tiếp nhận'}
+                      </p>
+                    )}
                   </div>
 
                   {/* Hàng 3: Ngày giao & Địa chỉ giao hàng */}
@@ -995,6 +1016,11 @@ export default function OrdersPage() {
                         <p className="font-bold text-slate-900">{order.customer_name || 'Khách lẻ'}</p>
                         <p className="text-xs text-slate-500">{order.customer_code}{order.customer_company ? ` · ${order.customer_company}` : ''}</p>
                         {order.sales_rep_name && <p className="text-[11px] text-slate-400 mt-0.5">Sale: {order.sales_rep_name}</p>}
+                        {view === 'orders' && (
+                          <p className={`text-[11px] mt-0.5 font-semibold ${order.processing_by_name ? 'text-blue-700' : 'text-amber-700'}`}>
+                            {order.processing_by_name ? `Đang xử lý: ${order.processing_by_name}` : 'Chưa tiếp nhận'}
+                          </p>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-center text-slate-600 font-medium">{order.item_count || 0}</td>
                       <td className="px-4 py-3 text-right">
@@ -1108,13 +1134,13 @@ export default function OrdersPage() {
           <div className="h-4 w-px bg-slate-700 hidden sm:block" />
 
           {/* Nút Gộp đơn */}
-          <button
+          {view === 'orders' && <button
             onClick={() => setIsMergeModalOpen(true)}
             disabled={selectedOrderIds.size < 2}
             className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 disabled:opacity-40 transition-all shadow-sm"
           >
             <Package size={14} /> Gộp đơn
-          </button>
+          </button>}
 
           {/* Menu Xuất file */}
           <button
@@ -1143,14 +1169,14 @@ export default function OrdersPage() {
       {/* ═════════════════════════════════════════════════════════════════════ */}
       {/* MODAL GỘP ĐƠN (2 BƯỚC: NHÓM KHÁCH HÀNG & BẢN XEM TRƯỚC)              */}
       {/* ═════════════════════════════════════════════════════════════════════ */}
-      <MergeOrdersModal
+      {view === 'orders' && <MergeOrdersModal
         isOpen={isMergeModalOpen}
         preSelectedOrderIds={Array.from(selectedOrderIds)}
         onClose={() => setIsMergeModalOpen(false)}
         onSuccess={handleMergeSuccess}
         token={token}
         apiBase={apiBase}
-      />
+      />}
     </div>
   );
 }

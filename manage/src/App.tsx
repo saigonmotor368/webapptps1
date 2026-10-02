@@ -98,6 +98,7 @@ function App() {
           <Route path="/" element={<ProtectedRoute><SaleLayout /></ProtectedRoute>}>
             <Route index element={<HomeRoute />} />
             <Route path="don-hang" element={<StaffOnlyRoute perm="orders.view"><OrdersPage /></StaffOnlyRoute>} />
+            <Route path="hoa-don" element={<StaffOnlyRoute perm="orders.view"><OrdersPage view="invoices" /></StaffOnlyRoute>} />
             <Route path="don-hang/:id" element={<StaffOnlyRoute perm="orders.view"><OrderDetailPage /></StaffOnlyRoute>} />
             <Route path="tao-don-hang" element={<StaffOnlyRoute perm="orders.create"><PosCreatePage /></StaffOnlyRoute>} />
             <Route path="khach-hang" element={<StaffOnlyRoute perm="customers.view"><CustomersPage /></StaffOnlyRoute>} />

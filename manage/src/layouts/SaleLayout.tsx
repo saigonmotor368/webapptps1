@@ -18,6 +18,7 @@ const NAV_GROUPS = [
 const NAV_GROUP_BY_PATH: Record<string, string> = {
   '/': 'overview',
   '/don-hang': 'sales',
+  '/hoa-don': 'sales',
   '/tao-don-hang': 'sales',
   '/khach-hang': 'sales',
   '/ap-gia-hang-ngay': 'sales',
@@ -50,7 +51,8 @@ export default function SaleLayout() {
         // Dashboard — mọi nhân viên
         { path: '/', icon: <LayoutDashboard size={20} />, label: 'Dashboard', perm: null },
         // Đơn hàng — mọi nhân viên có quyền xem
-        can(role, 'orders.view') && { path: '/don-hang', icon: <ShoppingCart size={20} />, label: 'Quản lý Đơn hàng', perm: 'orders.view' },
+        can(role, 'orders.view') && { path: '/don-hang', icon: <ShoppingCart size={20} />, label: 'Đặt hàng', perm: 'orders.view' },
+        can(role, 'orders.view') && { path: '/hoa-don', icon: <FileSpreadsheet size={20} />, label: 'Hóa đơn', perm: 'orders.view' },
         // Tạo đơn POS — chỉ sale/admin/truong_phong
         can(role, 'orders.create') && { path: '/tao-don-hang', icon: <PlusSquare size={20} />, label: 'Tạo đơn (POS)', perm: 'orders.create' },
         // Áp giá — admin/truong_phong/sale/thu_mua (Thu mua báo giá lại, sale áp giá rồi soạn đơn ra phiếu tạm)
@@ -100,7 +102,7 @@ export default function SaleLayout() {
           <div className={`min-w-[150px] transition-opacity duration-150 ${sidebarExpanded ? 'opacity-100' : 'opacity-0'}`}>
             <h1 className="font-extrabold text-green-900 leading-tight tracking-tight">TPS1 Quản lý</h1>
             <p className="text-[11px] text-slate-500 mt-0.5">
-              {isCustomer ? `Khách hàng ${user?.tier || ''}`.trim() : (ROLE_LABELS[role] || role)}
+              {isCustomer ? 'Khách hàng TPS1' : (ROLE_LABELS[role] || role)}
             </p>
           </div>
         </div>
