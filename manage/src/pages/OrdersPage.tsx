@@ -152,8 +152,8 @@ export default function OrdersPage({ view = 'orders' }: { view?: 'orders' | 'inv
 
       if (!token) throw new Error('Phiên đăng nhập đã hết hạn');
       const params = new URLSearchParams({ mode: view, page: String(page), pageSize: String(PAGE_SIZE) });
-      if (dateFrom) params.set('from', dateFrom);
-      if (dateTo) params.set('to', `${dateTo}T23:59:59.999`);
+      if (dateFrom) params.set('dateFrom', dateFrom);
+      if (dateTo) params.set('dateTo', dateTo);
       if (view === 'orders' && filterStatus) params.set('status', filterStatus);
       if (filterPayment) params.set('paymentStatus', filterPayment);
       if (debouncedSearch) params.set('search', debouncedSearch);
@@ -162,9 +162,17 @@ export default function OrdersPage({ view = 'orders' }: { view?: 'orders' | 'inv
       });
       const result = await response.json().catch(() => null);
       if (!response.ok || !result?.ok) throw new Error(result?.error || 'Không tải được danh sách đơn hàng');
-      setTotalCount(Number(result.count) || 0);
-      setOrders(Array.isArray(result.orders) ? result.orders : []);
-      setStats(result.stats || { pending: 0, preparing: 0, shipping: 0, completed: 0, revenue: 0 });
+      const loadedOrders = Array.isArray(result.orders) ? result.orders : [];
+      setTotalCount(Number(result.totalCount ?? result.count) || 0);
+      setOrders(loadedOrders);
+      setStats(result.stats || loadedOrders.reduce((acc: any, order: any) => {
+        if (order.status === 'pending') acc.pending += 1;
+        if (order.status === 'preparing') acc.preparing += 1;
+        if (order.status === 'shipping') acc.shipping += 1;
+        if (order.status === 'completed') acc.completed += 1;
+        if (order.status !== 'canceled' && order.status !== 'merged') acc.revenue += Number(order.grand_total) || 0;
+        return acc;
+      }, { pending: 0, preparing: 0, shipping: 0, completed: 0, revenue: 0 }));
     } catch (err) {
       console.error('Lỗi tải đơn hàng:', err);
     } finally {
