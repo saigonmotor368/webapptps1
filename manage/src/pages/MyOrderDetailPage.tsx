@@ -296,6 +296,7 @@ export default function MyOrderDetailPage() {
               <div className="flex justify-between text-slate-500"><span>Chiết khấu</span><span className="text-red-600 font-medium">-{money(order.discount_amount)}</span></div>
             )}
             <div className="flex justify-between text-slate-500"><span>Phí giao hàng</span><span className="font-medium text-slate-700">{money(order.shipping_amount || 0)}</span></div>
+            {order.vat_enabled && <div className="flex justify-between text-slate-500"><span>VAT</span><span className="font-medium text-slate-700">{money(order.vat_amount || 0)}</span></div>}
             <div className="flex justify-between font-bold text-lg pt-2 border-t border-slate-100">
               <span>Tổng thanh toán</span><span className="text-green-700">{money(order.grand_total)}</span>
             </div>

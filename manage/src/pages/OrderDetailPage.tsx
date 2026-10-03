@@ -47,6 +47,8 @@ interface LineItem {
   base_unit_price: number;
   unit_price: number;
   pricing_note?: string;
+  vat_rate: 5 | 8;
+  vat_amount?: number;
   isNew?: boolean;
 }
 
@@ -72,6 +74,7 @@ export default function OrderDetailPage() {
   const [pricingMode, setPricingMode] = useState('tier');
   const [orderDiscountPercent, setOrderDiscountPercent] = useState(0);
   const [shippingAmount, setShippingAmount] = useState(0);
+  const [vatEnabled, setVatEnabled] = useState(false);
   const [lines, setLines] = useState<LineItem[]>([]);
   const [verificationNote, setVerificationNote] = useState('');
   const [pricingNote, setPricingNote] = useState('');
@@ -292,6 +295,8 @@ export default function OrderDetailPage() {
         base_unit_price: Number(item.base_unit_price),
         unit_price: Number(item.unit_price),
         pricing_note: item.pricing_note || '',
+        vat_rate: Number(item.vat_rate) === 8 ? 8 : 5,
+        vat_amount: Number(item.vat_amount || 0),
       })));
 
       // Auto-load tier thật của khách từ vip_accounts khi đơn chưa finalize
@@ -348,6 +353,7 @@ export default function OrderDetailPage() {
       }
 
       setShippingAmount(Number(data.shipping_amount || 0));
+      setVatEnabled(Boolean(data.vat_enabled));
       setPricingNote(data.pricing_note || '');
       setDeliveryForm({
         packageWeightG: data.package_weight_g != null ? String(data.package_weight_g) : '',
@@ -375,7 +381,7 @@ export default function OrderDetailPage() {
   // quan tâm mode/tier đang chọn.
   const calcTotals = useCallback(() => {
     const tierDiscount = tiers.find(t => t.code === selectedTier)?.discount_percent || 0;
-    let subtotal = 0, merchandise = 0;
+    let subtotal = 0, merchandise = 0, vatAmount = 0;
     const priced = lines.map(line => {
       // Ưu tiên 1: giá hợp đồng cố định từng mặt hàng
       const contractPrice = line.productId ? contractPrices[line.productId] : undefined;
@@ -397,10 +403,13 @@ export default function OrderDetailPage() {
       }
       subtotal += Math.round((line.base_unit_price || up) * line.quantity);
       merchandise += Math.round(up * line.quantity);
-      return { ...line, unit_price: up };
+      const lineTotal = Math.round(up * line.quantity);
+      const lineVat = vatEnabled ? Math.round(lineTotal * line.vat_rate / 100) : 0;
+      vatAmount += lineVat;
+      return { ...line, unit_price: up, vat_amount: lineVat };
     });
-    return { subtotal, merchandise, total: merchandise + shippingAmount, priced };
-  }, [lines, pricingMode, selectedTier, orderDiscountPercent, shippingAmount, tiers, contractPrices]);
+    return { subtotal, merchandise, vatAmount, total: merchandise + vatAmount + shippingAmount, priced };
+  }, [lines, pricingMode, selectedTier, orderDiscountPercent, shippingAmount, tiers, contractPrices, vatEnabled]);
 
   const totals = calcTotals();
 
@@ -439,7 +448,7 @@ export default function OrderDetailPage() {
       productId: product.id, name: product.name, sku: product.sku,
       unit: product.unit || 'Kg', quantity: 1,
       base_unit_price: Number(product.price), unit_price: Number(product.price),
-      pricing_note: '', isNew: true,
+      pricing_note: '', vat_rate: 5, vat_amount: 0, isNew: true,
     }]);
     setProductResults([]);
     setProductSearch('');
@@ -472,12 +481,14 @@ export default function OrderDetailPage() {
           pricingMode,
           orderDiscountPercent,
           shippingAmount,
+          vatEnabled,
           items: totals.priced.map(l => ({
             itemId: l.isNew ? undefined : l.itemId,
             productId: l.productId,
             quantity: l.quantity,
             finalUnitPrice: l.unit_price,
             note: l.pricing_note || '',
+            vatRate: l.vat_rate,
           })),
           verificationNote,
           pricingNote,
@@ -787,6 +798,7 @@ export default function OrderDetailPage() {
                     <th className="px-4 py-3 text-center">SL</th>
                     <th className="px-4 py-3 text-center">Đã giao</th>
                     <th className="px-4 py-3 text-right">Đơn giá</th>
+                    {vatEnabled && <th className="px-4 py-3 text-center">VAT</th>}
                     <th className="px-4 py-3 text-right">Thành tiền</th>
                     <th className="px-4 py-3"></th>
                   </tr>
@@ -867,6 +879,23 @@ export default function OrderDetailPage() {
                             <span className="text-slate-600 font-medium">{money(priced?.unit_price || line.unit_price)}</span>
                           )}
                         </td>
+                        {vatEnabled && (
+                          <td className="px-4 py-3 text-center">
+                            {!isLocked && canFinalizePricing ? (
+                              <select
+                                value={line.vat_rate}
+                                onChange={e => updateLine(idx, 'vat_rate', Number(e.target.value) === 8 ? 8 : 5)}
+                                className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-green-500/20"
+                                aria-label={`VAT ${line.name}`}
+                              >
+                                <option value={5}>5%</option>
+                                <option value={8}>8%</option>
+                              </select>
+                            ) : (
+                              <span className="font-semibold text-slate-600">{line.vat_rate}%</span>
+                            )}
+                          </td>
+                        )}
                         <td className="px-4 py-3 text-right font-semibold text-slate-800">{money(lineTotal)}</td>
                         <td className="px-4 py-3">
                           {!isLocked && (
@@ -1003,6 +1032,16 @@ export default function OrderDetailPage() {
                   <input type="number" min="0" step="1000" value={shippingAmount} onChange={e => setShippingAmount(Number(e.target.value))} disabled={isLocked || !canFinalizePricing}
                     className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/20 disabled:opacity-60" />
                 </div>
+                <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={vatEnabled}
+                    onChange={e => setVatEnabled(e.target.checked)}
+                    disabled={isLocked || !canFinalizePricing}
+                    className="h-4 w-4 rounded border-slate-300 text-green-600 focus:ring-green-500/20 disabled:opacity-60"
+                  />
+                  <span className="text-sm font-bold text-slate-700">VAT</span>
+                </label>
               </div>
 
               {/* Ô nhập % chiết khấu — chỉ hiện khi chế độ "Chiết khấu riêng" */}
@@ -1046,6 +1085,7 @@ export default function OrderDetailPage() {
                   <span className="text-red-600">-{money(Math.max(0, totals.subtotal - totals.merchandise))}</span>
                 </div>
                 <div className="flex justify-between text-slate-500"><span>Phí giao hàng</span><span>{money(shippingAmount)}</span></div>
+                {vatEnabled && <div className="flex justify-between text-slate-500"><span>VAT</span><span>{money(totals.vatAmount)}</span></div>}
                 <div className="flex justify-between font-bold text-base text-slate-800 pt-2 border-t border-slate-200">
                   <span>Tổng sau xác nhận</span><span className="text-green-700">{money(totals.total)}</span>
                 </div>
