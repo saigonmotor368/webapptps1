@@ -48,6 +48,7 @@ interface OrderSummary {
   deliveryName: string;
   deliveryPhone: string;
   deliveryAddress: string;
+  deliveryDate: string;
   status: string;
   isLate: boolean;
   lineCount: number;
@@ -215,7 +216,7 @@ export default function DonTongPage() {
     const totalLines = checksum?.lineItemCount || 0;
     const lateOrders = orders.filter((o) => o.isLate).length;
 
-    let text = `📦 TỔNG HỢP SOẠN HÀNG TPS1 — Giao ngày ${deliveryDate}\n`;
+    let text = `📦 TỔNG HỢP SOẠN HÀNG TPS1 — Đến ngày giao ${deliveryDate}\n`;
     text += `• Số đơn: ${totalOrders} đơn (${orders.filter((o) => o.status === 'confirmed').length} đã xác nhận, ${orders.filter((o) => o.status === 'pending').length} chờ duyệt)\n`;
     text += `• Số dòng hàng: ${totalLines} dòng\n`;
     if (lateOrders > 0) {
@@ -331,7 +332,7 @@ export default function DonTongPage() {
             Đơn tổng &amp; Tổng hợp soạn hàng
           </h1>
           <p className="text-slate-500 text-sm mt-0.5">
-            Tổng hợp theo ngày giao, chuẩn bị file Excel cho Thu mua và xử lý ngoại lệ trước giờ soạn hàng.
+            Tổng hợp các đơn cần soạn đến ngày giao đã chọn, gồm cả đơn đã xác nhận còn tồn từ ngày trước.
           </p>
         </div>
 
@@ -339,7 +340,7 @@ export default function DonTongPage() {
         <div className="flex flex-wrap items-center gap-2.5">
           <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-3 py-1.5 shadow-sm">
             <Calendar size={15} className="text-slate-400" />
-            <span className="text-xs font-semibold text-slate-500">Giao ngày:</span>
+            <span className="text-xs font-semibold text-slate-500">Đến ngày giao:</span>
             <input
               type="date"
               value={deliveryDate}
@@ -562,6 +563,14 @@ export default function DonTongPage() {
         </label>
       </div>
 
+      <div className="-mt-3 flex items-start gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+        <Clock size={15} className="mt-0.5 shrink-0" />
+        <span>
+          Các đơn <b>đã xác nhận/đang soạn</b> chưa hoàn tất từ ngày trước vẫn được hiển thị để không bỏ sót.
+          Đơn chờ xác nhận chỉ lấy đúng ngày giao đã chọn.
+        </span>
+      </div>
+
       {/* 5. Nội dung Tab */}
       {loading ? (
         <div className="bg-white rounded-2xl border border-slate-200 p-16 text-center text-slate-500 space-y-3">
@@ -585,7 +594,7 @@ export default function DonTongPage() {
           {groups.length === 0 ? (
             <div className="bg-white rounded-2xl border border-slate-200 p-16 text-center text-slate-400">
               <Package size={36} className="mx-auto mb-2 opacity-40" />
-              <p className="font-semibold text-slate-600">Không có đơn hàng nào cho ngày giao {deliveryDate}</p>
+              <p className="font-semibold text-slate-600">Không có đơn cần soạn đến ngày giao {deliveryDate}</p>
               <p className="text-xs text-slate-400 mt-1">Chọn ngày khác hoặc tạo đơn mới tại màn hình POS</p>
             </div>
           ) : (
@@ -818,7 +827,7 @@ export default function DonTongPage() {
                   {orders.length === 0 ? (
                     <tr>
                       <td colSpan={8} className="py-12 text-center text-slate-400">
-                        Không có đơn hàng nào trong ngày {deliveryDate}
+                        Không có đơn cần xử lý đến ngày giao {deliveryDate}
                       </td>
                     </tr>
                   ) : (
@@ -849,7 +858,13 @@ export default function DonTongPage() {
                               />
                             )}
                           </td>
-                          <td className="py-3 px-3 font-mono font-bold text-slate-800">{o.orderCode}</td>
+                          <td className="py-3 px-3">
+                            <p className="font-mono font-bold text-slate-800">{o.orderCode}</p>
+                            <p className={`mt-0.5 text-[11px] ${o.deliveryDate && o.deliveryDate < deliveryDate ? 'font-semibold text-red-600' : 'text-slate-400'}`}>
+                              Giao {o.deliveryDate ? o.deliveryDate.split('-').reverse().join('/') : '—'}
+                              {o.deliveryDate && o.deliveryDate < deliveryDate ? ' · Còn tồn' : ''}
+                            </p>
+                          </td>
                           <td className="py-3 px-3">
                             <p className="font-semibold text-slate-800">{o.customerName}</p>
                             <p className="text-[11px] text-slate-400">{o.customerCode}</p>
