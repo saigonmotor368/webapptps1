@@ -92,7 +92,7 @@ export default function DonTongPage() {
     d.setDate(d.getDate() + 1);
     return d.toISOString().slice(0, 10);
   });
-  const [includePending, setIncludePending] = useState(true);
+  const [includePending, setIncludePending] = useState(false);
   const [activeTab, setActiveTab] = useState<'summary' | 'triage'>('summary');
 
   // 2. Dữ liệu từ API
@@ -111,6 +111,7 @@ export default function DonTongPage() {
 
   // 4. Hàng đợi cần xử lý (triage) & bulk-confirm
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
+  const [selectedExportOrderIds, setSelectedExportOrderIds] = useState<Set<string>>(new Set());
   const [bulkConfirming, setBulkConfirming] = useState(false);
   const [copiedZalo, setCopiedZalo] = useState(false);
   const [copiedChanges, setCopiedChanges] = useState(false);
@@ -143,6 +144,11 @@ export default function DonTongPage() {
       setLastExportedAt(data.lastExportedAt || null);
       setChangedSinceLastExport(data.changedSinceLastExport || []);
       setSelectedOrderIds(new Set());
+      setSelectedExportOrderIds(new Set(
+        (data.orders || [])
+          .filter((order: OrderSummary) => ['confirmed', 'preparing'].includes(order.status))
+          .map((order: OrderSummary) => order.orderId)
+      ));
     } catch (err: any) {
       setErrorMsg(err.message || 'Lỗi kết nối máy chủ');
     } finally {
@@ -157,11 +163,16 @@ export default function DonTongPage() {
   // Xuất file Excel tổng hợp
   const handleExportExcel = async () => {
     if (!token) return;
+    if (selectedExportOrderIds.size === 0) {
+      alert('Vui lòng chọn ít nhất một đơn đã xác nhận để xuất file soạn hàng');
+      return;
+    }
     setExporting(true);
     try {
       const params = new URLSearchParams();
       if (deliveryDate) params.set('date', deliveryDate);
       params.set('includePending', includePending ? '1' : '0');
+      params.set('orderIds', Array.from(selectedExportOrderIds).join(','));
 
       const res = await fetch(`${apiBase}/api/admin/procurement/export?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -301,6 +312,10 @@ export default function DonTongPage() {
 
   const pendingOrders = useMemo(() => orders.filter((o) => o.status === 'pending'), [orders]);
   const cleanPendingOrders = useMemo(() => orders.filter((o) => o.status === 'pending' && !o.isLate), [orders]);
+  const packingOrders = useMemo(
+    () => orders.filter((o) => ['confirmed', 'preparing'].includes(o.status)),
+    [orders],
+  );
 
   return (
     <div className="space-y-5">
@@ -385,11 +400,11 @@ export default function DonTongPage() {
           <button
             type="button"
             onClick={handleExportExcel}
-            disabled={exporting || loading}
+            disabled={exporting || loading || selectedExportOrderIds.size === 0}
             className="flex items-center gap-2 px-4 py-2 bg-green-700 hover:bg-green-800 text-white rounded-xl text-xs font-bold shadow-sm transition-colors disabled:opacity-50"
           >
             {exporting ? <RefreshCw size={14} className="animate-spin" /> : <Download size={14} />}
-            Xuất Excel soạn hàng
+            Xuất Excel ({selectedExportOrderIds.size} đơn)
           </button>
 
           <button
@@ -412,6 +427,69 @@ export default function DonTongPage() {
           </button>
         </div>
       </header>
+
+      {/* Chọn chính xác đơn đưa vào đợt soạn, tránh gom nhầm ngày giao. */}
+      <section className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+          <div>
+            <h2 className="text-sm font-bold text-slate-800">Chọn đơn đưa vào file soạn hàng</h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Hiển thị đơn đã xác nhận có ngày giao bằng hoặc trước {new Date(`${deliveryDate}T00:00:00`).toLocaleDateString('vi-VN')}. Đơn cũ được cảnh báo để không bỏ sót.
+            </p>
+          </div>
+          <label className="flex items-center gap-2 text-xs font-semibold text-slate-600 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={packingOrders.length > 0 && selectedExportOrderIds.size === packingOrders.length}
+              onChange={(event) => setSelectedExportOrderIds(
+                event.target.checked ? new Set(packingOrders.map((order) => order.orderId)) : new Set(),
+              )}
+              className="rounded border-slate-300 text-green-600 focus:ring-green-500/20"
+            />
+            Chọn tất cả ({packingOrders.length})
+          </label>
+        </div>
+
+        {packingOrders.length === 0 ? (
+          <div className="rounded-xl bg-slate-50 px-4 py-5 text-center text-xs text-slate-500">
+            Chưa có đơn đã xác nhận cần soạn đến ngày này.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+            {packingOrders.map((order) => {
+              const overdue = Boolean(order.deliveryDate && order.deliveryDate < deliveryDate);
+              return (
+                <label
+                  key={order.orderId}
+                  className={`flex items-start gap-3 rounded-xl border p-3 cursor-pointer transition-colors ${
+                    selectedExportOrderIds.has(order.orderId)
+                      ? 'border-green-300 bg-green-50/60'
+                      : 'border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedExportOrderIds.has(order.orderId)}
+                    onChange={(event) => setSelectedExportOrderIds((previous) => {
+                      const next = new Set(previous);
+                      if (event.target.checked) next.add(order.orderId); else next.delete(order.orderId);
+                      return next;
+                    })}
+                    className="mt-0.5 rounded border-slate-300 text-green-600 focus:ring-green-500/20"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-xs font-bold text-slate-800">{order.orderCode}</span>
+                    <span className="block text-xs text-slate-600 truncate">{order.customerName}</span>
+                    <span className={`block text-[11px] mt-1 ${overdue ? 'font-bold text-amber-700' : 'text-slate-400'}`}>
+                      Giao {order.deliveryDate || 'chưa có ngày'}{overdue ? ' · QUÁ NGÀY GIAO' : ''}
+                    </span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        )}
+      </section>
 
       {/* 2. Khối Cảnh báo đỏ: Đơn thay đổi sau lần xuất (WP5 / WP6b) */}
       {changedSinceLastExport.length > 0 && (

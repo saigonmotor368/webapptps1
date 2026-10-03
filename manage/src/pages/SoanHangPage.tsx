@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { getApiBase } from '../lib/apiBase';
 import { AlertCircle, RefreshCw, ChevronDown, ChevronUp, BarChart3, ListChecks, FileSpreadsheet, UserCheck, CheckCircle2, Undo2, PackageCheck, Boxes } from 'lucide-react';
@@ -10,8 +9,6 @@ import { AlertCircle, RefreshCw, ChevronDown, ChevronUp, BarChart3, ListChecks, 
 // (POS, khách tự đặt qua Mini App). Theo đúng kế hoạch mục 13.5: đọc từ
 // orders/order_items với status đã xác nhận trở lên (confirmed/preparing/
 // shipping — completed thì đã giao xong, không cần soạn nữa).
-const PACKING_STATUSES = ['confirmed', 'preparing', 'shipping'];
-
 function money(v: number) { return new Intl.NumberFormat('vi-VN').format(Math.round(Number(v) || 0)) + 'đ'; }
 
 export default function SoanHangPage() {
@@ -80,6 +77,8 @@ interface PackingOrder {
   packing_status: string;
   packed_by: string | null;
   packed_by_name?: string | null;
+  delivery_date?: string | null;
+  is_overdue?: boolean;
 }
 
 // Xử lý đơn hàng (soạn hàng) — đổi hẳn từ "xem tổng hợp thụ động" sang luồng
@@ -90,44 +89,41 @@ interface PackingOrder {
 function OrderPackingWorkflow() {
   const { user, token } = useAuth();
   const apiBase = getApiBase();
-  const [deliveryDate, setDeliveryDate] = useState<string>('');
+  const [deliveryDate, setDeliveryDate] = useState<string>(() => {
+    const date = new Date();
+    date.setDate(date.getDate() + 1);
+    return date.toISOString().slice(0, 10);
+  });
   const [orders, setOrders] = useState<PackingOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<PackingFilter>('active');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
 
   const canOverride = user?.role ? OVERRIDE_ROLES.has(user.role) : false;
 
   const fetchOrders = useCallback(async () => {
     setLoading(true);
+    setErrorMsg('');
     try {
-      let query = supabase
-        .from('orders')
-        .select('id, order_code, customer_name, customer_company, status, confirmed_at, item_count, packing_status, packed_by, delivery_date')
-        .in('status', PACKING_STATUSES)
-        .order('confirmed_at', { ascending: true });
-      if (deliveryDate) query = query.eq('delivery_date', deliveryDate);
-      if (filter === 'active') query = query.in('packing_status', ['not_started', 'in_progress']);
-      else query = query.eq('packing_status', filter);
-
-      const { data, error } = await query;
-      if (error) throw error;
-
-      const packerIds = [...new Set((data || []).map((o) => o.packed_by).filter(Boolean))] as string[];
-      const { data: packers } = packerIds.length
-        ? await supabase.from('admin_profiles').select('id, name').in('id', packerIds)
-        : { data: [] as { id: string; name: string }[] };
-      const packerMap = new Map((packers || []).map((p) => [p.id, p.name]));
-
-      setOrders((data || []).map((o) => ({ ...o, packed_by_name: o.packed_by ? packerMap.get(o.packed_by) || null : null })));
+      const params = new URLSearchParams({ packingStatus: filter });
+      if (deliveryDate) params.set('date', deliveryDate);
+      const res = await fetch(`${apiBase}/api/admin/orders/packing?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `Lỗi tải danh sách (${res.status})`);
+      setOrders(data.orders || []);
       setSelected(new Set());
-    } catch (err) {
+    } catch (err: any) {
       console.error('Lỗi tải danh sách đơn cần soạn:', err);
+      setOrders([]);
+      setErrorMsg(err.message || 'Không tải được danh sách soạn hàng');
     } finally {
       setLoading(false);
     }
-  }, [filter, deliveryDate]);
+  }, [apiBase, token, filter, deliveryDate]);
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
 
@@ -229,15 +225,7 @@ function OrderPackingWorkflow() {
               onChange={(e) => setDeliveryDate(e.target.value)}
               className="border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-green-500/20"
             />
-            {deliveryDate && (
-              <button
-                type="button"
-                onClick={() => setDeliveryDate('')}
-                className="text-xs text-slate-400 hover:text-slate-600 underline"
-              >
-                Tất cả ngày
-              </button>
-            )}
+            <span className="text-[11px] text-slate-400">Gồm cả đơn cũ chưa soạn</span>
           </div>
         </div>
 
@@ -245,6 +233,12 @@ function OrderPackingWorkflow() {
           <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
         </button>
       </div>
+
+      {errorMsg && (
+        <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700 flex items-center gap-2">
+          <AlertCircle size={17} /> {errorMsg}
+        </div>
+      )}
 
       <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex gap-3 text-amber-800 text-sm">
         <AlertCircle className="shrink-0 mt-0.5" size={18} />
@@ -294,6 +288,7 @@ function OrderPackingWorkflow() {
                   <th className="px-4 py-3 w-10"><input type="checkbox" checked={orders.length > 0 && selected.size === orders.length} onChange={toggleSelectAll} /></th>
                   <th className="px-4 py-3">Mã đơn</th>
                   <th className="px-4 py-3">Khách hàng</th>
+                  <th className="px-4 py-3">Ngày giao</th>
                   <th className="px-4 py-3 text-center">Số SP</th>
                   <th className="px-4 py-3">Xác nhận lúc</th>
                   <th className="px-4 py-3">Trạng thái soạn</th>
@@ -312,6 +307,12 @@ function OrderPackingWorkflow() {
                       <p className="text-slate-800">{o.customer_name}</p>
                       {o.customer_company && <p className="text-xs text-slate-400">{o.customer_company}</p>}
                     </td>
+                    <td className="px-4 py-3">
+                      <span className={o.is_overdue ? 'font-bold text-amber-700' : 'text-slate-600'}>
+                        {o.delivery_date ? new Date(`${o.delivery_date}T00:00:00`).toLocaleDateString('vi-VN') : 'Chưa đặt ngày'}
+                      </span>
+                      {o.is_overdue && <span className="block text-[10px] font-bold text-amber-600">QUÁ NGÀY GIAO</span>}
+                    </td>
                     <td className="px-4 py-3 text-center text-slate-600">{o.item_count}</td>
                     <td className="px-4 py-3 text-slate-500">{new Date(o.confirmed_at).toLocaleString('vi-VN')}</td>
                     <td className="px-4 py-3">
@@ -323,7 +324,7 @@ function OrderPackingWorkflow() {
                 ))}
                 {orders.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-5 py-12 text-center text-slate-400">
+                    <td colSpan={7} className="px-5 py-12 text-center text-slate-400">
                       Không có đơn nào ở trạng thái này.
                     </td>
                   </tr>
