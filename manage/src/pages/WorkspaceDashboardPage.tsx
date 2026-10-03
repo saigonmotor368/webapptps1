@@ -85,7 +85,7 @@ export default function WorkspaceDashboardPage() {
 
   const summary = data?.summary;
   const metrics = useMemo(() => [
-    { label: 'Doanh thu tháng này', value: money(summary?.monthRevenue || 0), icon: TrendingUp, tone: 'emerald', detail: summary?.revenueGrowth == null ? 'Chưa có dữ liệu tháng trước' : `${summary.revenueGrowth >= 0 ? '+' : ''}${summary.revenueGrowth.toFixed(1)}% so với tháng trước`, trend: summary?.revenueGrowth },
+    { label: 'Doanh thu tháng này', value: money(summary?.monthRevenue || 0), icon: TrendingUp, tone: 'emerald', detail: summary?.revenueGrowth == null ? 'Chưa có dữ liệu cùng kỳ' : `${summary.revenueGrowth >= 0 ? '+' : ''}${summary.revenueGrowth.toFixed(1)}% so với cùng kỳ tháng trước`, trend: summary?.revenueGrowth },
     { label: 'Đơn tháng này', value: new Intl.NumberFormat('vi-VN').format(summary?.monthOrders || 0), icon: ShoppingCart, tone: 'blue', detail: `${summary?.todayOrders || 0} đơn phát sinh hôm nay`, path: '/don-hang' },
     { label: 'Chờ tiếp nhận', value: new Intl.NumberFormat('vi-VN').format(summary?.pendingOrders || 0), icon: Clock3, tone: 'amber', detail: `${summary?.inProgressOrders || 0} đơn đang được thực hiện`, path: '/don-hang?status=pending' },
     { label: 'Công nợ phải thu', value: money(summary?.debtOutstanding || 0), icon: CircleDollarSign, tone: 'rose', detail: `${summary?.activeCustomers || 0} khách hàng đang hoạt động`, path: '/cong-no' },
