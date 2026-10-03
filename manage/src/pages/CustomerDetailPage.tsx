@@ -110,7 +110,7 @@ export default function CustomerDetailPage() {
     if (isNew || !id) return;
     const { data } = await supabase
       .from('orders')
-      .select('id, grand_total, paid_amount, debt_amount, status, created_at, order_code, item_count')
+      .select('id, grand_total, paid_amount, debt_amount, payment_method, status, created_at, order_code, item_count')
       .eq('customer_id', id)
       .order('created_at', { ascending: false });
     const list = data || [];
@@ -118,7 +118,9 @@ export default function CustomerDetailPage() {
     setStats({
       orderCount: nonCanceled.length,
       revenue: nonCanceled.reduce((s: number, o: any) => s + (Number(o.grand_total) || 0), 0),
-      debt: nonCanceled.reduce((s: number, o: any) => s + (o.debt_amount != null ? Number(o.debt_amount) : Math.max(0, Number(o.grand_total) - Number(o.paid_amount || 0))), 0),
+      debt: nonCanceled
+        .filter((o: any) => o.status === 'completed' && String(o.payment_method || '').toUpperCase() === 'CREDIT')
+        .reduce((s: number, o: any) => s + (o.debt_amount != null ? Number(o.debt_amount) : Math.max(0, Number(o.grand_total) - Number(o.paid_amount || 0))), 0),
       lastOrderAt: list[0]?.created_at || null,
     });
     setRecentOrders(list.slice(0, 10));

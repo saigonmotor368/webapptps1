@@ -16,6 +16,11 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
   cod: 'COD (trả ngay)', debt_collection: 'Thu công nợ (trả sau)',
 };
 
+const ORDER_PAYMENT_METHOD_LABELS: Record<string, string> = {
+  COD: 'COD (thu tiền khi giao)',
+  CREDIT: 'Công nợ (thanh toán sau)',
+};
+
 const STATUS_LABELS: Record<string, string> = {
   draft: 'Đơn nháp', pending: 'Chờ xác nhận', confirmed: 'Đã xác nhận',
   preparing: 'Đang chuẩn bị', shipping: 'Đang giao', completed: 'Hoàn thành', canceled: 'Đã hủy',
@@ -24,9 +29,6 @@ const STATUS_COLORS: Record<string, string> = {
   draft: 'bg-slate-100 text-slate-600', pending: 'bg-amber-100 text-amber-700',
   confirmed: 'bg-blue-100 text-blue-700', preparing: 'bg-purple-100 text-purple-700',
   shipping: 'bg-sky-100 text-sky-700', completed: 'bg-green-100 text-green-700', canceled: 'bg-red-100 text-red-700',
-};
-const PAYMENT_LABELS: Record<string, string> = {
-  pending: 'Chờ xử lý', cod: 'COD', paid: 'Đã thanh toán', failed: 'Thất bại', refunded: 'Đã hoàn tiền',
 };
 const PRICING_MODES = [
   { value: 'tier', label: 'Theo hạng khách hàng' },
@@ -102,6 +104,7 @@ export default function OrderDetailPage() {
   const [payments, setPayments] = useState<any[]>([]);
   const [paymentsAvailable, setPaymentsAvailable] = useState(true);
   const [paymentMethod, setPaymentMethod] = useState('cod');
+  const [orderPaymentMethod, setOrderPaymentMethod] = useState<'COD' | 'CREDIT'>('COD');
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentNote, setPaymentNote] = useState('');
   const [submittingPayment, setSubmittingPayment] = useState(false);
@@ -283,6 +286,12 @@ export default function OrderDetailPage() {
         console.warn('Cannot fetch order_history directly:', hErr);
       }
       data.order_history = data.order_history?.length ? data.order_history : historyList;
+      const latestClaim = (data.order_history || []).find((row: any) => row.action === 'processing_claimed');
+      if (latestClaim) {
+        data.processing_by_name = latestClaim.actor || null;
+        data.processing_by_id = latestClaim.payload?.staffId || null;
+        data.processing_started_at = latestClaim.created_at || null;
+      }
 
       setOrder(data);
       setLines((data.order_items || []).map((item: any) => ({
@@ -353,6 +362,7 @@ export default function OrderDetailPage() {
       }
 
       setShippingAmount(Number(data.shipping_amount || 0));
+      setOrderPaymentMethod(String(data.payment_method || 'COD').toUpperCase() === 'CREDIT' ? 'CREDIT' : 'COD');
       setVatEnabled(Boolean(data.vat_enabled));
       setPricingNote(data.pricing_note || '');
       setDeliveryForm({
@@ -492,6 +502,7 @@ export default function OrderDetailPage() {
           })),
           verificationNote,
           pricingNote,
+          paymentMethod: orderPaymentMethod,
           actor: 'TPS1 Sale App',
         }),
       });
@@ -502,6 +513,45 @@ export default function OrderDetailPage() {
     } catch (err: any) {
       alert('Lỗi: ' + err.message);
     } finally { setSaving(false); }
+  };
+
+  const claimAndOpenProcessing = async () => {
+    if (!order?.id) return;
+    setSaving(true);
+    try {
+      const apiBase = import.meta.env.VITE_API_BASE_URL || '';
+      const res = await fetch(`${apiBase}/api/admin/orders`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ orderId: order.id, claimOrder: true }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Không tiếp nhận được đơn hàng');
+      navigate(`/tao-don-hang?processOrderId=${order.id}`);
+    } catch (err: any) {
+      alert('Lỗi: ' + (err.message || 'Không tiếp nhận được đơn hàng'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateOrderPaymentMethod = async (method: 'COD' | 'CREDIT') => {
+    const previous = orderPaymentMethod;
+    setOrderPaymentMethod(method);
+    try {
+      const apiBase = import.meta.env.VITE_API_BASE_URL || '';
+      const res = await fetch(`${apiBase}/api/admin/orders`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ orderId: order.id, paymentMethod: method }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Không cập nhật được hình thức thanh toán');
+      setOrder((current: any) => current ? { ...current, payment_method: method } : current);
+    } catch (err: any) {
+      setOrderPaymentMethod(previous);
+      alert('Lỗi: ' + (err.message || 'Không cập nhật được hình thức thanh toán'));
+    }
   };
 
   const changeStatus = async (newStatus: string) => {
@@ -707,9 +757,9 @@ export default function OrderDetailPage() {
             {Object.entries(STATUS_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           </select>
           {order.pricing_status !== 'finalized' && (
-            <button onClick={() => navigate(`/tao-don-hang?processOrderId=${order.id}`)}
+            <button onClick={claimAndOpenProcessing} disabled={saving}
               className="px-3 py-2 bg-amber-50 border border-amber-200 text-amber-700 rounded-xl text-sm font-medium hover:bg-amber-100 flex items-center gap-1.5">
-              <ClipboardEdit size={16} /> Xử lý đơn hàng
+              <ClipboardEdit size={16} /> {order.processing_by_id === user?.id ? 'Tiếp tục xử lý' : 'Nhận đơn'}
             </button>
           )}
           {order.status === 'completed' && (
@@ -1092,10 +1142,10 @@ export default function OrderDetailPage() {
               </div>
 
               {!isLocked && canFinalizePricing && (
-                <button onClick={handleFinalize} disabled={saving}
+                <button onClick={order.pricing_status === 'finalized' ? handleFinalize : claimAndOpenProcessing} disabled={saving}
                   className="w-full flex items-center justify-center gap-2 py-3 bg-green-600 text-white rounded-xl font-semibold hover:bg-green-700 disabled:opacity-60 transition-colors shadow-lg shadow-green-900/20">
-                  <Save size={18} />
-                  {saving ? 'Đang lưu...' : order.pricing_status === 'finalized' ? 'Chốt lại & tạo PDF mới' : 'Xác nhận khách & Chốt giá'}
+                  {order.pricing_status === 'finalized' ? <Save size={18} /> : <ClipboardEdit size={18} />}
+                  {saving ? 'Đang xử lý...' : order.pricing_status === 'finalized' ? 'Chốt lại & tạo PDF mới' : order.processing_by_id === user?.id ? 'Tiếp tục xử lý đơn hàng' : 'Nhận đơn'}
                 </button>
               )}
             </div>
@@ -1110,7 +1160,7 @@ export default function OrderDetailPage() {
             <dl className="space-y-3 text-sm">
               <div className="flex items-start gap-3">
                 <User size={16} className="text-slate-400 mt-0.5 shrink-0" />
-                <div><p className="font-semibold text-slate-800">{order.customer_name}</p><p className="text-slate-400">{order.customer_code} · {order.customer_tier || 'VIP0'}</p></div>
+                <div><p className="font-semibold text-slate-800">{order.customer_name}</p><p className="text-slate-400">{order.customer_code} · Bảng giá theo khách hàng</p></div>
               </div>
               <div className="flex items-center gap-3 text-slate-600">
                 <Phone size={16} className="text-slate-400 shrink-0" />{order.customer_phone || '—'}
@@ -1197,16 +1247,27 @@ export default function OrderDetailPage() {
               </div>
             </dl>
             <div>
-              <p className="text-xs font-semibold text-slate-500 mb-1">Thanh toán</p>
-              <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
-                order.payment_status === 'paid' ? 'bg-green-100 text-green-700' :
-                order.payment_status === 'cod' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'
-              }`}>{PAYMENT_LABELS[order.payment_status] || order.payment_status}</span>
+              <p className="text-xs font-semibold text-slate-500 mb-1.5">Hình thức thanh toán</p>
+              {order.status === 'completed' ? (
+                <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700">
+                  {ORDER_PAYMENT_METHOD_LABELS[String(order.payment_method || 'COD').toUpperCase()] || order.payment_method}
+                </span>
+              ) : (
+                <select value={orderPaymentMethod} onChange={e => updateOrderPaymentMethod(e.target.value as 'COD' | 'CREDIT')}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white">
+                  {Object.entries(ORDER_PAYMENT_METHOD_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              )}
+              <p className="text-[11px] text-slate-400 mt-1.5">
+                {orderPaymentMethod === 'CREDIT'
+                  ? 'Công nợ chỉ được ghi nhận khi giao xong và phát hành hóa đơn.'
+                  : 'COD được thu khi giao hàng; chưa phát sinh công nợ trước khi hoàn thành.'}
+              </p>
             </div>
           </div>
 
           {/* Payments (Giai đoạn C) */}
-          {paymentsAvailable && (
+          {paymentsAvailable && order.status === 'completed' && (
             <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 space-y-4">
               <h2 className="font-bold text-slate-800 flex items-center gap-2"><Wallet size={18} className="text-green-600" />Thanh toán</h2>
 

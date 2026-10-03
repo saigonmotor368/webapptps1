@@ -87,6 +87,7 @@ interface OrderTab {
   packageDimensions: string;
   assignedDriver: string;
   codCollectAmount: string;
+  paymentMethod: 'COD' | 'CREDIT';
   mode: 'quick' | 'normal' | 'delivery';
   processingOrderId?: string;
   orderCode?: string;
@@ -113,7 +114,7 @@ function newTab(defaultDeliveryDate = ''): OrderTab {
     cart: [],
     deletedOriginalItems: [],
     discountAmount: 0, voucherCode: '', voucherDiscount: 0, shippingAmount: 0,
-    packageWeightG: '', packageDimensions: '', assignedDriver: '', codCollectAmount: '',
+    packageWeightG: '', packageDimensions: '', assignedDriver: '', codCollectAmount: '', paymentMethod: 'COD',
     mode: 'normal',
   };
 }
@@ -257,6 +258,13 @@ export default function PosCreatePage() {
     (async () => {
       try {
         const apiBase = getApiBase();
+        const claimRes = await fetch(`${apiBase}/api/admin/orders`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ orderId: processOrderId, claimOrder: true }),
+        });
+        const claimData = await claimRes.json();
+        if (!claimData.ok) throw new Error(claimData.error || 'Không tiếp nhận được đơn hàng');
         const res = await fetch(`${apiBase}/api/admin/orders?id=${processOrderId}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
@@ -284,6 +292,7 @@ export default function PosCreatePage() {
           packageDimensions: o.package_dimensions || '',
           assignedDriver: o.assigned_driver || '',
           codCollectAmount: o.cod_collect_amount ? String(o.cod_collect_amount) : '',
+          paymentMethod: String(o.payment_method || 'COD').toUpperCase() === 'CREDIT' ? 'CREDIT' : 'COD',
           mode: o.delivery_address ? 'delivery' : 'normal',
           deletedOriginalItems: [],
           cart: (o.order_items || []).map((it: any) => ({
@@ -472,22 +481,19 @@ export default function PosCreatePage() {
     });
   };
 
-  // Giai đoạn C: hiện công nợ hiện tại của khách khi chọn (mục 13.5). Chưa có
-  // bảng order_payments (Giai đoạn C phần thanh toán tách 3 phần — cần chạy
-  // migration riêng), nên đây là số TẠM TÍNH: cộng dồn grand_total của các
-  // đơn chưa hủy và chưa đánh dấu "đã thanh toán đủ" (payment_status != 'paid').
-  // Sẽ chính xác hơn khi order_payments/debt_amount đi vào hoạt động.
+  // Công nợ chỉ phát sinh từ hóa đơn đã hoàn thành và chọn thanh toán sau.
   const fetchCustomerDebt = async (customerId: string) => {
     setLoadingDebt(true);
     try {
       const { data, error } = await supabase
         .from('orders')
-        .select('grand_total')
+        .select('debt_amount')
         .eq('customer_id', customerId)
-        .neq('status', 'canceled')
+        .eq('status', 'completed')
+        .eq('payment_method', 'CREDIT')
         .neq('payment_status', 'paid');
       if (error) throw error;
-      const total = (data || []).reduce((s, o: any) => s + (Number(o.grand_total) || 0), 0);
+      const total = (data || []).reduce((s, o: any) => s + (Number(o.debt_amount) || 0), 0);
       updateActiveTab({ customerDebt: total });
     } catch (err) {
       console.error('Lỗi tải công nợ khách hàng:', err);
@@ -656,7 +662,7 @@ export default function PosCreatePage() {
   // OrderDetailPage. Không tạo đơn mới, không đụng admin_create_order.
   const submitProcessOrder = async () => {
     const { processingOrderId, orderCode, cart, deliveryAddress, deliveryName, deliveryPhone, note,
-      packageWeightG, packageDimensions, assignedDriver, codCollectAmount, discountAmount, shippingAmount } = activeTab;
+      packageWeightG, packageDimensions, assignedDriver, codCollectAmount, discountAmount, shippingAmount, paymentMethod } = activeTab;
     if (!processingOrderId) return;
     if (cart.length === 0) { alert('Giỏ hàng đang trống!'); return; }
 
@@ -749,6 +755,7 @@ export default function PosCreatePage() {
           items: cart.map(i => ({ itemId: i.itemId, productId: i.productId, quantity: i.quantity, finalUnitPrice: i.price, note: i.note || '' })),
           verificationNote: '',
           pricingNote: `Xử lý qua màn Bán hàng${discountAmount ? ` — chiết khấu thêm ${money(discountAmount)}` : ''}`,
+          paymentMethod,
           actor: user?.name || 'TPS1 Sale App',
         }),
       });
@@ -760,6 +767,7 @@ export default function PosCreatePage() {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           orderId: processingOrderId,
+          paymentMethod,
           delivery: {
             packageWeightG: packageWeightG ? Number(packageWeightG) : null,
             packageDimensions: packageDimensions || null,
@@ -795,7 +803,7 @@ export default function PosCreatePage() {
     const {
       selectedCustomerId, cart, customerDebt,
       deliveryDate, deliveryAddressId, deliveryAddress, deliveryName, deliveryPhone, saveNewAddress,
-      note, voucherCode, packageWeightG, packageDimensions, assignedDriver, codCollectAmount
+      note, voucherCode, packageWeightG, packageDimensions, assignedDriver, codCollectAmount, paymentMethod
     } = activeTab;
 
     if (!selectedCustomerId) { alert('Vui lòng chọn khách hàng!'); return; }
@@ -813,7 +821,7 @@ export default function PosCreatePage() {
 
     const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
     const creditLimit = Number(selectedCustomer?.credit_limit) || 0;
-    const projectedDebt = (customerDebt || 0) + total;
+    const projectedDebt = (customerDebt || 0) + (paymentMethod === 'CREDIT' ? total : 0);
     const overLimit = creditLimit > 0 && projectedDebt > creditLimit;
     const canOverride = canForProfile(user, 'orders.credit_override');
     let overrideNote = '';
@@ -861,6 +869,7 @@ export default function PosCreatePage() {
           packageDimensions: packageDimensions || null,
           assignedDriver: assignedDriver || null,
           codCollectAmount: codCollectAmount ? Number(codCollectAmount) : null,
+          paymentMethod,
           creditOverrideNote: overrideNote || null,
         }),
       });
@@ -1076,13 +1085,10 @@ export default function PosCreatePage() {
             {activeTab.selectedCustomerId && (() => {
               const cust = customers.find(c => c.id === activeTab.selectedCustomerId);
               const creditLimit = Number(cust?.credit_limit) || 0;
-              const projectedTotal = (activeTab.customerDebt || 0) + total;
+              const projectedTotal = (activeTab.customerDebt || 0) + (activeTab.paymentMethod === 'CREDIT' ? total : 0);
               const overLimit = creditLimit > 0 && projectedTotal > creditLimit;
               return (
                 <div className={`rounded-xl p-3 text-sm flex flex-wrap gap-x-6 gap-y-1 ${overLimit ? 'bg-red-50 border border-red-200' : 'bg-slate-50 border border-slate-100'}`}>
-                  {cust?.discount_tier && (
-                    <span className="text-slate-600">Hạng: <b className="text-slate-800">{cust.discount_tier}</b></span>
-                  )}
                   <span className="text-slate-600">
                     Hạn mức công nợ: <b className="text-slate-800">{creditLimit > 0 ? money(creditLimit) : 'Không giới hạn'}</b>
                   </span>
@@ -1445,6 +1451,17 @@ export default function PosCreatePage() {
               <div className="flex justify-between font-bold text-lg text-slate-800 pt-2 border-t border-slate-200">
                 <span>Tổng đơn</span><span className="text-red-600">{money(total)}</span>
               </div>
+              <div className="pt-2">
+                <label className="text-xs font-semibold text-slate-500 mb-1 block">Thanh toán</label>
+                <select value={activeTab.paymentMethod} onChange={e => updateActiveTab({ paymentMethod: e.target.value as 'COD' | 'CREDIT' })}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white">
+                  <option value="COD">COD (thu tiền khi giao)</option>
+                  <option value="CREDIT">Công nợ (thanh toán sau)</option>
+                </select>
+                {activeTab.paymentMethod === 'CREDIT' && (
+                  <p className="text-[11px] text-amber-700 mt-1">Công nợ chỉ phát sinh sau khi đơn giao xong và chuyển thành hóa đơn.</p>
+                )}
+              </div>
             </div>
 
             {/* Submit */}
@@ -1454,10 +1471,10 @@ export default function PosCreatePage() {
                 <CheckCircle2 size={20} />
                 {submitting
                   ? (activeTab.processingOrderId ? 'Đang chốt đơn...' : 'Đang tạo đơn...')
-                  : activeTab.processingOrderId ? `CẬP NHẬT & CHỐT ĐƠN ${activeTab.orderCode}` : 'TẠO ĐƠN HÀNG (NHÁP)'}
+                  : activeTab.processingOrderId ? `CHỐT ĐƠN & XÁC NHẬN ${activeTab.orderCode}` : 'LƯU PHIẾU TẠM'}
               </button>
               <p className="text-center text-xs text-slate-400 mt-2">
-                {activeTab.processingOrderId ? 'Chốt lại đơn có sẵn — không tạo đơn mới' : 'Đơn nháp sẽ được gửi cho khách xác nhận qua Mini App'}
+                {activeTab.processingOrderId ? 'Hoàn tất xử lý để chuyển đơn sang Đã xác nhận' : 'POS chỉ tạo phiếu tạm; đơn chỉ được xác nhận sau bước xử lý'}
               </p>
             </div>
           </div>
