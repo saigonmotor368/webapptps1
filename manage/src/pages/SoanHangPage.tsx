@@ -98,6 +98,7 @@ function OrderPackingWorkflow() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<PackingFilter>('active');
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [reviewingSelection, setReviewingSelection] = useState(false);
   const [busy, setBusy] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -116,6 +117,7 @@ function OrderPackingWorkflow() {
       if (!res.ok || !data?.ok) throw new Error(data?.error || `Lỗi tải danh sách (${res.status})`);
       setOrders(data.orders || []);
       setSelected(new Set());
+      setReviewingSelection(false);
     } catch (err: any) {
       console.error('Lỗi tải danh sách đơn cần soạn:', err);
       setOrders([]);
@@ -198,6 +200,10 @@ function OrderPackingWorkflow() {
 
   const selectableNotStarted = orders.filter((o) => selected.has(o.id) && o.packing_status === 'not_started');
   const selectableMine = orders.filter((o) => selected.has(o.id) && o.packing_status === 'in_progress' && (o.packed_by === user?.id || canOverride));
+  const displayedOrders = reviewingSelection ? orders.filter((o) => selected.has(o.id)) : orders;
+  const selectedItemCount = orders
+    .filter((o) => selected.has(o.id))
+    .reduce((sum, order) => sum + (Number(order.item_count) || 0), 0);
 
   return (
     <div className="space-y-6">
@@ -240,25 +246,35 @@ function OrderPackingWorkflow() {
         </div>
       )}
 
-      <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex gap-3 text-amber-800 text-sm">
-        <AlertCircle className="shrink-0 mt-0.5" size={18} />
-        <div>
-          <strong className="block mb-1">Luồng xử lý đơn hàng:</strong>
-          Chọn các đơn <b>"Chưa soạn"</b> rồi bấm <b>"Nhận soạn &amp; xuất file"</b> — hệ thống sẽ gán bạn là người soạn các đơn đó (người khác sẽ thấy "Đang soạn" và không nhận trùng được) và tải ngay 1 file Excel gồm bảng tổng hợp + từng sheet riêng cho mỗi đơn. Soạn xong thực tế thì quay lại đây chọn đúng các đơn đó và bấm <b>"Đánh dấu đã soạn xong"</b>.
-          {canOverride && ' Vai trò của bạn có thể "Hủy nhận" đơn của người khác nếu cần đổi người soạn.'}
-        </div>
+      <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex gap-2 text-blue-800 text-sm">
+        <AlertCircle className="shrink-0 mt-0.5" size={17} />
+        <p>Chọn đơn cần chia hàng, bấm <b>Xem danh sách soạn</b>, sau đó nhận soạn hoặc xuất file chi tiết.</p>
       </div>
 
       {selected.size > 0 && (
         <div className="flex flex-wrap items-center gap-2 bg-white border border-slate-200 rounded-xl p-3 sticky top-2 z-10 shadow-sm">
-          <span className="text-sm text-slate-600 font-medium">{selected.size} đơn đã chọn</span>
-          {selectableNotStarted.length > 0 && (
+          <div className="mr-auto">
+            <p className="text-sm text-slate-800 font-bold">{selected.size} đơn · {selectedItemCount} mặt hàng</p>
+            <p className="text-[11px] text-slate-400">Chỉ file Excel mới hiển thị đầy đủ chi tiết từng sản phẩm</p>
+          </div>
+          {!reviewingSelection ? (
+            <button onClick={() => setReviewingSelection(true)} disabled={busy}
+              className="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-semibold hover:bg-slate-800 disabled:opacity-50 flex items-center gap-1.5">
+              <ListChecks size={15} /> Xem danh sách soạn ({selected.size})
+            </button>
+          ) : (
+            <button onClick={() => setReviewingSelection(false)} disabled={busy}
+              className="px-3 py-2 border border-slate-200 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50 disabled:opacity-50">
+              Chọn thêm đơn
+            </button>
+          )}
+          {reviewingSelection && selectableNotStarted.length > 0 && (
             <button onClick={() => runPackingAction('claim', true)} disabled={busy}
               className="px-3 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50 flex items-center gap-1.5">
               <UserCheck size={15} /> Nhận soạn & xuất file ({selectableNotStarted.length})
             </button>
           )}
-          {selectableMine.length > 0 && (
+          {reviewingSelection && selectableMine.length > 0 && (
             <>
               <button onClick={() => runPackingAction('complete')} disabled={busy}
                 className="px-3 py-2 bg-slate-800 text-white rounded-lg text-sm font-medium hover:bg-slate-900 disabled:opacity-50 flex items-center gap-1.5">
@@ -285,17 +301,16 @@ function OrderPackingWorkflow() {
             <table className="w-full text-left text-sm whitespace-nowrap">
               <thead className="bg-slate-50 text-slate-500 uppercase text-[11px] font-bold tracking-wider">
                 <tr>
-                  <th className="px-4 py-3 w-10"><input type="checkbox" checked={orders.length > 0 && selected.size === orders.length} onChange={toggleSelectAll} /></th>
+                  <th className="px-4 py-3 w-10"><input type="checkbox" checked={displayedOrders.length > 0 && displayedOrders.every((o) => selected.has(o.id))} onChange={toggleSelectAll} disabled={reviewingSelection} /></th>
                   <th className="px-4 py-3">Mã đơn</th>
                   <th className="px-4 py-3">Khách hàng</th>
                   <th className="px-4 py-3">Ngày giao</th>
                   <th className="px-4 py-3 text-center">Số SP</th>
-                  <th className="px-4 py-3">Xác nhận lúc</th>
                   <th className="px-4 py-3">Trạng thái soạn</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {orders.map((o) => (
+                {displayedOrders.map((o) => (
                   <tr key={o.id} onClick={() => toggleSelect(o.id)} className={`cursor-pointer hover:bg-slate-50 transition-colors ${selected.has(o.id) ? 'bg-green-50/40' : ''}`}>
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                       <input type="checkbox" checked={selected.has(o.id)} onChange={() => toggleSelect(o.id)} />
@@ -314,7 +329,6 @@ function OrderPackingWorkflow() {
                       {o.is_overdue && <span className="block text-[10px] font-bold text-amber-600">QUÁ NGÀY GIAO</span>}
                     </td>
                     <td className="px-4 py-3 text-center text-slate-600">{o.item_count}</td>
-                    <td className="px-4 py-3 text-slate-500">{new Date(o.confirmed_at).toLocaleString('vi-VN')}</td>
                     <td className="px-4 py-3">
                       <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${PACKING_COLORS[o.packing_status]}`}>
                         {PACKING_LABELS[o.packing_status]}{o.packed_by_name ? ` — ${o.packed_by_name}` : ''}
@@ -322,9 +336,9 @@ function OrderPackingWorkflow() {
                     </td>
                   </tr>
                 ))}
-                {orders.length === 0 && (
+                {displayedOrders.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-5 py-12 text-center text-slate-400">
+                    <td colSpan={6} className="px-5 py-12 text-center text-slate-400">
                       Không có đơn nào ở trạng thái này.
                     </td>
                   </tr>

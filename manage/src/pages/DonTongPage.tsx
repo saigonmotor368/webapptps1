@@ -101,13 +101,14 @@ export default function DonTongPage() {
   const [errorMsg, setErrorMsg] = useState('');
   const [groups, setGroups] = useState<CategoryGroup[]>([]);
   const [orders, setOrders] = useState<OrderSummary[]>([]);
+  const [packingCandidates, setPackingCandidates] = useState<OrderSummary[]>([]);
+  const [selectionApplied, setSelectionApplied] = useState(false);
   const [checksum, setChecksum] = useState<ChecksumInfo | null>(null);
   const [lastExportedAt, setLastExportedAt] = useState<string | null>(null);
   const [changedSinceLastExport, setChangedSinceLastExport] = useState<ChangedOrder[]>([]);
 
   // 3. Quản lý mở/đóng danh mục & dòng mặt hàng
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
-  const [expandedProducts, setExpandedProducts] = useState<Set<string>>(new Set());
 
   // 4. Hàng đợi cần xử lý (triage) & bulk-confirm
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
@@ -117,7 +118,7 @@ export default function DonTongPage() {
   const [copiedChanges, setCopiedChanges] = useState(false);
 
   // Tải dữ liệu tổng hợp
-  const fetchSummary = useCallback(async () => {
+  const loadSummary = useCallback(async (scopeOrderIds: string[] | null = null) => {
     if (!token) return;
     setLoading(true);
     setErrorMsg('');
@@ -125,6 +126,7 @@ export default function DonTongPage() {
       const params = new URLSearchParams();
       if (deliveryDate) params.set('date', deliveryDate);
       params.set('includePending', includePending ? '1' : '0');
+      if (scopeOrderIds?.length) params.set('orderIds', scopeOrderIds.join(','));
 
       const res = await fetch(`${apiBase}/api/admin/procurement/summary?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -143,18 +145,23 @@ export default function DonTongPage() {
       setChecksum(data.checksum || null);
       setLastExportedAt(data.lastExportedAt || null);
       setChangedSinceLastExport(data.changedSinceLastExport || []);
-      setSelectedOrderIds(new Set());
-      setSelectedExportOrderIds(new Set(
-        (data.orders || [])
-          .filter((order: OrderSummary) => ['confirmed', 'preparing'].includes(order.status))
-          .map((order: OrderSummary) => order.orderId)
-      ));
+      if (!scopeOrderIds) {
+        const candidates = (data.orders || []).filter(
+          (order: OrderSummary) => ['confirmed', 'preparing'].includes(order.status),
+        );
+        setPackingCandidates(candidates);
+        setSelectedOrderIds(new Set());
+        setSelectedExportOrderIds(new Set(candidates.map((order: OrderSummary) => order.orderId)));
+        setSelectionApplied(false);
+      }
     } catch (err: any) {
       setErrorMsg(err.message || 'Lỗi kết nối máy chủ');
     } finally {
       setLoading(false);
     }
   }, [apiBase, token, deliveryDate, includePending]);
+
+  const fetchSummary = useCallback(() => loadSummary(null), [loadSummary]);
 
   useEffect(() => {
     fetchSummary();
@@ -194,7 +201,11 @@ export default function DonTongPage() {
       window.URL.revokeObjectURL(url);
 
       // Cập nhật lại summary sau khi xuất để ghi nhận lastExportedAt
-      fetchSummary();
+      if (selectionApplied) {
+        await loadSummary(Array.from(selectedExportOrderIds));
+      } else {
+        await fetchSummary();
+      }
     } catch (err: any) {
       alert('❌ ' + (err.message || 'Không thể xuất file Excel'));
     } finally {
@@ -212,13 +223,20 @@ export default function DonTongPage() {
     });
   };
 
-  const toggleProduct = (pid: string) => {
-    setExpandedProducts((prev) => {
-      const next = new Set(prev);
-      if (next.has(pid)) next.delete(pid);
-      else next.add(pid);
-      return next;
-    });
+  const applyPackingSelection = async () => {
+    const ids = Array.from(selectedExportOrderIds);
+    if (ids.length === 0) {
+      alert('Vui lòng chọn ít nhất một đơn để lập danh sách soạn hàng');
+      return;
+    }
+    setSelectionApplied(true);
+    setActiveTab('summary');
+    await loadSummary(ids);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const reopenPackingSelection = () => {
+    setSelectionApplied(false);
   };
 
   // Sao chép thông báo Zalo
@@ -312,10 +330,7 @@ export default function DonTongPage() {
 
   const pendingOrders = useMemo(() => orders.filter((o) => o.status === 'pending'), [orders]);
   const cleanPendingOrders = useMemo(() => orders.filter((o) => o.status === 'pending' && !o.isLate), [orders]);
-  const packingOrders = useMemo(
-    () => orders.filter((o) => ['confirmed', 'preparing'].includes(o.status)),
-    [orders],
-  );
+  const packingOrders = packingCandidates;
 
   return (
     <div className="space-y-5">
@@ -434,60 +449,119 @@ export default function DonTongPage() {
           <div>
             <h2 className="text-sm font-bold text-slate-800">Chọn đơn đưa vào file soạn hàng</h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              Hiển thị đơn đã xác nhận có ngày giao bằng hoặc trước {new Date(`${deliveryDate}T00:00:00`).toLocaleDateString('vi-VN')}. Đơn cũ được cảnh báo để không bỏ sót.
+              {selectionApplied
+                ? `Đang tổng hợp đúng ${selectedExportOrderIds.size} đơn đã chọn. File Excel sẽ có đầy đủ chi tiết từng khách hàng.`
+                : `Chọn đơn cần soạn đến ngày ${new Date(`${deliveryDate}T00:00:00`).toLocaleDateString('vi-VN')}, sau đó bấm “Xem danh sách soạn”.`}
             </p>
           </div>
-          <label className="flex items-center gap-2 text-xs font-semibold text-slate-600 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={packingOrders.length > 0 && selectedExportOrderIds.size === packingOrders.length}
-              onChange={(event) => setSelectedExportOrderIds(
-                event.target.checked ? new Set(packingOrders.map((order) => order.orderId)) : new Set(),
-              )}
-              className="rounded border-slate-300 text-green-600 focus:ring-green-500/20"
-            />
-            Chọn tất cả ({packingOrders.length})
-          </label>
+          {!selectionApplied && (
+            <label className="flex items-center gap-2 text-xs font-semibold text-slate-600 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={packingOrders.length > 0 && selectedExportOrderIds.size === packingOrders.length}
+                onChange={(event) => {
+                  setSelectionApplied(false);
+                  setSelectedExportOrderIds(
+                    event.target.checked ? new Set(packingOrders.map((order) => order.orderId)) : new Set(),
+                  );
+                }}
+                className="rounded border-slate-300 text-green-600 focus:ring-green-500/20"
+              />
+              Chọn tất cả ({packingOrders.length})
+            </label>
+          )}
         </div>
 
         {packingOrders.length === 0 ? (
           <div className="rounded-xl bg-slate-50 px-4 py-5 text-center text-xs text-slate-500">
             Chưa có đơn đã xác nhận cần soạn đến ngày này.
           </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
-            {packingOrders.map((order) => {
-              const overdue = Boolean(order.deliveryDate && order.deliveryDate < deliveryDate);
-              return (
-                <label
-                  key={order.orderId}
-                  className={`flex items-start gap-3 rounded-xl border p-3 cursor-pointer transition-colors ${
-                    selectedExportOrderIds.has(order.orderId)
-                      ? 'border-green-300 bg-green-50/60'
-                      : 'border-slate-200 hover:bg-slate-50'
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedExportOrderIds.has(order.orderId)}
-                    onChange={(event) => setSelectedExportOrderIds((previous) => {
-                      const next = new Set(previous);
-                      if (event.target.checked) next.add(order.orderId); else next.delete(order.orderId);
-                      return next;
-                    })}
-                    className="mt-0.5 rounded border-slate-300 text-green-600 focus:ring-green-500/20"
-                  />
-                  <span className="min-w-0">
-                    <span className="block text-xs font-bold text-slate-800">{order.orderCode}</span>
-                    <span className="block text-xs text-slate-600 truncate">{order.customerName}</span>
-                    <span className={`block text-[11px] mt-1 ${overdue ? 'font-bold text-amber-700' : 'text-slate-400'}`}>
-                      Giao {order.deliveryDate || 'chưa có ngày'}{overdue ? ' · QUÁ NGÀY GIAO' : ''}
-                    </span>
-                  </span>
-                </label>
-              );
-            })}
+        ) : selectionApplied ? (
+          <div className="flex flex-col gap-3 rounded-xl border border-green-200 bg-green-50/60 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-sm font-bold text-green-800">
+                <PackageCheck size={17} />
+                Danh sách soạn: {selectedExportOrderIds.size} đơn
+              </div>
+              <p className="mt-1 truncate text-xs text-slate-600">
+                {packingOrders
+                  .filter((order) => selectedExportOrderIds.has(order.orderId))
+                  .slice(0, 5)
+                  .map((order) => order.orderCode)
+                  .join(' · ')}
+                {selectedExportOrderIds.size > 5 ? ` · +${selectedExportOrderIds.size - 5} đơn` : ''}
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={reopenPackingSelection}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Chọn lại
+              </button>
+              <button
+                type="button"
+                onClick={handleExportExcel}
+                disabled={exporting}
+                className="flex items-center gap-1.5 rounded-lg bg-green-700 px-3 py-2 text-xs font-bold text-white hover:bg-green-800 disabled:opacity-50"
+              >
+                <Download size={14} /> Xuất file chi tiết
+              </button>
+            </div>
           </div>
+        ) : (
+          <>
+            <div className="max-h-64 overflow-y-auto rounded-xl border border-slate-200 p-2">
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
+                {packingOrders.map((order) => {
+                  const overdue = Boolean(order.deliveryDate && order.deliveryDate < deliveryDate);
+                  return (
+                    <label
+                      key={order.orderId}
+                      className={`flex items-start gap-3 rounded-lg border px-3 py-2 cursor-pointer transition-colors ${
+                        selectedExportOrderIds.has(order.orderId)
+                          ? 'border-green-300 bg-green-50/60'
+                          : 'border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedExportOrderIds.has(order.orderId)}
+                        onChange={(event) => {
+                          setSelectionApplied(false);
+                          setSelectedExportOrderIds((previous) => {
+                            const next = new Set(previous);
+                            if (event.target.checked) next.add(order.orderId); else next.delete(order.orderId);
+                            return next;
+                          });
+                        }}
+                        className="mt-0.5 rounded border-slate-300 text-green-600 focus:ring-green-500/20"
+                      />
+                      <span className="min-w-0">
+                        <span className="block text-xs font-bold text-slate-800">{order.orderCode}</span>
+                        <span className="block truncate text-xs text-slate-600">{order.customerName}</span>
+                        <span className={`block text-[11px] ${overdue ? 'font-bold text-amber-700' : 'text-slate-400'}`}>
+                          Giao {order.deliveryDate || 'chưa có ngày'}{overdue ? ' · Quá ngày' : ''}
+                        </span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
+              <span className="text-xs font-semibold text-slate-600">Đã chọn {selectedExportOrderIds.size}/{packingOrders.length} đơn</span>
+              <button
+                type="button"
+                onClick={applyPackingSelection}
+                disabled={loading || selectedExportOrderIds.size === 0}
+                className="flex items-center gap-2 rounded-xl bg-green-700 px-4 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-green-800 disabled:opacity-50"
+              >
+                <PackageCheck size={15} /> Xem danh sách soạn ({selectedExportOrderIds.size})
+              </button>
+            </div>
+          </>
         )}
       </section>
 
@@ -592,7 +666,7 @@ export default function DonTongPage() {
             <span className="text-2xl font-black text-amber-600">
               {orders.filter((o) => o.isLate).length}
             </span>
-            <span className="text-xs text-slate-400">đơn sau 16:30</span>
+            <span className="text-xs text-slate-400">đơn sau giờ chốt</span>
           </div>
           <p className="text-[11px] text-slate-500 mt-1">
             Lần xuất gần nhất: {lastExportedAt ? formatTime(lastExportedAt) : 'Chưa xuất'}
@@ -646,6 +720,7 @@ export default function DonTongPage() {
         <span>
           Các đơn <b>đã xác nhận/đang soạn</b> chưa hoàn tất từ ngày trước vẫn được hiển thị để không bỏ sót.
           Đơn chờ xác nhận chỉ lấy đúng ngày giao đã chọn.
+          Màn hình chỉ hiện số liệu tổng hợp; chi tiết từng khách hàng nằm trong file Excel.
         </span>
       </div>
 
@@ -714,111 +789,48 @@ export default function DonTongPage() {
 
                   {/* Table Lines */}
                   {!isCollapsed && (
-                    <div className="overflow-x-auto">
+                    <div className="max-h-[520px] overflow-auto">
                       <table className="w-full text-left text-xs text-slate-700">
-                        <thead className="bg-slate-50 text-slate-500 border-b border-slate-200 uppercase font-semibold text-[11px]">
+                        <thead className="sticky top-0 z-10 bg-slate-50 text-slate-500 border-b border-slate-200 uppercase font-semibold text-[11px]">
                           <tr>
                             <th className="py-2.5 pl-4 pr-2 w-10 text-center">STT</th>
                             <th className="py-2.5 px-3">Mã hàng</th>
                             <th className="py-2.5 px-3">Tên sản phẩm</th>
                             <th className="py-2.5 px-2 text-center">ĐVT</th>
                             <th className="py-2.5 px-3 text-right font-bold text-slate-800">Tổng SL cuối</th>
-                            <th className="py-2.5 px-3 text-right text-slate-400">SL khách đặt</th>
                             <th className="py-2.5 px-3 text-center">Số đơn</th>
                             <th className="py-2.5 px-3 text-right">Tồn kho</th>
                             <th className="py-2.5 px-3 text-right">Cần bù</th>
-                            <th className="py-2.5 px-4">Ghi chú của khách</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                           {group.lines.map((line, idx) => {
-                            const isExpanded = expandedProducts.has(line.productId || line.name);
                             const hasShortfall = line.shortfall > 0;
 
                             return (
                               <tr
                                 key={line.productId || idx}
-                                onClick={() => toggleProduct(line.productId || line.name)}
-                                className={`cursor-pointer hover:bg-green-50/50 transition-colors ${
-                                  isExpanded ? 'bg-slate-50/80' : ''
-                                }`}
+                                className="hover:bg-green-50/50 transition-colors"
                               >
-                                <td className="py-3 pl-4 pr-2 text-center text-slate-400">{idx + 1}</td>
-                                <td className="py-3 px-3 font-mono text-[11px] text-slate-500">{line.sku || '—'}</td>
-                                <td className="py-3 px-3 font-semibold text-slate-800">
-                                  <div className="flex items-center gap-1.5">
-                                    {isExpanded ? (
-                                      <ChevronDown size={14} className="text-slate-400" />
-                                    ) : (
-                                      <ChevronRight size={14} className="text-slate-400" />
-                                    )}
-                                    <span>{line.name}</span>
-                                  </div>
-                                </td>
-                                <td className="py-3 px-2 text-center font-medium">{line.unit}</td>
-                                <td className="py-3 px-3 text-right font-black text-sm text-green-700">
+                                <td className="py-2.5 pl-4 pr-2 text-center text-slate-400">{idx + 1}</td>
+                                <td className="py-2.5 px-3 font-mono text-[11px] text-slate-500">{line.sku || '—'}</td>
+                                <td className="py-2.5 px-3 font-semibold text-slate-800">{line.name}</td>
+                                <td className="py-2.5 px-2 text-center font-medium">{line.unit}</td>
+                                <td className="py-2.5 px-3 text-right font-black text-sm text-green-700">
                                   {formatQty(line.totalQty)}
                                 </td>
-                                <td className="py-3 px-3 text-right text-slate-400">
-                                  {formatQty(line.orderedQty)}
-                                </td>
-                                <td className="py-3 px-3 text-center text-slate-600">
+                                <td className="py-2.5 px-3 text-center text-slate-600">
                                   {line.orderCount} đơn ({line.customerCount} KH)
                                 </td>
-                                <td className="py-3 px-3 text-right font-medium text-slate-600">
+                                <td className="py-2.5 px-3 text-right font-medium text-slate-600">
                                   {line.stockQty !== null ? formatQty(line.stockQty) : '—'}
                                 </td>
                                 <td
-                                  className={`py-3 px-3 text-right font-bold ${
+                                  className={`py-2.5 px-3 text-right font-bold ${
                                     hasShortfall ? 'text-red-600' : 'text-slate-400'
                                   }`}
                                 >
                                   {hasShortfall ? formatQty(line.shortfall) : '—'}
-                                </td>
-                                <td className="py-3 px-4 text-slate-500">
-                                  {line.notes && line.notes.length > 0 ? (
-                                    <div className="space-y-0.5">
-                                      {line.notes.map((n, i) => (
-                                        <div key={i} className="text-[11px]">
-                                          <span className="font-semibold text-slate-700">{n.customer}:</span>{' '}
-                                          <span className="text-slate-600 italic">"{n.note}"</span>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  ) : (
-                                    <span className="text-slate-300 italic">Không có</span>
-                                  )}
-
-                                  {/* Bảng chi tiết phân bổ cho từng khách hàng (khi mở rộng) */}
-                                  {isExpanded && line.customerLines && line.customerLines.length > 0 && (
-                                    <div className="mt-3 p-3 bg-white border border-slate-200 rounded-xl shadow-inner space-y-1.5">
-                                      <p className="font-bold text-[11px] text-slate-700 uppercase tracking-wider">
-                                        Chi tiết phân bổ cho từng khách hàng:
-                                      </p>
-                                      <div className="divide-y divide-slate-100">
-                                        {line.customerLines.map((cl, ci) => (
-                                          <div
-                                            key={ci}
-                                            className="py-1 flex items-center justify-between text-[11px]"
-                                          >
-                                            <div>
-                                              <b className="text-slate-800 mr-2">{cl.customerName}</b>
-                                              <span className="text-slate-400 font-mono">({cl.orderCode})</span>
-                                              {cl.note && (
-                                                <span className="text-amber-700 ml-2 italic">Ghi chú: {cl.note}</span>
-                                              )}
-                                            </div>
-                                            <div className="text-right">
-                                              <span className="font-bold text-green-700">{formatQty(cl.quantity)} {line.unit}</span>
-                                              {cl.orderedQuantity !== cl.quantity && (
-                                                <span className="text-slate-400 text-[10px] ml-1.5">(gốc: {formatQty(cl.orderedQuantity)})</span>
-                                              )}
-                                            </div>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  )}
                                 </td>
                               </tr>
                             );
