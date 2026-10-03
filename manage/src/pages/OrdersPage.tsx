@@ -263,6 +263,23 @@ export default function OrdersPage({ view = 'orders' }: { view?: 'orders' | 'inv
   const handlePrint = async (order: any, e: React.MouseEvent) => {
     e.stopPropagation();
     try {
+      if (view === 'invoices') {
+        const invoiceResponse = await fetch(`${apiBase}/api/admin/orders/document?orderId=${encodeURIComponent(order.id)}&type=invoice`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!invoiceResponse.ok) {
+          const errorData = await invoiceResponse.json().catch(() => null);
+          throw new Error(errorData?.error || 'Chưa có hóa đơn cho đơn này');
+        }
+        const blob = await invoiceResponse.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `HOA-DON_${order.order_code}.pdf`;
+        a.click();
+        URL.revokeObjectURL(url);
+        return;
+      }
       const response = await fetch(`${apiBase}/api/admin/orders?id=${encodeURIComponent(order.id)}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -424,7 +441,7 @@ export default function OrdersPage({ view = 'orders' }: { view?: 'orders' | 'inv
             </span>
           </div>
           <p className="text-xs text-slate-500 mt-0.5 truncate">
-            {totalCount} đơn hàng · hiển thị {filteredOrders.length}
+            {view === 'invoices' ? 'Đơn đã giao xong; dùng để theo dõi thanh toán và xử lý đổi/trả' : 'Phiếu tạm và đơn đang xử lý'} · hiển thị {filteredOrders.length}
             {selectedOrderIds.size > 0 && (
               <span className="ml-2 font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
                 Đã chọn {selectedOrderIds.size} đơn
@@ -882,8 +899,8 @@ export default function OrdersPage({ view = 'orders' }: { view?: 'orders' | 'inv
                       <button
                         onClick={(e) => handlePrint(order, e)}
                         className="w-8 h-8 rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 flex items-center justify-center transition-colors"
-                        title="In phiếu tạm"
-                        aria-label="In phiếu tạm"
+                        title={view === 'invoices' ? 'Tải hóa đơn bán hàng' : 'In phiếu tạm'}
+                        aria-label={view === 'invoices' ? 'Tải hóa đơn bán hàng' : 'In phiếu tạm'}
                       >
                         <Printer size={16} />
                       </button>
@@ -895,7 +912,7 @@ export default function OrdersPage({ view = 'orders' }: { view?: 'orders' | 'inv
                       >
                         <Eye size={16} />
                       </button>
-                      {user?.role === 'admin' && (
+                      {view === 'orders' && user?.role === 'admin' && (
                         <button
                           onClick={(e) => deleteOrder(order, e)}
                           className="w-8 h-8 rounded-lg bg-rose-50 text-rose-600 hover:bg-rose-100 flex items-center justify-center transition-colors"
@@ -1036,26 +1053,36 @@ export default function OrdersPage({ view = 'orders' }: { view?: 'orders' | 'inv
                         <p className="text-[11px] text-slate-400 whitespace-nowrap">Đã trả: {money(order.paid_amount || 0)}</p>
                       </td>
                       <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
-                        <select
-                          value={order.status}
-                          onChange={(e) => changeStatus(order, e.target.value)}
-                          className={`text-xs px-2.5 py-1.5 rounded-lg border font-semibold focus:outline-none ${STATUS_PILL_COLORS[order.status] || 'bg-slate-50 text-slate-600 border-slate-200'}`}
-                        >
-                          {Object.entries(STATUS_LABELS).map(([v, l]) => (
-                            <option key={v} value={v}>{l}</option>
-                          ))}
-                        </select>
+                        {view === 'invoices' ? (
+                          <span className="inline-flex text-xs px-2.5 py-1.5 rounded-lg border font-semibold bg-green-50 text-green-700 border-green-200">Hoàn thành</span>
+                        ) : (
+                          <select
+                            value={order.status}
+                            onChange={(e) => changeStatus(order, e.target.value)}
+                            className={`text-xs px-2.5 py-1.5 rounded-lg border font-semibold focus:outline-none ${STATUS_PILL_COLORS[order.status] || 'bg-slate-50 text-slate-600 border-slate-200'}`}
+                          >
+                            {Object.entries(STATUS_LABELS).map(([v, l]) => (
+                              <option key={v} value={v}>{l}</option>
+                            ))}
+                          </select>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
-                        <select
-                          value={order.payment_status}
-                          onChange={(e) => changePayment(order, e.target.value)}
-                          className={`text-xs px-2.5 py-1.5 rounded-lg border font-medium focus:outline-none ${PAYMENT_COLORS[order.payment_status] || 'bg-slate-50 text-slate-600 border-slate-200'}`}
-                        >
-                          {Object.entries(PAYMENT_LABELS).map(([v, l]) => (
-                            <option key={v} value={v}>{l}</option>
-                          ))}
-                        </select>
+                        {view === 'invoices' ? (
+                          <span className={`inline-flex text-xs px-2.5 py-1.5 rounded-lg border font-medium ${PAYMENT_COLORS[order.payment_status] || 'bg-slate-50 text-slate-600 border-slate-200'}`}>
+                            {PAYMENT_LABELS[order.payment_status] || order.payment_status}
+                          </span>
+                        ) : (
+                          <select
+                            value={order.payment_status}
+                            onChange={(e) => changePayment(order, e.target.value)}
+                            className={`text-xs px-2.5 py-1.5 rounded-lg border font-medium focus:outline-none ${PAYMENT_COLORS[order.payment_status] || 'bg-slate-50 text-slate-600 border-slate-200'}`}
+                          >
+                            {Object.entries(PAYMENT_LABELS).map(([v, l]) => (
+                              <option key={v} value={v}>{l}</option>
+                            ))}
+                          </select>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex gap-1 justify-end" onClick={(e) => e.stopPropagation()}>
@@ -1078,11 +1105,11 @@ export default function OrdersPage({ view = 'orders' }: { view?: 'orders' | 'inv
                           <button
                             onClick={(e) => handlePrint(order, e)}
                             className="p-1.5 bg-slate-50 text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
-                            title="Xuất phiếu tạm"
+                            title={view === 'invoices' ? 'Tải hóa đơn bán hàng' : 'Xuất phiếu tạm'}
                           >
                             <Printer size={16} />
                           </button>
-                          {user?.role === 'admin' && (
+                          {view === 'orders' && user?.role === 'admin' && (
                             <button
                               onClick={(e) => deleteOrder(order, e)}
                               className="p-1.5 bg-rose-50 text-rose-600 rounded-lg hover:bg-rose-100 transition-colors"
