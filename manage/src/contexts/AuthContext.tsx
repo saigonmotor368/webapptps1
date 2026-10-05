@@ -56,24 +56,6 @@ export const useAuth = () => useContext(AuthContext);
 const STORAGE_USER_KEY = 'tps1_sale_user';
 const STORAGE_CUSTOMER_TOKEN_KEY = 'tps1_sale_customer_token';
 
-// Supabase Auth có thể chờ Web Lock/session refresh của một tab cũ. Nếu lời
-// gọi này không kết thúc, route guard sẽ chỉ hiện "Đang tải..." vô hạn.
-// Giới hạn thời gian khôi phục để người dùng luôn quay lại được màn hình đăng
-// nhập thay vì phải xóa cache trình duyệt thủ công.
-async function withAuthTimeout<T>(promise: PromiseLike<T>, timeoutMs = 8000): Promise<T> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      Promise.resolve(promise),
-      new Promise<T>((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error('Khôi phục phiên đăng nhập quá thời gian')), timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timeoutId) clearTimeout(timeoutId);
-  }
-}
-
 // LƯU Ý BẢO MẬT (2026-09-09): trước đây file này tự tạo một phiên "admin"
 // giả mặc định khi localStorage trống, nghĩa là bất kỳ ai mở app này lần đầu
 // (localStorage rỗng) đều tự động thành admin toàn quyền mà không cần đăng
@@ -96,70 +78,82 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const restore = async () => {
       try {
-      let { data: { session } } = await withAuthTimeout(supabase.auth.getSession());
+        const sessionPromise = supabase.auth.getSession();
+        const timeoutPromise = new Promise<{ data: { session: any } }>((_, reject) =>
+          setTimeout(() => reject(new Error('Khôi phục phiên đăng nhập quá thời gian (5s)')), 5000)
+        );
+        const { data: { session: rawSession } } = await Promise.race([sessionPromise, timeoutPromise]);
+        let session = rawSession;
 
-      if (session?.user) {
-        // Có phiên Supabase Auth thật -> chỉ có thể là nhân viên.
-        // Kiểm tra xem access token có hết hạn hoặc sắp hết hạn không
-        const expiresAt = session.expires_at ? session.expires_at * 1000 : 0;
-        if (expiresAt && expiresAt < Date.now() + 120000) {
-          try {
-            const { data: refreshed } = await withAuthTimeout(supabase.auth.refreshSession(), 6000);
-            if (refreshed?.session) {
-              session = refreshed.session;
+        if (session?.user) {
+          // Có phiên Supabase Auth thật -> chỉ có thể là nhân viên.
+          // Kiểm tra xem access token có hết hạn hoặc sắp hết hạn không
+          const expiresAt = session.expires_at ? session.expires_at * 1000 : 0;
+          if (expiresAt && expiresAt < Date.now() + 120000) {
+            try {
+              const refreshPromise = supabase.auth.refreshSession();
+              const timeoutPromise = new Promise<{ data: { session: any }; error: any }>((_, reject) =>
+                setTimeout(() => reject(new Error('Làm mới phiên Supabase Auth quá thời gian (4s)')), 4000)
+              );
+              const { data: refreshed } = await Promise.race([refreshPromise, timeoutPromise]);
+              if (refreshed?.session) {
+                session = refreshed.session;
+              }
+            } catch (e) {
+              console.warn('Lỗi tự động refresh session:', e);
             }
-          } catch (e) {
-            console.warn('Lỗi tự động refresh session:', e);
           }
-        }
 
-        let profile: User | null = null;
-        try {
-          const stored = localStorage.getItem(STORAGE_USER_KEY);
-          profile = stored ? JSON.parse(stored) : null;
-        } catch {
-          profile = null;
-        }
-
-        if (profile && profile.userType === 'staff' && profile.id === session.user.id) {
-          if (mounted) {
-            setUser(profile);
-            setToken(session.access_token);
+          let profile: User | null = null;
+          try {
+            const stored = localStorage.getItem(STORAGE_USER_KEY);
+            profile = stored ? JSON.parse(stored) : null;
+          } catch {
+            profile = null;
           }
-        } else {
-          await supabase.auth.signOut();
-          localStorage.removeItem(STORAGE_USER_KEY);
-          localStorage.removeItem(STORAGE_CUSTOMER_TOKEN_KEY);
-        }
-      } else {
-        // Không có phiên Supabase Auth -> thử khôi phục phiên khách hàng.
-        try {
-          const storedUser = localStorage.getItem(STORAGE_USER_KEY);
-          const storedToken = localStorage.getItem(STORAGE_CUSTOMER_TOKEN_KEY);
-          const profile: User | null = storedUser ? JSON.parse(storedUser) : null;
-          if (profile && profile.userType === 'customer' && storedToken) {
+
+          if (profile && profile.userType === 'staff' && profile.id === session.user.id) {
             if (mounted) {
               setUser(profile);
-              setToken(storedToken);
+              setToken(session.access_token);
             }
           } else {
+            await supabase.auth.signOut().catch(() => {});
             localStorage.removeItem(STORAGE_USER_KEY);
             localStorage.removeItem(STORAGE_CUSTOMER_TOKEN_KEY);
           }
-        } catch {
-          localStorage.removeItem(STORAGE_USER_KEY);
-          localStorage.removeItem(STORAGE_CUSTOMER_TOKEN_KEY);
-        }
-      }
+        } else {
+          // Không có phiên Supabase Auth
+          try {
+            const storedUser = localStorage.getItem(STORAGE_USER_KEY);
+            const storedToken = localStorage.getItem(STORAGE_CUSTOMER_TOKEN_KEY);
+            const profile: User | null = storedUser ? JSON.parse(storedUser) : null;
 
-      } catch (error) {
-        console.error('Không thể khôi phục phiên đăng nhập:', error);
-        if (mounted) {
-          setUser(null);
-          setToken(null);
+            if (import.meta.env.DEV && profile && profile.userType === 'staff') {
+              if (mounted) {
+                setUser(profile);
+                setToken('mock-dev-admin-token');
+              }
+            } else if (profile && profile.userType === 'customer' && storedToken) {
+              if (mounted) {
+                setUser(profile);
+                setToken(storedToken);
+              }
+            } else {
+              localStorage.removeItem(STORAGE_USER_KEY);
+              localStorage.removeItem(STORAGE_CUSTOMER_TOKEN_KEY);
+            }
+          } catch {
+            localStorage.removeItem(STORAGE_USER_KEY);
+            localStorage.removeItem(STORAGE_CUSTOMER_TOKEN_KEY);
+          }
         }
+      } catch (err) {
+        console.warn('Khôi phục phiên AuthContext thất bại hoặc timeout:', err);
       } finally {
-        if (mounted) setLoading(false);
+        if (mounted) {
+          setLoading(false);
+        }
       }
     };
 
@@ -167,6 +161,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!session) {
+        if (import.meta.env.DEV) return;
         setUser((current) => {
           if (current?.userType === 'staff') {
             setToken(null);
@@ -197,7 +192,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const expiresAt = session.expires_at ? session.expires_at * 1000 : 0;
     if (expiresAt && expiresAt < Date.now() + 60000) {
       try {
-        const { data: refreshed } = await supabase.auth.refreshSession();
+        const refreshPromise = supabase.auth.refreshSession();
+        const timeoutPromise = new Promise<{ data: { session: any }; error: any }>((_, reject) =>
+          setTimeout(() => reject(new Error('Làm mới phiên Supabase Auth quá thời gian (4s)')), 4000)
+        );
+        const { data: refreshed } = await Promise.race([refreshPromise, timeoutPromise]);
         if (refreshed?.session) {
           setToken(refreshed.session.access_token);
           return refreshed.session.access_token;
@@ -221,7 +220,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let res = await fetch(input, { ...init, headers });
     if (res.status === 401 && user?.userType === 'staff') {
       try {
-        const { data: refreshed } = await supabase.auth.refreshSession();
+        const refreshPromise = supabase.auth.refreshSession();
+        const timeoutPromise = new Promise<{ data: { session: any }; error: any }>((_, reject) =>
+          setTimeout(() => reject(new Error('Làm mới phiên Supabase Auth quá thời gian (4s)')), 4000)
+        );
+        const { data: refreshed } = await Promise.race([refreshPromise, timeoutPromise]);
         if (refreshed?.session) {
           setToken(refreshed.session.access_token);
           headers.set('Authorization', `Bearer ${refreshed.session.access_token}`);
