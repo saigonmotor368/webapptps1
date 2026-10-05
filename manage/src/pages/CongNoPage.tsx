@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { can } from '../lib/permissions';
 import {
@@ -87,7 +87,10 @@ export default function CongNoPage() {
   // Selected customer for detail drawer / statement
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const [customerDetail, setCustomerDetail] = useState<any>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState<'invoices' | 'receipts' | 'adjustments'>('invoices');
+  const detailPanelRef = useRef<HTMLElement | null>(null);
 
   // Filter toolbar state
   const [searchTerm, setSearchTerm] = useState('');
@@ -150,23 +153,41 @@ export default function CongNoPage() {
 
   // 2. Fetch Customer Detail
   const fetchCustomerDetail = useCallback(async (customerId: string) => {
+    setDetailLoading(true);
+    setDetailError(null);
     try {
       const res = await fetch(`${API_BASE}/api/admin/receivables/customers/${customerId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
-      if (res.ok && data.ok) {
-        setCustomerDetail(data);
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || 'Không tải được sổ nợ khách hàng');
       }
-    } catch (err) {
+      setCustomerDetail(data);
+    } catch (err: any) {
       console.error('Lỗi tải chi tiết khách hàng:', err);
+      setCustomerDetail(null);
+      setDetailError(err?.message || 'Không tải được sổ nợ khách hàng');
+    } finally {
+      setDetailLoading(false);
     }
   }, [token]);
 
   const handleSelectCustomer = (customerId: string) => {
+    setCustomerDetail(null);
     setSelectedCustomerId(customerId);
-    fetchCustomerDetail(customerId);
+    void fetchCustomerDetail(customerId);
   };
+
+  // Khối sổ nợ nằm sau danh sách khách hàng. Tự chuyển đến khối chi tiết để
+  // thao tác có phản hồi ngay, thay vì khiến người dùng tưởng nút không chạy.
+  useEffect(() => {
+    if (!selectedCustomerId) return;
+    const frame = window.requestAnimationFrame(() => {
+      detailPanelRef.current?.scrollIntoView({ behavior: 'auto', block: 'start' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [selectedCustomerId]);
 
   // Distinct list of sales reps for dropdown
   const salesRepList = useMemo(() => {
@@ -879,6 +900,7 @@ export default function CongNoPage() {
       {/* CHI TIẾT SỔ CÔNG NỢ KHÁCH HÀNG (Statement View Panel) */}
       {selectedCustomerId && (
         <section
+          ref={detailPanelRef}
           id="panel-customer-receivables-detail"
           className="bg-white rounded-3xl border-2 border-emerald-500/50 shadow-xl p-6 space-y-6 relative"
         >
@@ -963,6 +985,26 @@ export default function CongNoPage() {
               </button>
             </div>
           </div>
+
+          {detailLoading && (
+            <div className="py-10 flex items-center justify-center gap-2 text-sm font-medium text-slate-500">
+              <RefreshCw size={18} className="animate-spin" />
+              Đang tải sổ nợ khách hàng...
+            </div>
+          )}
+
+          {detailError && (
+            <div className="p-4 bg-red-50 border border-red-200 rounded-2xl text-red-700 text-sm flex items-center justify-between gap-3">
+              <span>{detailError}</span>
+              <button
+                type="button"
+                onClick={() => selectedCustomerId && void fetchCustomerDetail(selectedCustomerId)}
+                className="font-bold underline whitespace-nowrap"
+              >
+                Thử lại
+              </button>
+            </div>
+          )}
 
           {/* Quick Stats Grid */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
