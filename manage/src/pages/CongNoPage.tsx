@@ -179,14 +179,12 @@ export default function CongNoPage() {
     void fetchCustomerDetail(customerId);
   };
 
-  // Khối sổ nợ nằm sau danh sách khách hàng. Tự chuyển đến khối chi tiết để
-  // thao tác có phản hồi ngay, thay vì khiến người dùng tưởng nút không chạy.
-  useEffect(() => {
-    if (!selectedCustomerId) return;
-    const frame = window.requestAnimationFrame(() => {
-      detailPanelRef.current?.scrollIntoView({ behavior: 'auto', block: 'start' });
-    });
-    return () => window.cancelAnimationFrame(frame);
+  // Callback ref chạy đúng thời điểm panel được gắn vào DOM. Cách này ổn định
+  // hơn effect vì panel chỉ tồn tại sau khi selectedCustomerId được cập nhật.
+  const setDetailPanelRef = useCallback((node: HTMLElement | null) => {
+    detailPanelRef.current = node;
+    if (!node || !selectedCustomerId) return;
+    node.scrollIntoView({ behavior: 'auto', block: 'start' });
   }, [selectedCustomerId]);
 
   // Distinct list of sales reps for dropdown
@@ -900,7 +898,7 @@ export default function CongNoPage() {
       {/* CHI TIẾT SỔ CÔNG NỢ KHÁCH HÀNG (Statement View Panel) */}
       {selectedCustomerId && (
         <section
-          ref={detailPanelRef}
+          ref={setDetailPanelRef}
           id="panel-customer-receivables-detail"
           className="bg-white rounded-3xl border-2 border-emerald-500/50 shadow-xl p-6 space-y-6 relative"
         >
