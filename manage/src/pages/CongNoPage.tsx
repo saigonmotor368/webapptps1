@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { can } from '../lib/permissions';
 import {
@@ -90,7 +90,6 @@ export default function CongNoPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState<'invoices' | 'receipts' | 'adjustments'>('invoices');
-  const detailPanelRef = useRef<HTMLElement | null>(null);
 
   // Filter toolbar state
   const [searchTerm, setSearchTerm] = useState('');
@@ -178,14 +177,6 @@ export default function CongNoPage() {
     setSelectedCustomerId(customerId);
     void fetchCustomerDetail(customerId);
   };
-
-  // Callback ref chạy đúng thời điểm panel được gắn vào DOM. Cách này ổn định
-  // hơn effect vì panel chỉ tồn tại sau khi selectedCustomerId được cập nhật.
-  const setDetailPanelRef = useCallback((node: HTMLElement | null) => {
-    detailPanelRef.current = node;
-    if (!node || !selectedCustomerId) return;
-    node.scrollIntoView({ behavior: 'auto', block: 'start' });
-  }, [selectedCustomerId]);
 
   // Distinct list of sales reps for dropdown
   const salesRepList = useMemo(() => {
@@ -897,11 +888,15 @@ export default function CongNoPage() {
 
       {/* CHI TIẾT SỔ CÔNG NỢ KHÁCH HÀNG (Statement View Panel) */}
       {selectedCustomerId && (
-        <section
-          ref={setDetailPanelRef}
-          id="panel-customer-receivables-detail"
-          className="bg-white rounded-3xl border-2 border-emerald-500/50 shadow-xl p-6 space-y-6 relative"
-        >
+        <>
+          <div className="fixed inset-0 z-[60] bg-slate-950/30 backdrop-blur-[1px]" aria-hidden="true" />
+          <section
+            id="panel-customer-receivables-detail"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Sổ nợ khách hàng"
+            className="fixed inset-y-4 left-4 right-4 md:left-60 z-[70] overflow-y-auto bg-white rounded-3xl border-2 border-emerald-500/50 shadow-2xl p-6 space-y-6"
+          >
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-5">
             <div>
               <div className="flex items-center gap-2">
@@ -1252,7 +1247,8 @@ export default function CongNoPage() {
               </table>
             </div>
           )}
-        </section>
+          </section>
+        </>
       )}
 
       {/* MODAL 1: GHI NHẬN THANH TOÁN & PHÂN BỔ THU TIỀN */}
