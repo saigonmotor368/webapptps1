@@ -1,5 +1,5 @@
 import React from 'react';
-import { Search, X, Loader2 } from 'lucide-react';
+import { Search, X, Loader2, Plus } from 'lucide-react';
 import type { Product } from '../../lib/api';
 import ProductThumbnail from './ProductThumbnail';
 
@@ -19,6 +19,8 @@ interface ProductSearchBarProps {
   onCloseDropdown: () => void;
   selectedResultIndex: number;
   onSelectIndex: (idx: number) => void;
+  selectedProduct: Product | null;
+  onSelectProduct: (product: Product) => void;
   onAddProduct: (product: Product, qty?: number, options?: { resetSearch?: boolean; keepFocus?: boolean }) => void;
   searchInputRef: React.RefObject<HTMLInputElement | null>;
   dropdownRef: React.RefObject<HTMLDivElement | null>;
@@ -36,6 +38,8 @@ export default function ProductSearchBar({
   onOpenDropdown,
   selectedResultIndex,
   onSelectIndex,
+  selectedProduct,
+  onSelectProduct,
   onAddProduct,
   searchInputRef,
   dropdownRef,
@@ -75,7 +79,7 @@ export default function ProductSearchBar({
         )}
       </div>
 
-      {/* Ô nhập số lượng nhanh trước khi chọn */}
+      {/* Chọn sản phẩm trước, sau đó nhập số lượng và bấm Thêm */}
       <div
         className="flex items-center gap-1 bg-[#f8faf7] border border-[#17231d]/12 rounded-xl px-2 py-1.5 shrink-0"
         title="Số lượng mặc định khi bấm Enter hoặc chọn sản phẩm"
@@ -91,6 +95,15 @@ export default function ProductSearchBar({
           aria-label="Số lượng thêm nhanh"
         />
       </div>
+
+      <button
+        type="button"
+        disabled={!selectedProduct}
+        onClick={() => selectedProduct && onAddProduct(selectedProduct, addQty, { resetSearch: true, keepFocus: true })}
+        className="flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-[#0f7a4f] text-white text-sm font-bold hover:bg-[#0b6340] disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+      >
+        <Plus size={16} /> Thêm
+      </button>
 
       {/* Dropdown kết quả tìm kiếm */}
       {isDropdownOpen && (
@@ -118,7 +131,7 @@ export default function ProductSearchBar({
                 return (
                   <div
                     key={p.id}
-                    onClick={() => onAddProduct(p, addQty, { resetSearch: true, keepFocus: false })}
+                    onClick={() => onSelectProduct(p)}
                     onMouseEnter={() => onSelectIndex(idx)}
                     className={`px-3.5 py-2.5 flex items-center justify-between gap-3 cursor-pointer transition-colors ${
                       isSelected

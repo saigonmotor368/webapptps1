@@ -68,16 +68,19 @@ function decodeCatalog(catalog: ProductCatalogResponse): Product[] {
 function searchLocalCatalog(products: Product[], rawQuery: string): Product[] {
   const query = normalizeSearch(rawQuery);
   if (!query) return products.slice(0, 48);
+  const compactQuery = query.replace(/\s+/g, '');
   const words = query.split(' ').filter(Boolean);
   const ranked: Array<{ product: Product; score: number }> = [];
 
   for (const product of products) {
     const key = productSearchKeys.get(product.id) || normalizeSearch(`${product.sku} ${product.name}`);
-    if (!words.every((word) => key.includes(word))) continue;
+    const compactKey = key.replace(/\s+/g, '');
+    if (!words.every((word) => key.includes(word)) && !compactKey.includes(compactQuery)) continue;
     const sku = normalizeSearch(product.sku || '');
     const name = normalizeSearch(product.name);
+    const compactName = name.replace(/\s+/g, '');
     const score =
-      sku === query ? 0 : sku.startsWith(query) ? 1 : name === query ? 2 : name.startsWith(query) ? 3 : 4;
+      sku === query ? 0 : sku.startsWith(query) ? 1 : name === query ? 2 : compactName === compactQuery ? 3 : name.startsWith(query) || compactName.startsWith(compactQuery) ? 4 : 5;
     ranked.push({ product, score });
   }
 
@@ -170,6 +173,7 @@ export default function ProductsPage() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [selectedResultIndex, setSelectedResultIndex] = useState(0);
+  const [selectedSearchProduct, setSelectedSearchProduct] = useState<Product | null>(null);
   const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [cutoffInfo, setCutoffInfo] = useState<{ earliestDate: string; cutoffTimeStr: string } | null>(null);
@@ -360,6 +364,10 @@ export default function ProductsPage() {
       setIsDropdownOpen(false);
       return;
     }
+    if (selectedSearchProduct && q === selectedSearchProduct.name) {
+      setIsDropdownOpen(false);
+      return;
+    }
 
     if (catalogProducts.length > 0) {
       searchAbortRef.current?.abort();
@@ -374,7 +382,7 @@ export default function ProductsPage() {
     searchTimeoutRef.current = setTimeout(() => void loadProducts(q), 120);
 
     return () => clearTimeout(searchTimeoutRef.current);
-  }, [searchQuery, loadProducts, catalogProducts]);
+  }, [searchQuery, loadProducts, catalogProducts, selectedSearchProduct]);
 
   // Đóng dropdown khi click ngoài
   useEffect(() => {
@@ -445,6 +453,7 @@ export default function ProductsPage() {
 
     if (options?.resetSearch) {
       setSearchQuery('');
+      setSelectedSearchProduct(null);
       setIsDropdownOpen(false);
       setAddQty(1);
     }
@@ -559,7 +568,14 @@ export default function ProductsPage() {
   };
 
   const handleSearchKeyDown = (e: React.KeyboardEvent) => {
-    if (!isDropdownOpen || searchResults.length === 0) return;
+    if (!isDropdownOpen) {
+      if (e.key === 'Enter' && selectedSearchProduct) {
+        e.preventDefault();
+        handleAddProduct(selectedSearchProduct, addQty, { resetSearch: true, keepFocus: true });
+      }
+      return;
+    }
+    if (searchResults.length === 0) return;
 
     if (e.key === 'ArrowDown') {
       e.preventDefault();
@@ -570,7 +586,11 @@ export default function ProductsPage() {
     } else if (e.key === 'Enter') {
       e.preventDefault();
       if (searchResults[selectedResultIndex]) {
-        handleAddProduct(searchResults[selectedResultIndex], addQty, { resetSearch: true, keepFocus: true });
+        const product = searchResults[selectedResultIndex];
+        setSelectedSearchProduct(product);
+        setSearchQuery(product.name);
+        setAddQty(product.enforceOrderStep && product.minOrderQty ? product.minOrderQty : (product.orderStep || 1));
+        setIsDropdownOpen(false);
       }
     } else if (e.key === 'Escape') {
       setIsDropdownOpen(false);
@@ -775,19 +795,30 @@ export default function ProductsPage() {
       <div className="bg-white rounded-2xl border border-[#17231d]/10 shadow-xs p-3 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 sticky top-[58px] z-20 backdrop-blur-md bg-white/95">
         <ProductSearchBar
           searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
+          onSearchChange={(value) => {
+            setSearchQuery(value);
+            if (!selectedSearchProduct || value !== selectedSearchProduct.name) setSelectedSearchProduct(null);
+          }}
           addQty={addQty}
           onAddQtyChange={setAddQty}
           searchResults={searchResults}
           searchLoading={searchLoading}
           isDropdownOpen={isDropdownOpen}
           onOpenDropdown={() => {
+            if (selectedSearchProduct && searchQuery === selectedSearchProduct.name) return;
             if (searchResults.length > 0) setIsDropdownOpen(true);
             else void loadProducts('');
           }}
           onCloseDropdown={() => setIsDropdownOpen(false)}
           selectedResultIndex={selectedResultIndex}
           onSelectIndex={setSelectedResultIndex}
+          selectedProduct={selectedSearchProduct}
+          onSelectProduct={(product) => {
+            setSelectedSearchProduct(product);
+            setSearchQuery(product.name);
+            setAddQty(product.enforceOrderStep && product.minOrderQty ? product.minOrderQty : (product.orderStep || 1));
+            setIsDropdownOpen(false);
+          }}
           onAddProduct={handleAddProduct}
           searchInputRef={searchInputRef}
           dropdownRef={dropdownRef}
