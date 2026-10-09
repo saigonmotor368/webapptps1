@@ -5,6 +5,8 @@ export interface OrderItem {
   product: import('../../lib/api').Product;
   quantity: number;
   note?: string;
+  lineKey?: string;
+  sourceImportLineId?: string;
 }
 
 export interface OrderTab {
@@ -19,6 +21,7 @@ export interface OrderTab {
   deliveryPhone: string;
   deliveryAddress: string;
   mode: 'delivery' | 'pickup';
+  sourceImportBatchId?: string;
 }
 
 interface OrderTabsBarProps {

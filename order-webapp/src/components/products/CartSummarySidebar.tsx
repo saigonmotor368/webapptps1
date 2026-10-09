@@ -86,9 +86,10 @@ export default function CartSummarySidebar({
           ) : (
             activeTab.items.map((item) => {
               const lineTotal = item.quantity * (item.product.price || 0);
+              const lineKey = item.lineKey || item.product.id;
               return (
                 <div
-                  key={item.product.id}
+                  key={lineKey}
                   className="p-2 rounded-xl hover:bg-[#f8faf7] transition-colors space-y-1.5 group"
                 >
                   <div className="flex items-start justify-between gap-2">
@@ -119,7 +120,7 @@ export default function CartSummarySidebar({
 
                     <button
                       type="button"
-                      onClick={() => onRemoveItem(item.product.id)}
+                      onClick={() => onRemoveItem(lineKey)}
                       className="text-[#59665f]/40 hover:text-red-600 p-1 rounded transition-colors cursor-pointer"
                       title="Xóa món"
                     >
@@ -142,9 +143,9 @@ export default function CartSummarySidebar({
                               onClick={() => {
                                 const next = Math.round((item.quantity - step) * 1000) / 1000;
                                 if (item.product.enforceOrderStep && item.product.minOrderQty && next < item.product.minOrderQty) {
-                                  onRemoveItem(item.product.id);
+                                  onRemoveItem(lineKey);
                                 } else {
-                                  onUpdateQty(item.product.id, Math.max(0, next));
+                                  onUpdateQty(lineKey, Math.max(0, next));
                                 }
                               }}
                               className="w-6 h-6 rounded bg-white font-bold text-xs hover:bg-rose-50 hover:text-rose-600 text-[#17231d] flex items-center justify-center cursor-pointer select-none"
@@ -158,7 +159,7 @@ export default function CartSummarySidebar({
                               value={item.quantity}
                               onChange={(e) => {
                                 const v = parseFloat(e.target.value);
-                                onUpdateQty(item.product.id, isNaN(v) ? 0 : v);
+                                onUpdateQty(lineKey, isNaN(v) ? 0 : v);
                               }}
                               className="w-11 text-center font-bold text-xs bg-transparent focus:outline-none"
                             />
@@ -166,7 +167,7 @@ export default function CartSummarySidebar({
                               type="button"
                               onClick={() =>
                                 onUpdateQty(
-                                  item.product.id,
+                                  lineKey,
                                   Math.round((item.quantity + step) * 1000) / 1000
                                 )
                               }

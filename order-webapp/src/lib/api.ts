@@ -133,7 +133,7 @@ export const api = {
   frequentItems: (signal?: AbortSignal) => request<{ ok: true; items: FrequentItem[] }>('/api/customer/frequent-items', { signal }),
 
   createOrder: (payload: {
-    items: { productId: string; name: string; quantity: number; note?: string }[];
+    items: { productId: string; name: string; quantity: number; note?: string; sourceImportLineId?: string }[];
     deliveryAlias?: string;
     deliveryAddress: string;
     deliveryName: string;
@@ -141,6 +141,7 @@ export const api = {
     deliveryDate?: string;
     note?: string;
     idempotencyKey: string;
+    sourceImportBatchId?: string;
   }) =>
     request<{ ok: true; orderId: string; orderCode: string; total: number }>('/api/customer/order', {
       method: 'POST',
