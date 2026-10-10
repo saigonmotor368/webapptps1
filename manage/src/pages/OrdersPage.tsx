@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Fragment, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { printOrderSlip, printBatchOrderSlips } from '../lib/printOrder';
@@ -104,6 +104,9 @@ export default function OrdersPage({ view = 'orders' }: { view?: 'orders' | 'inv
   const [totalCount, setTotalCount] = useState(0);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [stats, setStats] = useState({ pending: 0, preparing: 0, shipping: 0, completed: 0, revenue: 0 });
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
+  const [previewLoadingId, setPreviewLoadingId] = useState<string | null>(null);
+  const [orderPreviewCache, setOrderPreviewCache] = useState<Record<string, any>>({});
 
   // Multi-select & Gộp đơn
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
@@ -260,8 +263,8 @@ export default function OrdersPage({ view = 'orders' }: { view?: 'orders' | 'inv
     }
   };
 
-  const handlePrint = async (order: any, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handlePrint = async (order: any, e?: React.MouseEvent) => {
+    e?.stopPropagation();
     try {
       if (view === 'invoices') {
         const invoiceResponse = await fetch(`${apiBase}/api/admin/orders/document?orderId=${encodeURIComponent(order.id)}&type=invoice`, {
@@ -289,6 +292,150 @@ export default function OrdersPage({ view = 'orders' }: { view?: 'orders' | 'inv
     } catch (err: any) {
       alert('Lỗi in phiếu: ' + (err.message || 'Không thể in phiếu tạm'));
     }
+  };
+
+  const toggleOrderPreview = async (order: any) => {
+    if (expandedOrderId === order.id) {
+      setExpandedOrderId(null);
+      return;
+    }
+    setExpandedOrderId(order.id);
+    if (orderPreviewCache[order.id] || !token) return;
+    setPreviewLoadingId(order.id);
+    try {
+      const response = await fetch(`${apiBase}/api/admin/orders?id=${encodeURIComponent(order.id)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result?.ok || !result.order) {
+        throw new Error(result?.error || 'Không tải được thông tin đơn hàng');
+      }
+      setOrderPreviewCache((current) => ({ ...current, [order.id]: result.order }));
+    } catch (error: any) {
+      setExpandedOrderId(null);
+      alert(error?.message || 'Không tải được thông tin đơn hàng');
+    } finally {
+      setPreviewLoadingId(null);
+    }
+  };
+
+  const renderOrderPreview = (order: any, mobile = false) => {
+    const detail = orderPreviewCache[order.id];
+    const items = Array.isArray(detail?.items)
+      ? detail.items
+      : Array.isArray(detail?.order_items)
+        ? detail.order_items
+        : [];
+    const visibleItems = mobile ? items.slice(0, 5) : items.slice(0, 10);
+    const total = Number(detail?.grand_total ?? order.grand_total) || 0;
+    const paid = Number(detail?.paid_amount ?? order.paid_amount) || 0;
+    const discount = Number(detail?.discount_amount ?? order.discount_amount) || 0;
+    const shipping = Number(detail?.shipping_amount ?? order.shipping_amount) || 0;
+    const priceBookLabel = detail?.price_book_name
+      || detail?.applied_price_book_name
+      || (detail?.customer_price_source === 'customer_price_book'
+        ? 'Giá riêng khách hàng'
+        : detail?.customer_price_source === 'group_price_book'
+          ? 'Giá nhóm bếp'
+          : detail?.customer_price_source === 'general_price_book'
+            ? 'Bảng giá chung'
+            : '—');
+
+    if (previewLoadingId === order.id || !detail) {
+      return (
+        <div className="flex items-center justify-center gap-2 bg-slate-50 px-4 py-8 text-sm font-medium text-slate-500">
+          <RefreshCw size={17} className="animate-spin text-emerald-600" /> Đang tải thông tin đơn...
+        </div>
+      );
+    }
+
+    return (
+      <div className="bg-white text-left" onClick={(event) => event.stopPropagation()}>
+        <div className="grid gap-4 border-b border-slate-200 bg-slate-50/70 px-4 py-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="font-extrabold text-slate-900">
+                {detail.customer_code ? `${detail.customer_code} · ` : ''}{detail.customer_company || detail.customer_name || 'Khách lẻ'}
+              </h3>
+              <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${STATUS_PILL_COLORS[detail.status] || STATUS_PILL_COLORS.pending}`}>
+                {STATUS_LABELS[detail.status] || detail.status}
+              </span>
+            </div>
+            <div className="mt-1 flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-500">
+              <span>Mã đơn: <b className="text-slate-700">{detail.order_code}</b></span>
+              <span>Người tạo: <b className="text-slate-700">{detail.created_by_name || detail.sales_rep_name || '—'}</b></span>
+              <span>Ngày giao: <b className="text-slate-700">{detail.delivery_date || '—'}</b></span>
+              <span>Bảng giá: <b className="text-slate-700">{priceBookLabel}</b></span>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+            {view === 'orders' && detail.status !== 'merged' && detail.pricing_status !== 'finalized' && (
+              <button type="button" onClick={(event) => handleProcess(order, event)} className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500 px-3 py-2 text-xs font-bold text-white hover:bg-amber-600">
+                <ClipboardEdit size={14} /> Xử lý đơn
+              </button>
+            )}
+            <button type="button" onClick={() => void handlePrint(order)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100">
+              <Printer size={14} /> {view === 'invoices' ? 'Hóa đơn PDF' : 'Phiếu tạm'}
+            </button>
+            <button type="button" onClick={() => navigate(`/don-hang/${order.id}`)} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-700">
+              <Eye size={14} /> Mở đầy đủ
+            </button>
+          </div>
+        </div>
+
+        {items.length === 0 ? (
+          <div className="px-4 py-8 text-center text-sm text-slate-400">Đơn chưa có mặt hàng.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-xs">
+              <thead className="border-b border-slate-200 bg-white text-[10px] font-extrabold uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-4 py-2.5 text-left">Mã hàng</th>
+                  <th className="px-4 py-2.5 text-left">Tên hàng</th>
+                  <th className="px-4 py-2.5 text-right">Số lượng</th>
+                  <th className="px-4 py-2.5 text-right">Đơn giá</th>
+                  <th className="px-4 py-2.5 text-right">Thành tiền</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {visibleItems.map((item: any, index: number) => {
+                  const quantity = Number(item.quantity ?? item.qty) || 0;
+                  const unitPrice = Number(item.final_unit_price ?? item.unit_price ?? item.price) || 0;
+                  const lineTotal = Number(item.final_line_total ?? item.line_total) || quantity * unitPrice;
+                  return (
+                    <tr key={item.id || `${item.product_id}-${index}`} className="hover:bg-slate-50/70">
+                      <td className="px-4 py-2.5 font-mono text-[11px] text-blue-700">{item.product_sku || item.sku || item.product_code || '—'}</td>
+                      <td className="px-4 py-2.5 font-semibold text-slate-800">{item.product_name || item.name || item.title || 'Sản phẩm'}</td>
+                      <td className="px-4 py-2.5 text-right font-semibold text-slate-700">{quantity.toLocaleString('vi-VN')} {item.unit || item.unit_snapshot || ''}</td>
+                      <td className="px-4 py-2.5 text-right text-slate-600">{money(unitPrice)}</td>
+                      <td className="px-4 py-2.5 text-right font-extrabold text-slate-900">{money(lineTotal)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {items.length > visibleItems.length && (
+              <div className="border-t border-slate-100 px-4 py-2 text-center text-xs text-slate-500">
+                Còn {items.length - visibleItems.length} mặt hàng — bấm “Mở đầy đủ” để xem tất cả
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="grid gap-3 border-t border-slate-200 bg-slate-50/60 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_280px]">
+          <div className="min-h-12 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
+            <b className="text-slate-700">Ghi chú:</b> {detail.note || detail.customer_note || 'Không có ghi chú'}
+          </div>
+          <div className="space-y-1 text-xs">
+            <div className="flex justify-between text-slate-500"><span>Tiền hàng</span><b className="text-slate-700">{money(Number(detail.subtotal) || total + discount - shipping)}</b></div>
+            {discount > 0 && <div className="flex justify-between text-slate-500"><span>Giảm giá</span><b>-{money(discount)}</b></div>}
+            {shipping > 0 && <div className="flex justify-between text-slate-500"><span>Phí giao hàng</span><b>+{money(shipping)}</b></div>}
+            <div className="flex justify-between border-t border-slate-200 pt-1.5 text-sm"><span className="font-bold text-slate-800">Khách cần trả</span><b className="text-emerald-700">{money(total)}</b></div>
+            <div className="flex justify-between text-slate-500"><span>Khách đã trả</span><b className="text-slate-700">{money(paid)}</b></div>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   const handleProcess = async (order: any, e: React.MouseEvent) => {
@@ -764,7 +911,7 @@ export default function OrdersPage({ view = 'orders' }: { view?: 'orders' | 'inv
               return (
                 <article
                   key={order.id}
-                  onClick={() => navigate(`/don-hang/${order.id}`)}
+                  onClick={() => void toggleOrderPreview(order)}
                   className={`p-3.5 sm:p-4 space-y-2.5 transition-all cursor-pointer ${
                     isSelected
                       ? 'bg-emerald-50/50 border-l-4 border-l-emerald-600'
@@ -792,6 +939,7 @@ export default function OrdersPage({ view = 'orders' }: { view?: 'orders' | 'inv
                         <span className="font-extrabold text-slate-900 text-sm tracking-tight break-all">
                           {order.order_code}
                         </span>
+                        <ChevronDown size={14} className={`text-slate-400 transition-transform ${expandedOrderId === order.id ? 'rotate-180' : ''}`} />
 
                         {/* Nguồn đơn */}
                         <span className="text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 px-1.5 py-0.2 rounded">
@@ -924,6 +1072,11 @@ export default function OrdersPage({ view = 'orders' }: { view?: 'orders' | 'inv
                       )}
                     </div>
                   </div>
+                  {expandedOrderId === order.id && (
+                    <div className="-mx-3.5 -mb-3.5 mt-3 overflow-hidden border-t border-slate-200 sm:-mx-4 sm:-mb-4">
+                      {renderOrderPreview(order, true)}
+                    </div>
+                  )}
                 </article>
               );
             })
@@ -986,12 +1139,12 @@ export default function OrdersPage({ view = 'orders' }: { view?: 'orders' | 'inv
                   const req = changeRequestsMap.get(order.id);
 
                   return (
+                    <Fragment key={order.id}>
                     <tr
-                      key={order.id}
-                      onClick={() => navigate(`/don-hang/${order.id}`)}
+                      onClick={() => void toggleOrderPreview(order)}
                       className={`hover:bg-slate-50/80 cursor-pointer transition-colors ${
                         isSelected ? 'bg-emerald-50/40' : ''
-                      } ${updatingId === order.id ? 'opacity-60 pointer-events-none' : ''}`}
+                      } ${expandedOrderId === order.id ? 'bg-blue-50/50 ring-1 ring-inset ring-blue-200' : ''} ${updatingId === order.id ? 'opacity-60 pointer-events-none' : ''}`}
                     >
                       <td className="px-3 py-3 text-center" onClick={(e) => toggleSelectOrder(order.id, e)}>
                         <button className="text-slate-400 hover:text-emerald-700 transition-colors p-1">
@@ -1005,6 +1158,7 @@ export default function OrdersPage({ view = 'orders' }: { view?: 'orders' | 'inv
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           <p className="font-bold text-slate-900">{order.order_code}</p>
+                          <ChevronDown size={14} className={`text-slate-400 transition-transform ${expandedOrderId === order.id ? 'rotate-180' : ''}`} />
                           {order.status === 'merged' && (
                             <span className="text-[10px] font-extrabold bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded">
                               Đã gộp
@@ -1121,6 +1275,14 @@ export default function OrdersPage({ view = 'orders' }: { view?: 'orders' | 'inv
                         </div>
                       </td>
                     </tr>
+                    {expandedOrderId === order.id && (
+                      <tr className="bg-white">
+                        <td colSpan={9} className="border-b-2 border-blue-200 p-0 shadow-inner">
+                          {renderOrderPreview(order)}
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   );
                 })
               )}

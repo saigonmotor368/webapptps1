@@ -1014,11 +1014,11 @@ export default function PosCreatePage() {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(0,1fr)_400px] 2xl:grid-cols-[minmax(0,1fr)_430px] xl:gap-6">
-        {/* Left: Customer + Products */}
-        <div className="min-w-0 space-y-5">
+      <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(0,1fr)_380px] 2xl:grid-cols-[minmax(0,1fr)_420px] xl:gap-5">
+        {/* Trên desktop, các con được đưa thẳng vào lưới để hàng hóa nằm trái và khách hàng nằm phải. */}
+        <div className="min-w-0 space-y-5 xl:contents">
           {/* Customer Selection & Delivery Information */}
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-5 space-y-4">
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-5 space-y-4 xl:col-start-2 xl:row-start-1 xl:row-span-2 xl:sticky xl:top-4 xl:max-h-[calc(100vh-7rem)] xl:overflow-y-auto">
             <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3">
               <h2 className="font-bold text-slate-800 flex items-center gap-2"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-green-50"><User size={17} className="text-green-600" /></span>Khách hàng &amp; giao hàng</h2>
               <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-500">Bước 1</span>
@@ -1235,10 +1235,43 @@ export default function PosCreatePage() {
                 </div>
               </div>
             )}
+
+            <div className="-mx-4 border-t border-slate-200 bg-slate-50 px-4 py-4 sm:-mx-5 sm:px-5">
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between text-slate-500"><span>Tiền hàng</span><span>{money(subtotal)}</span></div>
+                {activeTab.voucherDiscount > 0 && <div className="flex justify-between text-green-700"><span>Voucher</span><span>-{money(activeTab.voucherDiscount)}</span></div>}
+                {activeTab.discountAmount > 0 && <div className="flex justify-between text-green-700"><span>Chiết khấu</span><span>-{money(activeTab.discountAmount)}</span></div>}
+                {activeTab.shippingAmount > 0 && <div className="flex justify-between text-slate-500"><span>Phí giao hàng</span><span>+{money(activeTab.shippingAmount)}</span></div>}
+                <div className="flex justify-between border-t border-slate-200 pt-2 text-lg font-extrabold text-slate-900">
+                  <span>Khách cần trả</span><span className="text-emerald-700">{money(total)}</span>
+                </div>
+              </div>
+              <div className="mt-4">
+                <label className="mb-1.5 block text-xs font-semibold text-slate-500">Thanh toán</label>
+                <select value={activeTab.paymentMethod} onChange={e => updateActiveTab({ paymentMethod: e.target.value as 'COD' | 'CREDIT' })}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold">
+                  <option value="COD">COD (thu tiền khi giao)</option>
+                  <option value="CREDIT">Công nợ (thanh toán sau)</option>
+                </select>
+                {activeTab.paymentMethod === 'CREDIT' && (
+                  <p className="mt-1 text-[11px] text-amber-700">Công nợ phát sinh sau khi giao xong và chuyển thành hóa đơn.</p>
+                )}
+              </div>
+              <button onClick={submitOrder} disabled={submitting || activeTab.cart.length === 0 || (!activeTab.processingOrderId && !activeTab.selectedCustomerId)}
+                className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-green-600 py-3.5 font-bold text-white shadow-lg shadow-green-900/20 transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50">
+                <CheckCircle2 size={20} />
+                {submitting
+                  ? (activeTab.processingOrderId ? 'Đang chốt đơn...' : 'Đang tạo đơn...')
+                  : activeTab.processingOrderId ? `CHỐT ĐƠN & XÁC NHẬN ${activeTab.orderCode}` : 'LƯU PHIẾU TẠM'}
+              </button>
+              <p className="mt-2 text-center text-[11px] text-slate-400">
+                {activeTab.processingOrderId ? 'Hoàn tất xử lý để chuyển sang Đã xác nhận' : 'POS tạo phiếu tạm; xác nhận sau bước xử lý đơn'}
+              </p>
+            </div>
           </div>
 
           {/* Product Search */}
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 space-y-4">
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 sm:p-5 space-y-4 xl:col-start-1 xl:row-start-1">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="font-bold text-slate-800 flex items-center gap-2"><Search size={18} className="text-green-600" />Tìm & thêm sản phẩm</h2>
               <button type="button" onClick={() => activeTab.selectedCustomerId ? setShowSmartImport(true) : alert('Vui lòng chọn khách hàng trước khi đọc đơn')}
@@ -1281,16 +1314,16 @@ export default function PosCreatePage() {
           </div>
         </div>
 
-        {/* Right: Cart */}
-        <div className="space-y-4">
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden sticky top-4">
+        {/* Danh sách hàng là vùng làm việc chính bên trái trên desktop. */}
+        <div className="space-y-4 xl:col-start-1 xl:row-start-2">
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
             <div className="p-4 border-b border-slate-100 flex items-center justify-between">
               <h2 className="font-bold text-slate-800 flex items-center gap-2"><ShoppingCart size={18} className="text-green-600" />Giỏ hàng</h2>
               <span className="text-sm text-slate-500">{activeTab.cart.length} sản phẩm</span>
             </div>
 
             {/* Cart Items */}
-            <div className="divide-y divide-slate-100 max-h-80 overflow-y-auto">
+            <div className="divide-y divide-slate-100 max-h-[56vh] min-h-[240px] overflow-y-auto">
               {activeTab.cart.length === 0 ? (
                 <div className="py-10 text-center text-slate-400 text-sm">
                   <ShoppingCart size={32} className="mx-auto mb-2 opacity-30" />Giỏ hàng đang trống
@@ -1499,41 +1532,6 @@ export default function PosCreatePage() {
               </div>
             )}
 
-            {/* Summary */}
-            <div className="p-4 bg-slate-50 border-t border-slate-100 space-y-2 text-sm">
-              <div className="flex justify-between text-slate-500"><span>Tạm tính</span><span>{money(subtotal)}</span></div>
-              {activeTab.voucherDiscount > 0 && <div className="flex justify-between text-green-600"><span>Voucher</span><span>-{money(activeTab.voucherDiscount)}</span></div>}
-              {activeTab.discountAmount > 0 && <div className="flex justify-between text-green-600"><span>Chiết khấu</span><span>-{money(activeTab.discountAmount)}</span></div>}
-              {activeTab.shippingAmount > 0 && <div className="flex justify-between text-slate-500"><span>Phí giao hàng</span><span>+{money(activeTab.shippingAmount)}</span></div>}
-              <div className="flex justify-between font-bold text-lg text-slate-800 pt-2 border-t border-slate-200">
-                <span>Tổng đơn</span><span className="text-red-600">{money(total)}</span>
-              </div>
-              <div className="pt-2">
-                <label className="text-xs font-semibold text-slate-500 mb-1 block">Thanh toán</label>
-                <select value={activeTab.paymentMethod} onChange={e => updateActiveTab({ paymentMethod: e.target.value as 'COD' | 'CREDIT' })}
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white">
-                  <option value="COD">COD (thu tiền khi giao)</option>
-                  <option value="CREDIT">Công nợ (thanh toán sau)</option>
-                </select>
-                {activeTab.paymentMethod === 'CREDIT' && (
-                  <p className="text-[11px] text-amber-700 mt-1">Công nợ chỉ phát sinh sau khi đơn giao xong và chuyển thành hóa đơn.</p>
-                )}
-              </div>
-            </div>
-
-            {/* Submit */}
-            <div className="p-4 border-t border-slate-100">
-              <button onClick={submitOrder} disabled={submitting || activeTab.cart.length === 0 || (!activeTab.processingOrderId && !activeTab.selectedCustomerId)}
-                className="w-full flex items-center justify-center gap-2 py-3.5 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-lg shadow-green-900/20">
-                <CheckCircle2 size={20} />
-                {submitting
-                  ? (activeTab.processingOrderId ? 'Đang chốt đơn...' : 'Đang tạo đơn...')
-                  : activeTab.processingOrderId ? `CHỐT ĐƠN & XÁC NHẬN ${activeTab.orderCode}` : 'LƯU PHIẾU TẠM'}
-              </button>
-              <p className="text-center text-xs text-slate-400 mt-2">
-                {activeTab.processingOrderId ? 'Hoàn tất xử lý để chuyển đơn sang Đã xác nhận' : 'POS chỉ tạo phiếu tạm; đơn chỉ được xác nhận sau bước xử lý'}
-              </p>
-            </div>
           </div>
         </div>
       </div>
