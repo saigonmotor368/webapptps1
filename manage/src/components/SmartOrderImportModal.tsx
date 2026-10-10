@@ -5,7 +5,9 @@ import {
   CheckCircle2,
   FileText,
   Loader2,
+  Search,
   ScanLine,
+  Trash2,
   Upload,
   X,
   XCircle,
@@ -44,6 +46,7 @@ type Line = {
     score: number;
   }>;
 };
+type ProductChoice = { id: string; name: string; sku: string; unit: string };
 
 export default function SmartOrderImportModal({
   open,
@@ -65,6 +68,10 @@ export default function SmartOrderImportModal({
   const [lines, setLines] = useState<Line[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [pickerLine, setPickerLine] = useState<Line | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [searchResults, setSearchResults] = useState<ProductChoice[]>([]);
+  const [searching, setSearching] = useState(false);
   const base = getApiBase();
   const counts = useMemo(
     () =>
@@ -150,6 +157,35 @@ export default function SmartOrderImportModal({
     } finally {
       setBusy(false);
     }
+  };
+  const removeLine = async (line: Line) => {
+    setBusy(true);
+    setError("");
+    try {
+      await call(`/api/order-import/batches/${batchId}/lines/${line.id}`, { method: "DELETE" });
+      setLines((current) => current.filter((item) => item.id !== line.id));
+      if (pickerLine?.id === line.id) setPickerLine(null);
+    } catch (e: any) {
+      setError(e.message || "Không bỏ được dòng hàng");
+    } finally { setBusy(false); }
+  };
+  const openProductPicker = (line: Line) => {
+    setPickerLine(line); setSearchTerm(line.raw_name); setSearchResults([]);
+  };
+  const searchProducts = async () => {
+    const query = searchTerm.trim();
+    if (!query) return;
+    setSearching(true); setError("");
+    try {
+      const data = await call(`/api/admin/products?search=${encodeURIComponent(query)}&pageSize=30&customerId=${encodeURIComponent(customerId)}`);
+      setSearchResults((data.products || []).map((product: any) => ({ id: product.id, name: product.name, sku: product.sku || "", unit: product.unit || "Kg" })));
+    } catch (e: any) { setError(e.message || "Không tìm được hàng hóa"); }
+    finally { setSearching(false); }
+  };
+  const chooseProduct = async (product: ProductChoice) => {
+    if (!pickerLine) return;
+    await patch(pickerLine, { productId: product.id, quantity: pickerLine.raw_quantity, inputUnit: pickerLine.raw_unit || product.unit });
+    setPickerLine(null); setSearchResults([]);
   };
   const confirm = async () => {
     setBusy(true);
@@ -359,6 +395,12 @@ export default function SmartOrderImportModal({
                             {w}
                           </p>
                         ))}
+                        {line.status !== "matched" && (
+                          <div className="flex flex-wrap gap-2 mt-2">
+                            <button disabled={busy} onClick={() => openProductPicker(line)} className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5"><Search size={14} /> Chọn sản phẩm</button>
+                            <button disabled={busy} onClick={() => removeLine(line)} className="px-3 py-1.5 bg-white border border-red-200 text-red-600 rounded-lg text-xs font-semibold flex items-center gap-1.5"><Trash2 size={14} /> Bỏ dòng</button>
+                          </div>
+                        )}
                         {line.selected_product_id && (
                           <div className="flex gap-2 mt-2">
                             <input
@@ -430,6 +472,15 @@ export default function SmartOrderImportModal({
           </footer>
         )}
       </div>
+      {pickerLine && (
+        <div className="fixed inset-0 z-[120] bg-black/45 p-4 flex items-center justify-center">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl p-4 space-y-3">
+            <div className="flex items-center justify-between gap-3"><div><h3 className="font-bold text-slate-900">Chọn sản phẩm</h3><p className="text-xs text-slate-500">Dòng đọc được: {pickerLine.raw_name}</p></div><button onClick={() => setPickerLine(null)} className="p-2 rounded-lg hover:bg-slate-100"><X size={18} /></button></div>
+            <div className="flex gap-2"><input autoFocus value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} onKeyDown={(e) => e.key === "Enter" && searchProducts()} placeholder="Nhập tên sản phẩm..." className="flex-1 border rounded-xl px-3 py-2 text-sm" /><button onClick={searchProducts} disabled={searching} className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold text-sm flex items-center gap-2">{searching ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />} Tìm</button></div>
+            <div className="max-h-72 overflow-y-auto divide-y border rounded-xl">{searchResults.map((product) => <button key={product.id} onClick={() => chooseProduct(product)} className="w-full text-left px-3 py-2.5 hover:bg-emerald-50"><p className="font-semibold text-sm">{product.name}</p><p className="text-xs text-slate-500">Mã: {product.sku} · {product.unit}</p></button>)}{!searching && searchResults.length === 0 && <p className="p-4 text-sm text-center text-slate-500">Nhập tên rồi bấm Tìm để chọn đúng sản phẩm.</p>}</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
