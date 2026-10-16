@@ -36,15 +36,10 @@ export default function CustomerLayout() {
             </NavLink>
             <div className="min-w-0 hidden sm:block">
               <p className="font-semibold text-white text-sm leading-tight truncate">
-                {session?.name || session?.company || 'Khách hàng VIP'}
+                {session?.company || session?.name || 'Khách hàng'}
               </p>
               <div className="flex items-center gap-1.5 text-[11px] text-emerald-100/80 font-mono mt-0.5">
                 <span className="font-bold">{session?.code}</span>
-                {session?.tier && (
-                  <span className="px-1.5 py-0.2 rounded-full bg-emerald-900/60 text-emerald-200 border border-emerald-400/30 text-[10px]">
-                    Hạng {session.tier}
-                  </span>
-                )}
               </div>
             </div>
           </div>
@@ -68,7 +63,7 @@ export default function CustomerLayout() {
               </NavLink>
             ))}
             <NavLink
-              to="/doi-mat-khau"
+              to="/tai-khoan"
               className={({ isActive }) =>
                 `flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-medium transition-colors ${
                   isActive ? 'bg-white text-[#0b4f34] font-semibold' : 'text-white/85 hover:bg-white/12'
@@ -113,7 +108,7 @@ export default function CustomerLayout() {
             </a>
             <NotificationBell />
             <button
-              onClick={() => navigate('/doi-mat-khau')}
+              onClick={() => navigate('/tai-khoan')}
               className="w-8 h-8 rounded-full bg-white/15 border border-white/20 text-white font-bold flex items-center justify-center text-xs active:scale-95 transition-transform"
               aria-label="Tài khoản"
             >
@@ -136,7 +131,7 @@ export default function CustomerLayout() {
         <div className="grid grid-cols-4">
           {[
             ...tabs,
-            { to: '/doi-mat-khau', label: 'Tài khoản', icon: UserCircle2 },
+            { to: '/tai-khoan', label: 'Tài khoản', icon: UserCircle2 },
           ].map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}

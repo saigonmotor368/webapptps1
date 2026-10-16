@@ -9,7 +9,7 @@ import {
   type FrequentItem,
   ApiError,
 } from '../lib/api';
-import { validateOrderQuantity } from '../lib/quantityRules';
+import { normalizeOrderQuantity, validateOrderQuantity } from '../lib/quantityRules';
 import { useAuth } from '../contexts/AuthContext';
 
 import OrderTabsBar, { type OrderTab } from '../components/products/OrderTabsBar';
@@ -42,7 +42,7 @@ function normalizeSearch(value: string) {
 
 function decodeCatalog(catalog: ProductCatalogResponse): Product[] {
   const imageBaseUrl = catalog.imageBaseUrl.replace(/\/$/, '');
-  return catalog.items.map(([id, sku, name, category, unit, price, priceOnRequest, hasImage, packagingNote, minOrderQty, orderStep, enforceOrderStep]) => {
+  return catalog.items.map(([id, sku, name, category, unit, price, priceOnRequest, hasImage, packagingNote, minOrderQty, orderStep, enforceOrderStep, quantityPrecision, quantityAdjustmentMode]) => {
     const imageUrl = hasImage && imageBaseUrl ? `${imageBaseUrl}/${id}.webp` : null;
     const product: Product = {
       id,
@@ -59,6 +59,8 @@ function decodeCatalog(catalog: ProductCatalogResponse): Product[] {
       minOrderQty: minOrderQty != null ? Number(minOrderQty) : 1,
       orderStep: orderStep != null ? Number(orderStep) : 1,
       enforceOrderStep: Boolean(enforceOrderStep),
+      quantityPrecision: quantityPrecision != null ? Number(quantityPrecision) : 3,
+      quantityAdjustmentMode: quantityAdjustmentMode || 'reject',
     };
     productSearchKeys.set(id, normalizeSearch(`${sku} ${name} ${category || ''}`));
     return product;
@@ -431,22 +433,34 @@ export default function ProductsPage() {
     options?: { resetSearch?: boolean; keepFocus?: boolean }
   ) => {
     const defaultQty = product.enforceOrderStep && product.minOrderQty ? product.minOrderQty : (product.orderStep || 1);
-    const qty = quantityToAdd != null && quantityToAdd > 0 ? quantityToAdd : defaultQty;
+    const requestedQty = quantityToAdd != null && quantityToAdd > 0 ? quantityToAdd : defaultQty;
+    const normalized = normalizeOrderQuantity(requestedQty, product.minOrderQty, product.orderStep, product.enforceOrderStep, product.quantityPrecision, product.quantityAdjustmentMode, product.unit);
+    if (!normalized.ok) { setErrorMessage(`${product.name}: ${normalized.message}`); return; }
+    const qty = normalized.normalizedQuantity;
+    const currentLine = activeTab.items.find((item) => item.product.id === product.id && !item.note?.trim());
+    const mergedResult = currentLine
+      ? normalizeOrderQuantity(currentLine.quantity + requestedQty, product.minOrderQty, product.orderStep, product.enforceOrderStep, product.quantityPrecision, product.quantityAdjustmentMode, product.unit)
+      : null;
+    if (mergedResult && !mergedResult.ok) { setErrorMessage(`${product.name}: ${mergedResult.message}`); return; }
     updateActiveTab((tab) => {
       const existingIdx = tab.items.findIndex((item) => item.product.id === product.id && !item.note?.trim());
       if (existingIdx >= 0) {
         const step = product.orderStep || 1;
         const addAmount = quantityToAdd != null && quantityToAdd > 0 ? quantityToAdd : step;
+        const result = mergedResult && mergedResult.ok ? mergedResult : null;
         const updated = [...tab.items];
         updated[existingIdx] = {
           ...updated[existingIdx],
-          quantity: Math.round((updated[existingIdx].quantity + addAmount) * 1000) / 1000,
+          quantity: result?.normalizedQuantity ?? Math.round((updated[existingIdx].quantity + addAmount) * 1000) / 1000,
+          requestedQuantity: result?.requestedQuantity ?? updated[existingIdx].quantity + addAmount,
+          adjustmentAcknowledged: Boolean(result?.adjusted),
+          quantityAdjustmentMessage: result?.message || undefined,
         };
         return { ...tab, items: updated };
       } else {
         return {
           ...tab,
-          items: [...tab.items, { product, quantity: qty }],
+          items: [...tab.items, { product, quantity: qty, requestedQuantity: requestedQty, adjustmentAcknowledged: normalized.adjusted, quantityAdjustmentMessage: normalized.message || undefined }],
         };
       }
     });
@@ -471,9 +485,18 @@ export default function ProductsPage() {
     updateActiveTab((tab) => ({
       ...tab,
       items: tab.items.map((item) =>
-        (item.lineKey || item.product.id) === lineKey ? { ...item, quantity: qty } : item
+        (item.lineKey || item.product.id) === lineKey ? { ...item, quantity: qty, requestedQuantity: qty, adjustmentAcknowledged: false, quantityAdjustmentMessage: undefined } : item
       ),
     }));
+  };
+
+  const handleNormalizeQty = (lineKey: string) => {
+    updateActiveTab((tab) => ({ ...tab, items: tab.items.map((item) => {
+      if ((item.lineKey || item.product.id) !== lineKey) return item;
+      const result = normalizeOrderQuantity(item.quantity, item.product.minOrderQty, item.product.orderStep, item.product.enforceOrderStep, item.product.quantityPrecision, item.product.quantityAdjustmentMode, item.product.unit);
+      if (!result.ok) return item;
+      return { ...item, requestedQuantity: result.requestedQuantity, quantity: result.normalizedQuantity, adjustmentAcknowledged: result.adjusted, quantityAdjustmentMessage: result.message || undefined };
+    }) }));
   };
 
   const handleUpdateItemNote = (lineKey: string, note: string) => {
@@ -510,6 +533,7 @@ export default function ProductsPage() {
             imageUrl: item.imageUrl, thumbUrl: item.imageUrl, price: item.price, priceOnRequest: item.price <= 0,
 	            available: true, minOrderQty: item.minOrderQty ?? undefined, orderStep: item.orderStep ?? undefined,
 	            enforceOrderStep: item.enforceOrderStep ?? undefined, packagingNote: item.packagingNote ?? undefined,
+            quantityPrecision: item.quantityPrecision ?? undefined, quantityAdjustmentMode: item.quantityAdjustmentMode ?? 'reject',
           },
           quantity: item.quantity,
           note,
@@ -708,7 +732,10 @@ export default function ProductsPage() {
           item.quantity,
           item.product.minOrderQty,
           item.product.orderStep,
-          true
+          true,
+          item.product.quantityPrecision,
+          item.product.quantityAdjustmentMode,
+          item.product.unit
         );
         if (err) {
           setErrorMessage(`Mặt hàng "${item.product.name}" chưa đúng quy cách: ${err}`);
@@ -738,6 +765,8 @@ export default function ProductsPage() {
           productId: it.product.id,
           name: it.product.name,
           quantity: it.quantity,
+          requestedQuantity: it.requestedQuantity ?? it.quantity,
+          adjustmentAcknowledged: Boolean(it.adjustmentAcknowledged),
           note: it.note?.trim() || undefined,
           sourceImportLineId: it.sourceImportLineId,
         })),
@@ -892,6 +921,7 @@ export default function ProductsPage() {
             onToggleFavorite={toggleFavorite}
             onAddProduct={handleAddProduct}
             onUpdateQty={handleUpdateQty}
+            onNormalizeQty={handleNormalizeQty}
             onUpdateNote={handleUpdateItemNote}
             searchQuery={searchQuery}
             loading={catalogLoading || searchLoading}
@@ -905,6 +935,7 @@ export default function ProductsPage() {
             activeTab={activeTab}
             onUpdateTab={updateActiveTab}
             onUpdateQty={handleUpdateQty}
+            onNormalizeQty={handleNormalizeQty}
             onRemoveItem={handleRemoveItem}
             onSubmitOrder={handleSubmitOrder}
             submitting={submitting}
@@ -927,6 +958,7 @@ export default function ProductsPage() {
         activeTab={activeTab}
         onUpdateTab={updateActiveTab}
         onUpdateQty={handleUpdateQty}
+        onNormalizeQty={handleNormalizeQty}
         onUpdateNote={handleUpdateItemNote}
         onRemoveItem={handleRemoveItem}
         onSubmitOrder={handleSubmitOrder}

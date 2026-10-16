@@ -9,6 +9,7 @@ export type SmartImportItem = {
   imageUrl: string | null; quantity: number; inputQuantity: number; inputUnit: string; conversionFactor: number | null;
   note: string; price: number; priceSource: string; minOrderQty?: number | null; orderStep?: number | null;
   enforceOrderStep?: boolean | null; packagingNote?: string | null; quantityPrecision?: number | null;
+  quantityAdjustmentMode?: 'reject' | 'ceil_to_step' | null;
 };
 
 type ImportLine = {

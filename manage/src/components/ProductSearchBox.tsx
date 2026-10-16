@@ -25,6 +25,8 @@ export interface SearchProductItem {
   minOrderQty?: number;
   orderStep?: number;
   enforceOrderStep?: boolean;
+  quantityPrecision?: number;
+  quantityAdjustmentMode?: 'reject' | 'ceil_to_step';
   [key: string]: any;
 }
 
@@ -201,6 +203,12 @@ export default function ProductSearchBox({
             stockQty: p.stockQty != null ? Number(p.stockQty) : null,
             lowStock: !!p.lowStock,
             categoryLabel: p.category || '',
+            packagingNote: p.packaging_note || null,
+            minOrderQty: p.min_order_qty == null ? 1 : Number(p.min_order_qty),
+            orderStep: p.order_step == null ? 1 : Number(p.order_step),
+            enforceOrderStep: Boolean(p.enforce_order_step),
+            quantityPrecision: p.quantity_precision == null ? 3 : Number(p.quantity_precision),
+            quantityAdjustmentMode: p.quantity_adjustment_mode || 'reject',
           }));
           productSearchCache.set(cacheKey, { products: items, expiresAt: Date.now() + PRODUCT_SEARCH_CACHE_TTL });
           setResults(items);

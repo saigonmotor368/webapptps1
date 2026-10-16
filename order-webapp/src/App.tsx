@@ -9,6 +9,7 @@ import CartPage from './pages/CartPage';
 import OrdersPage from './pages/OrdersPage';
 import OrderDetailPage from './pages/OrderDetailPage';
 import ExcelOrderPage from './pages/ExcelOrderPage';
+import AccountPage from './pages/AccountPage';
 
 const LoadingScreen = () => (
   <div className="fixed inset-0 min-h-screen bg-white flex flex-col items-center justify-center z-50">
@@ -60,6 +61,7 @@ function App() {
               <Route path="don-hang" element={<OrdersPage />} />
               <Route path="don-hang/:id" element={<OrderDetailPage />} />
               <Route path="doi-mat-khau" element={<ChangePasswordPage />} />
+              <Route path="tai-khoan" element={<AccountPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

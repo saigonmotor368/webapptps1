@@ -39,6 +39,8 @@ export default function ProductDetailPage() {
     min_order_qty: 1,
     order_step: 1,
     enforce_order_step: false,
+    quantity_precision: 3,
+    quantity_adjustment_mode: 'reject',
     packaging_note: '',
   });
   const [tierDrafts, setTierDrafts] = useState<Record<string, string>>({});
@@ -86,6 +88,8 @@ export default function ProductDetailPage() {
         min_order_qty: data.product.min_order_qty ?? 1,
         order_step: data.product.order_step ?? 1,
         enforce_order_step: Boolean(data.product.enforce_order_step),
+        quantity_precision: data.product.quantity_precision ?? 3,
+        quantity_adjustment_mode: data.product.quantity_adjustment_mode || 'reject',
         packaging_note: data.product.packaging_note || '',
       });
       setCanEdit(!!data.canEdit);
@@ -162,6 +166,8 @@ export default function ProductDetailPage() {
         errs.order_step = 'Khi bật kiểm tra, bước đặt hàng phải lớn hơn 0';
       }
     }
+    const precision = Number(product.quantity_precision);
+    if (!Number.isInteger(precision) || precision < 0 || precision > 6) errs.quantity_precision = 'Số chữ số thập phân phải từ 0 đến 6';
 
     setErrors(errs);
     return Object.keys(errs).length === 0;
@@ -198,6 +204,8 @@ export default function ProductDetailPage() {
             min_order_qty: Number(product.min_order_qty) || 1,
             order_step: Number(product.order_step) || 1,
             enforce_order_step: !!product.enforce_order_step,
+            quantity_precision: Number(product.quantity_precision) || 0,
+            quantity_adjustment_mode: product.quantity_adjustment_mode || 'reject',
           },
         }),
       });
@@ -232,6 +240,8 @@ export default function ProductDetailPage() {
       fields.min_order_qty = Number(product.min_order_qty) || 1;
       fields.order_step = Number(product.order_step) || 1;
       fields.enforce_order_step = !!product.enforce_order_step;
+      fields.quantity_precision = Number(product.quantity_precision) || 0;
+      fields.quantity_adjustment_mode = product.quantity_adjustment_mode || 'reject';
 
       const tierPrices: Record<string, number | null> = {};
       for (const t of tiers) {
@@ -586,6 +596,25 @@ export default function ProductDetailPage() {
                 className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-mono disabled:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
               />
             </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wide">
+              Số chữ số thập phân
+              <input type="number" min="0" max="6" step="1" disabled={!canEdit} value={product.quantity_precision ?? 3}
+                onChange={e => setField('quantity_precision', e.target.value)}
+                className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-mono normal-case" />
+              {errors.quantity_precision && <p className="text-rose-600 text-xs mt-1">{errors.quantity_precision}</p>}
+            </label>
+            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wide">
+              Xử lý khi sai quy cách
+              <select disabled={!canEdit} value={product.quantity_adjustment_mode || 'reject'}
+                onChange={e => setField('quantity_adjustment_mode', e.target.value)}
+                className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-xl text-sm normal-case">
+                <option value="reject">Yêu cầu nhập lại</option>
+                <option value="ceil_to_step">Làm tròn lên bước hợp lệ</option>
+              </select>
+            </label>
           </div>
 
           <div className="flex items-center gap-6 pt-2">

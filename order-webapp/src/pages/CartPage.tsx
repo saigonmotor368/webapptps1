@@ -19,7 +19,7 @@ import {
 import { useCart } from '../contexts/CartContext';
 import { useAuth } from '../contexts/AuthContext';
 import { api, ApiError } from '../lib/api';
-import { validateOrderQuantity, formatQuantityVN } from '../lib/quantityRules';
+import { normalizeOrderQuantity, validateOrderQuantity, formatQuantityVN } from '../lib/quantityRules';
 import ProductThumbnail from '../components/products/ProductThumbnail';
 
 function money(v: number) {
@@ -49,6 +49,7 @@ export default function CartPage() {
   const [deliveryDate, setDeliveryDate] = useState(getTomorrowDateStr());
   const [deliveryShift, setDeliveryShift] = useState('Ca sáng sớm (05:00 - 07:00)');
   const [generalNote, setGeneralNote] = useState('');
+  const [quantityDrafts, setQuantityDrafts] = useState<Record<string, string>>({});
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -68,7 +69,7 @@ export default function CartPage() {
 
     for (const l of lines) {
       if (l.product.enforceOrderStep) {
-        const err = validateOrderQuantity(l.quantity, l.product.minOrderQty, l.product.orderStep, true);
+        const err = validateOrderQuantity(l.quantity, l.product.minOrderQty, l.product.orderStep, true, l.product.quantityPrecision, l.product.quantityAdjustmentMode, l.product.unit);
         if (err) {
           setError(`Mặt hàng "${l.product.name}" chưa đúng quy cách: ${err}`);
           return;
@@ -97,6 +98,8 @@ export default function CartPage() {
           productId: l.product.id,
           name: l.product.name,
           quantity: l.quantity,
+          requestedQuantity: l.requestedQuantity ?? l.quantity,
+          adjustmentAcknowledged: Boolean(l.adjustmentAcknowledged),
           note: l.note?.trim() || undefined,
         })),
         deliveryAlias: deliveryAlias.trim() || undefined,
@@ -207,7 +210,7 @@ export default function CartPage() {
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px] gap-5 items-start">
         {/* Danh sách mặt hàng (Card layout) */}
         <div className="space-y-3">
-          {lines.map(({ product, quantity, note }) => {
+          {lines.map(({ product, quantity, note, requestedQuantity, quantityAdjustmentMessage }) => {
             const lineTotal = quantity * (product.price || 0);
             return (
               <div
@@ -268,7 +271,7 @@ export default function CartPage() {
                 {(() => {
                   const step = product.orderStep || 1;
                   const lineErr = product.enforceOrderStep
-                    ? validateOrderQuantity(quantity, product.minOrderQty, product.orderStep, true)
+                    ? validateOrderQuantity(quantity, product.minOrderQty, product.orderStep, true, product.quantityPrecision, product.quantityAdjustmentMode, product.unit)
                     : null;
                   return (
                     <>
@@ -289,14 +292,24 @@ export default function CartPage() {
                             <Minus size={14} />
                           </button>
                           <input
-                            type="number"
-                            min={0.001}
-                            step={step}
-                            value={quantity}
+                            type="text"
+                            inputMode="decimal"
+                            value={quantityDrafts[product.id] ?? String(quantity)}
                             onChange={(e) => {
-                              const val = parseFloat(e.target.value);
-                              setQty(product.id, isNaN(val) ? 0 : val);
+                              const raw = e.target.value;
+                              setQuantityDrafts(prev => ({ ...prev, [product.id]: raw }));
+                              const val = Number(raw.replace(',', '.'));
+                              if (Number.isFinite(val) && val > 0) setQty(product.id, val);
                             }}
+                            onBlur={() => {
+                              const raw = quantityDrafts[product.id]; const requested = Number((raw ?? '').replace(',', '.'));
+                              if (Number.isFinite(requested) && requested > 0) {
+                                const normalized = normalizeOrderQuantity(requested, product.minOrderQty, product.orderStep, product.enforceOrderStep, product.quantityPrecision, product.quantityAdjustmentMode, product.unit);
+                                if (normalized.ok) setQty(product.id, normalized.normalizedQuantity, { requestedQuantity: requested, acknowledged: true, message: normalized.message || undefined });
+                              }
+                              setQuantityDrafts(prev => { const next = { ...prev }; delete next[product.id]; return next; });
+                            }}
+                            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (e.currentTarget as HTMLInputElement).blur(); } }}
                             className="w-16 text-center font-bold text-sm text-[#0b4f34] bg-transparent focus:outline-none"
                             aria-label={`Số lượng ${product.name}`}
                           />
@@ -324,6 +337,7 @@ export default function CartPage() {
                           <span>{lineErr}</span>
                         </div>
                       )}
+                      {quantityAdjustmentMessage && <p className="text-[11px] text-amber-800 bg-amber-50 rounded-lg p-2 mt-1">{quantityAdjustmentMessage}<span className="block mt-0.5">Nhập ban đầu: {formatQuantityVN(requestedQuantity ?? quantity)} · Số lượng đặt: {formatQuantityVN(quantity)} {product.unit}</span></p>}
                     </>
                   );
                 })()}

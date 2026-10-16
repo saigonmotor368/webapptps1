@@ -8,7 +8,7 @@ import ProductSearchBox, { type SearchProductItem } from '../components/ProductS
 import SmartOrderImportModal, { type PosSmartImportItem } from '../components/SmartOrderImportModal';
 import { getApiBase } from '../lib/apiBase';
 import { canForProfile } from '../lib/permissions';
-import { validateOrderQuantity, formatQuantityVN } from '../lib/quantityRules';
+import { normalizeOrderQuantity, validateOrderQuantity, formatQuantityVN, type QuantityAdjustmentMode } from '../lib/quantityRules';
 import {
   Search, Plus, Tag, Truck, RefreshCw, ShoppingCart, User, X, CheckCircle2, AlertTriangle, PlusCircle, ClipboardEdit,
   Calendar, Clock, MapPin, ScanLine
@@ -45,6 +45,11 @@ interface CartItem {
   minOrderQty?: number;
   orderStep?: number;
   enforceOrderStep?: boolean;
+  quantityPrecision?: number;
+  quantityAdjustmentMode?: QuantityAdjustmentMode;
+  requestedQuantity?: number;
+  adjustmentAcknowledged?: boolean;
+  quantityAdjustmentMessage?: string;
   sourceImportLineId?: string;
 }
 
@@ -154,6 +159,7 @@ export default function PosCreatePage() {
   const [loadingDebt, setLoadingDebt] = useState(false);
   const [loadingProcessOrder, setLoadingProcessOrder] = useState(false);
   const [showSmartImport, setShowSmartImport] = useState(false);
+  const [quantityDrafts, setQuantityDrafts] = useState<Record<string, string>>({});
 
   const [earliestDeliveryDate, setEarliestDeliveryDate] = useState<string>('');
 
@@ -191,7 +197,16 @@ export default function PosCreatePage() {
         if (existing >= 0) {
           cart[existing] = { ...cart[existing], quantity: cart[existing].quantity + item.quantity, sourceImportLineId: cart[existing].sourceImportLineId || item.importLineId };
         } else {
-          cart.push({ productId: item.productId, name: item.name, unit: item.unit, quantity: item.quantity, price: item.price, note, image_url: item.imageUrl || undefined, sourceImportLineId: item.importLineId });
+          cart.push({
+            productId: item.productId, name: item.name, unit: item.unit, quantity: item.quantity, price: item.price,
+            note, image_url: item.imageUrl || undefined, sourceImportLineId: item.importLineId,
+            minOrderQty: item.minOrderQty == null ? 1 : Number(item.minOrderQty),
+            orderStep: item.orderStep == null ? 1 : Number(item.orderStep),
+            enforceOrderStep: Boolean(item.enforceOrderStep),
+            quantityPrecision: item.quantityPrecision == null ? 3 : Number(item.quantityPrecision),
+            quantityAdjustmentMode: item.quantityAdjustmentMode || 'reject', packagingNote: item.packagingNote || null,
+            requestedQuantity: item.quantity, adjustmentAcknowledged: true,
+          });
         }
       }
       return { cart, sourceImportBatchId };
@@ -572,6 +587,10 @@ export default function PosCreatePage() {
         minOrderQty: p.minOrderQty != null ? Number(p.minOrderQty) : 1,
         orderStep: p.orderStep != null ? Number(p.orderStep) : 1,
         enforceOrderStep: Boolean(p.enforceOrderStep),
+        quantityPrecision: p.quantityPrecision ?? 3,
+        quantityAdjustmentMode: p.quantityAdjustmentMode || 'reject',
+        requestedQuantity: initialQty,
+        adjustmentAcknowledged: false,
       }],
     }));
   };
@@ -617,7 +636,13 @@ export default function PosCreatePage() {
     setCustomName(''); setCustomPrice(0); setCustomQty(1);
   };
 
-  const updateQty = (idx: number, qty: number) => updateActiveTab(t => ({ cart: t.cart.map((i, n) => n === idx ? { ...i, quantity: Math.max(0.001, qty) } : i) }));
+  const updateQty = (idx: number, qty: number) => updateActiveTab(t => ({ cart: t.cart.map((i, n) => n === idx ? { ...i, quantity: Math.max(0.001, qty), requestedQuantity: qty, adjustmentAcknowledged: false, quantityAdjustmentMessage: undefined } : i) }));
+  const normalizeQty = (idx: number) => updateActiveTab(t => ({ cart: t.cart.map((item, n) => {
+    if (n !== idx) return item;
+    const result = normalizeOrderQuantity(item.quantity, item.minOrderQty, item.orderStep, item.enforceOrderStep, item.quantityPrecision, item.quantityAdjustmentMode, item.unit);
+    if (!result.ok) return item;
+    return { ...item, requestedQuantity: result.requestedQuantity, quantity: result.normalizedQuantity, adjustmentAcknowledged: result.adjusted, quantityAdjustmentMessage: result.message || undefined };
+  }) }));
   const updatePrice = (idx: number, price: number) => updateActiveTab(t => ({ cart: t.cart.map((i, n) => n === idx ? { ...i, price: Math.max(0, price) } : i) }));
   const updateItemNote = (idx: number, note: string) => updateActiveTab(t => ({ cart: t.cart.map((i, n) => n === idx ? { ...i, note } : i) }));
   const updateItemChangeReason = (idx: number, changeReason: string) => updateActiveTab(t => ({ cart: t.cart.map((i, n) => n === idx ? { ...i, changeReason } : i) }));
@@ -718,7 +743,7 @@ export default function PosCreatePage() {
     // WP6: Kiểm tra lý do điều chỉnh cho các mặt hàng bị đổi SL hoặc thêm mới
     for (const it of cart) {
       if (it.enforceOrderStep) {
-        const err = validateOrderQuantity(it.quantity, it.minOrderQty, it.orderStep, true);
+        const err = validateOrderQuantity(it.quantity, it.minOrderQty, it.orderStep, true, it.quantityPrecision, it.quantityAdjustmentMode, it.unit);
         if (err) {
           alert(`❌ Mặt hàng "${it.name}" chưa đúng quy cách: ${err}`);
           return;
@@ -860,7 +885,7 @@ export default function PosCreatePage() {
 
     for (const item of cart) {
       if (item.enforceOrderStep) {
-        const err = validateOrderQuantity(item.quantity, item.minOrderQty, item.orderStep, true);
+        const err = validateOrderQuantity(item.quantity, item.minOrderQty, item.orderStep, true, item.quantityPrecision, item.quantityAdjustmentMode, item.unit);
         if (err) {
           alert(`❌ Sản phẩm "${item.name}" chưa đúng quy cách: ${err}`);
           return;
@@ -902,6 +927,8 @@ export default function PosCreatePage() {
             name: i.name,
             unit: i.unit || 'Kg',
             quantity: i.quantity,
+            requestedQuantity: i.requestedQuantity ?? i.quantity,
+            adjustmentAcknowledged: Boolean(i.adjustmentAcknowledged),
             price: i.price,
             note: i.note || null,
             sourceImportLineId: i.sourceImportLineId,
@@ -1363,19 +1390,30 @@ export default function PosCreatePage() {
                   </div>
                   {(() => {
                     const itemErr = item.enforceOrderStep
-                      ? validateOrderQuantity(item.quantity, item.minOrderQty, item.orderStep, true)
+                      ? validateOrderQuantity(item.quantity, item.minOrderQty, item.orderStep, true, item.quantityPrecision, item.quantityAdjustmentMode, item.unit)
                       : null;
-                    const step = item.enforceOrderStep && item.orderStep ? item.orderStep : 0.001;
+                    const quantityKey = item.itemId || item.productId || String(idx);
                     return (
                       <>
                         <div className="flex gap-2 items-center">
                           <div className="w-20">
                             <input
-                              type="number"
-                              min={item.enforceOrderStep && item.minOrderQty ? item.minOrderQty : 0.001}
-                              step={step}
-                              value={item.quantity}
-                              onChange={e => updateQty(idx, Number(e.target.value))}
+                              type="text"
+                              inputMode="decimal"
+                              value={quantityDrafts[quantityKey] ?? String(item.quantity)}
+                              onChange={e => {
+                                const raw = e.target.value;
+                                setQuantityDrafts(prev => ({ ...prev, [quantityKey]: raw }));
+                                const qty = Number(raw.replace(',', '.'));
+                                if (Number.isFinite(qty) && qty > 0) updateQty(idx, qty);
+                              }}
+                              onBlur={() => {
+                                const raw = quantityDrafts[quantityKey]; const qty = Number((raw ?? '').replace(',', '.'));
+                                if (Number.isFinite(qty) && qty > 0) updateQty(idx, qty);
+                                normalizeQty(idx);
+                                setQuantityDrafts(prev => { const next = { ...prev }; delete next[quantityKey]; return next; });
+                              }}
+                              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); normalizeQty(idx); setQuantityDrafts(prev => { const next = { ...prev }; delete next[quantityKey]; return next; }); } }}
                               title={`Số lượng (${item.unit})`}
                               className={`w-full border rounded-lg px-2 py-1 text-xs text-center focus:outline-none font-medium ${
                                 itemErr ? 'border-red-400 bg-red-50 text-red-700 font-bold' : 'border-slate-200'
@@ -1394,6 +1432,7 @@ export default function PosCreatePage() {
                             ⚠️ {itemErr}
                           </p>
                         )}
+                        {item.quantityAdjustmentMessage && <p className="text-[11px] text-amber-700 bg-amber-50 rounded px-2 py-1 mt-1">{item.quantityAdjustmentMessage}</p>}
                       </>
                     );
                   })()}

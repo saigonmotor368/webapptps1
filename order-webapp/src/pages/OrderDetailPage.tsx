@@ -419,7 +419,7 @@ export default function OrderDetailPage() {
 
             {Number(order.discount_amount) > 0 && (
               <div className="flex justify-between text-[#59665f]">
-                <span>Chiết khấu khách hàng VIP:</span>
+                <span>Chiết khấu đơn hàng:</span>
                 <span className="font-mono font-bold text-red-600">
                   -{money(order.discount_amount || 0)}
                 </span>

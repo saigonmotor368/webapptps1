@@ -10,6 +10,7 @@ interface ProductGridProps {
   onToggleFavorite: (productId: string) => void;
   onAddProduct: (product: Product, qty: number) => void;
   onUpdateQty: (productId: string, qty: number) => void;
+  onNormalizeQty: (productId: string) => void;
   onUpdateNote: (productId: string, note: string) => void;
   searchQuery?: string;
   loading?: boolean;
@@ -22,6 +23,7 @@ export default function ProductGrid({
   onToggleFavorite,
   onAddProduct,
   onUpdateQty,
+  onNormalizeQty,
   onUpdateNote,
   searchQuery = '',
   loading = false,
@@ -88,6 +90,7 @@ export default function ProductGrid({
             onToggleFavorite={onToggleFavorite}
             onAdd={onAddProduct}
             onUpdateQty={onUpdateQty}
+            onNormalizeQty={onNormalizeQty}
             onUpdateNote={onUpdateNote}
           />
         );

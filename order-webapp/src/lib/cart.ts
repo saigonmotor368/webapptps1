@@ -5,6 +5,9 @@ export interface CartLine {
   product: Product;
   quantity: number;
   note?: string;
+  requestedQuantity?: number;
+  adjustmentAcknowledged?: boolean;
+  quantityAdjustmentMessage?: string;
 }
 
 const CART_KEY = 'tps1_order_cart_v1';
@@ -25,7 +28,7 @@ export function useCart() {
     sessionStorage.setItem(CART_KEY, JSON.stringify(cart));
   }, [cart]);
 
-  const addItem = useCallback((product: Product, qty = 1, note = '') => {
+  const addItem = useCallback((product: Product, qty = 1, note = '', adjustment?: { requestedQuantity: number; acknowledged: boolean; message?: string }) => {
     setCart((prev) => {
       const existing = prev[product.id];
       return {
@@ -34,19 +37,22 @@ export function useCart() {
           product,
           quantity: (existing?.quantity || 0) + qty,
           note: note || existing?.note || '',
+          requestedQuantity: (existing?.requestedQuantity ?? existing?.quantity ?? 0) + (adjustment?.requestedQuantity ?? qty),
+          adjustmentAcknowledged: adjustment?.acknowledged ?? existing?.adjustmentAcknowledged ?? false,
+          quantityAdjustmentMessage: adjustment?.message || existing?.quantityAdjustmentMessage,
         },
       };
     });
   }, []);
 
-  const setQty = useCallback((productId: string, qty: number) => {
+  const setQty = useCallback((productId: string, qty: number, adjustment?: { requestedQuantity: number; acknowledged: boolean; message?: string }) => {
     setCart((prev) => {
       if (qty <= 0) {
         const next = { ...prev };
         delete next[productId];
         return next;
       }
-      return { ...prev, [productId]: { ...prev[productId], quantity: qty } };
+      return { ...prev, [productId]: { ...prev[productId], quantity: qty, requestedQuantity: adjustment?.requestedQuantity ?? qty, adjustmentAcknowledged: adjustment?.acknowledged ?? false, quantityAdjustmentMessage: adjustment?.message } };
     });
   }, []);
 

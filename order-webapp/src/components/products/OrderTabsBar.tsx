@@ -7,6 +7,9 @@ export interface OrderItem {
   note?: string;
   lineKey?: string;
   sourceImportLineId?: string;
+  requestedQuantity?: number;
+  adjustmentAcknowledged?: boolean;
+  quantityAdjustmentMessage?: string;
 }
 
 export interface OrderTab {

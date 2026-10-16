@@ -16,6 +16,7 @@ interface ProductCardProps {
   onToggleFavorite: (productId: string) => void;
   onAdd: (product: Product, qty: number) => void;
   onUpdateQty: (productId: string, qty: number) => void;
+  onNormalizeQty: (productId: string) => void;
   onUpdateNote: (productId: string, note: string) => void;
 }
 
@@ -27,15 +28,19 @@ export default function ProductCard({
   onToggleFavorite,
   onAdd,
   onUpdateQty,
+  onNormalizeQty,
   onUpdateNote,
 }: ProductCardProps) {
   const [showNoteInput, setShowNoteInput] = useState(Boolean(itemNote));
   const [tempNote, setTempNote] = useState(itemNote);
+  const [qtyDraft, setQtyDraft] = useState(String(quantityInCart || ''));
 
   useEffect(() => {
     setTempNote(itemNote);
     if (itemNote) setShowNoteInput(true);
   }, [itemNote]);
+
+  useEffect(() => { setQtyDraft(String(quantityInCart || '')); }, [quantityInCart]);
 
   const isInCart = quantityInCart > 0;
   const step = product.orderStep || 1;
@@ -221,14 +226,17 @@ export default function ProductCard({
               {/* Ô nhập số lượng (cho phép số thập phân như 1.5, 2.25) */}
               <div className="flex-1 flex items-center justify-center">
                 <input
-                  type="number"
-                  min={0}
-                  step={step}
-                  value={quantityInCart}
+                  type="text"
+                  inputMode="decimal"
+                  value={qtyDraft}
                   onChange={(e) => {
-                    const val = parseFloat(e.target.value);
-                    onUpdateQty(product.id, isNaN(val) ? 0 : Math.max(0, val));
+                    const raw = e.target.value;
+                    setQtyDraft(raw);
+                    const val = Number(raw.replace(',', '.'));
+                    if (Number.isFinite(val) && val > 0) onUpdateQty(product.id, val);
                   }}
+                  onBlur={() => { const val = Number(qtyDraft.replace(',', '.')); if (Number.isFinite(val) && val > 0) onUpdateQty(product.id, val); onNormalizeQty(product.id); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); onNormalizeQty(product.id); } }}
                   className="w-16 sm:w-20 text-center font-extrabold text-sm sm:text-base text-[#0b4f34] bg-transparent focus:outline-none"
                   aria-label={`Số lượng ${product.name}`}
                 />

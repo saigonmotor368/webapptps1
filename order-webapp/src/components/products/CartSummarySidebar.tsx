@@ -27,6 +27,7 @@ interface CartSummarySidebarProps {
   activeTab: OrderTab;
   onUpdateTab: (updater: (prev: OrderTab) => OrderTab) => void;
   onUpdateQty: (productId: string, qty: number) => void;
+  onNormalizeQty: (productId: string) => void;
   onRemoveItem: (productId: string) => void;
   onSubmitOrder: () => void;
   submitting: boolean;
@@ -38,12 +39,14 @@ export default function CartSummarySidebar({
   activeTab,
   onUpdateTab,
   onUpdateQty,
+  onNormalizeQty,
   onRemoveItem,
   onSubmitOrder,
   submitting,
   errorMessage,
 }: CartSummarySidebarProps) {
   const [isDeliveryExpanded, setIsDeliveryExpanded] = useState(true);
+  const [quantityDrafts, setQuantityDrafts] = useState<Record<string, string>>({});
 
   const totalItemsCount = activeTab.items.length;
   const totalQuantity = activeTab.items.reduce((sum, item) => sum + item.quantity, 0);
@@ -113,9 +116,10 @@ export default function CartSummarySidebar({
                       )}
                       {item.product.enforceOrderStep && (
                         <p className="text-[9px] text-[#59665f] mt-0.5">
-                          Tối thiểu: {formatQuantityVN(item.product.minOrderQty || 1)} · Bước: {formatQuantityVN(item.product.orderStep || 1)}
+                          {item.product.quantityAdjustmentMode === 'ceil_to_step' ? `Bán theo ${item.product.unit || 'đơn vị'} nguyên` : `Tối thiểu ${formatQuantityVN(item.product.minOrderQty || 1)}`} · Bước đặt {formatQuantityVN(item.product.orderStep || 1)} {item.product.unit}
                         </p>
                       )}
+                      {item.quantityAdjustmentMessage && <p className="text-[10px] text-amber-800 bg-amber-50 rounded px-1.5 py-1 mt-1">{item.quantityAdjustmentMessage}<span className="block mt-0.5">Nhập ban đầu: {formatQuantityVN(item.requestedQuantity ?? item.quantity)} · Số lượng đặt: {formatQuantityVN(item.quantity)} {item.product.unit}</span></p>}
                     </div>
 
                     <button
@@ -132,7 +136,7 @@ export default function CartSummarySidebar({
                   {(() => {
                     const step = item.product.orderStep || 1;
                     const lineErr = item.product.enforceOrderStep
-                      ? validateOrderQuantity(item.quantity, item.product.minOrderQty, item.product.orderStep, true)
+                      ? validateOrderQuantity(item.quantity, item.product.minOrderQty, item.product.orderStep, true, item.product.quantityPrecision, item.product.quantityAdjustmentMode, item.product.unit)
                       : null;
                     return (
                       <>
@@ -153,14 +157,23 @@ export default function CartSummarySidebar({
                               -
                             </button>
                             <input
-                              type="number"
-                              min={0.001}
-                              step={step}
-                              value={item.quantity}
+                              type="text"
+                              inputMode="decimal"
+                              value={quantityDrafts[lineKey] ?? String(item.quantity)}
                               onChange={(e) => {
-                                const v = parseFloat(e.target.value);
-                                onUpdateQty(lineKey, isNaN(v) ? 0 : v);
+                                const raw = e.target.value;
+                                setQuantityDrafts(prev => ({ ...prev, [lineKey]: raw }));
+                                const v = Number(raw.replace(',', '.'));
+                                if (Number.isFinite(v) && v > 0) onUpdateQty(lineKey, v);
                               }}
+                              onBlur={() => {
+                                const raw = quantityDrafts[lineKey]; const v = Number((raw ?? '').replace(',', '.'));
+                                if (Number.isFinite(v) && v > 0) onUpdateQty(lineKey, v);
+                                else setQuantityDrafts(prev => ({ ...prev, [lineKey]: String(item.quantity) }));
+                                onNormalizeQty(lineKey);
+                                setQuantityDrafts(prev => { const next = { ...prev }; delete next[lineKey]; return next; });
+                              }}
+                              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); onNormalizeQty(lineKey); setQuantityDrafts(prev => { const next = { ...prev }; delete next[lineKey]; return next; }); } }}
                               className="w-11 text-center font-bold text-xs bg-transparent focus:outline-none"
                             />
                             <button
@@ -374,7 +387,7 @@ export default function CartSummarySidebar({
             const hasInvalidItems = activeTab.items.some(
               (item) =>
                 item.product.enforceOrderStep &&
-                validateOrderQuantity(item.quantity, item.product.minOrderQty, item.product.orderStep, true) !== null
+                validateOrderQuantity(item.quantity, item.product.minOrderQty, item.product.orderStep, true, item.product.quantityPrecision, item.product.quantityAdjustmentMode, item.product.unit) !== null
             );
             return (
               <>

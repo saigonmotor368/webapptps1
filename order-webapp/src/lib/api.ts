@@ -133,7 +133,7 @@ export const api = {
   frequentItems: (signal?: AbortSignal) => request<{ ok: true; items: FrequentItem[] }>('/api/customer/frequent-items', { signal }),
 
   createOrder: (payload: {
-    items: { productId: string; name: string; quantity: number; note?: string; sourceImportLineId?: string }[];
+    items: { productId: string; name: string; quantity: number; requestedQuantity?: number; adjustmentAcknowledged?: boolean; note?: string; sourceImportLineId?: string }[];
     deliveryAlias?: string;
     deliveryAddress: string;
     deliveryName: string;
@@ -177,6 +177,16 @@ export const api = {
 
   pushUnsubscribe: (endpoint: string) =>
     request<{ ok: true }>('/api/customer/push-subscribe', { method: 'DELETE', body: { endpoint } }),
+
+  account: () => request<CustomerAccountResponse>('/api/customer/account'),
+  updateProfile: (body: { name: string; phone: string; email?: string; address?: string }) =>
+    request<{ ok: true; session: CustomerSession }>('/api/customer/profile', { method: 'PATCH', body }),
+  createAddress: (body: CustomerAddressInput) => request<{ ok: true; address: CustomerAddress }>('/api/customer/addresses', { method: 'POST', body }),
+  updateAddress: (id: string, body: CustomerAddressInput) => request<{ ok: true; address: CustomerAddress }>(`/api/customer/addresses/${id}`, { method: 'PATCH', body }),
+  deactivateAddress: (id: string) => request<{ ok: true }>(`/api/customer/addresses/${id}`, { method: 'DELETE' }),
+  setDefaultAddress: (id: string) => request<{ ok: true }>(`/api/customer/addresses/${id}/default`, { method: 'POST' }),
+  requestLegalProfileChange: (body: { company?: string; taxCode?: string; reason: string }) =>
+    request<{ ok: true }>('/api/customer/profile-change-requests', { method: 'POST', body }),
 };
 
 export interface Product {
@@ -195,6 +205,8 @@ export interface Product {
   minOrderQty?: number;
   orderStep?: number;
   enforceOrderStep?: boolean;
+  quantityPrecision?: number;
+  quantityAdjustmentMode?: 'reject' | 'ceil_to_step';
 }
 
 export type ProductCatalogTuple = [
@@ -210,7 +222,25 @@ export type ProductCatalogTuple = [
   minOrderQty?: number,
   orderStep?: number,
   enforceOrderStep?: boolean,
+  quantityPrecision?: number,
+  quantityAdjustmentMode?: 'reject' | 'ceil_to_step',
 ];
+
+export interface CustomerAddress {
+  id: string; label: string; address: string; contact_name: string; contact_phone: string;
+  is_default: boolean; is_active: boolean; created_at?: string; updated_at?: string;
+}
+
+export interface CustomerAddressInput { label: string; address: string; contactName: string; contactPhone: string; isDefault?: boolean }
+
+export interface CustomerAccountResponse {
+  ok: true;
+  profile: { id: string; code: string; contactName: string; company: string; phone: string; email?: string; address?: string; taxCode?: string; verificationStatus?: string; isActive?: boolean; priceBook: { id: string; name: string; version: number } | null };
+  orderSummary: { total: number; processing: number; shipping: number; completed: number };
+  recentOrders: Order[];
+  addresses: CustomerAddress[];
+  legalChangeRequests: { id: string; requested_company?: string; requested_tax_code?: string; reason: string; status: string; created_at: string }[];
+}
 
 export interface ProductCatalogResponse {
   ok: true;
@@ -275,8 +305,11 @@ export interface ExcelMatchResult {
   row: number;
   input: string;
   quantity: number;
+  requestedQuantity?: number;
+  adjustmentAcknowledged?: boolean;
+  adjustmentMessage?: string;
   note: string;
   status: 'matched' | 'ambiguous' | 'not_found' | 'invalid_quantity';
-  product?: { id: string; sku: string; name: string; unit: string; price: number; priceOnRequest: boolean };
-  suggestions?: { id: string; sku: string; name: string; unit: string; price: number; priceOnRequest: boolean; score: number }[];
+  product?: { id: string; sku: string; name: string; unit: string; price: number; priceOnRequest: boolean; minOrderQty?: number; orderStep?: number; enforceOrderStep?: boolean; quantityPrecision?: number; quantityAdjustmentMode?: 'reject' | 'ceil_to_step' };
+  suggestions?: { id: string; sku: string; name: string; unit: string; price: number; priceOnRequest: boolean; minOrderQty?: number; orderStep?: number; enforceOrderStep?: boolean; quantityPrecision?: number; quantityAdjustmentMode?: 'reject' | 'ceil_to_step'; score: number }[];
 }

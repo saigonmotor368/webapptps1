@@ -56,15 +56,19 @@ export default function ExcelOrderPage() {
     for (const r of results) {
       if (r.status === 'matched' && r.product) {
         addItem(
-          { id: r.product.id, sku: r.product.sku, name: r.product.name, category: null, unit: r.product.unit, imageUrl: null, price: r.product.price, priceOnRequest: r.product.priceOnRequest, available: true },
-          r.quantity
+          { id: r.product.id, sku: r.product.sku, name: r.product.name, category: null, unit: r.product.unit, imageUrl: null, price: r.product.price, priceOnRequest: r.product.priceOnRequest, available: true, minOrderQty: r.product.minOrderQty, orderStep: r.product.orderStep, enforceOrderStep: r.product.enforceOrderStep, quantityPrecision: r.product.quantityPrecision, quantityAdjustmentMode: r.product.quantityAdjustmentMode },
+          r.quantity,
+          r.note,
+          { requestedQuantity: r.requestedQuantity ?? r.quantity, acknowledged: true, message: r.adjustmentMessage }
         );
       } else if (r.status === 'ambiguous' && chosenSuggestion[r.row]) {
         const chosen = r.suggestions?.find((s) => s.id === chosenSuggestion[r.row]);
         if (chosen) {
           addItem(
-            { id: chosen.id, sku: chosen.sku, name: chosen.name, category: null, unit: chosen.unit, imageUrl: null, price: chosen.price, priceOnRequest: chosen.priceOnRequest, available: true },
-            r.quantity
+            { id: chosen.id, sku: chosen.sku, name: chosen.name, category: null, unit: chosen.unit, imageUrl: null, price: chosen.price, priceOnRequest: chosen.priceOnRequest, available: true, minOrderQty: chosen.minOrderQty, orderStep: chosen.orderStep, enforceOrderStep: chosen.enforceOrderStep, quantityPrecision: chosen.quantityPrecision, quantityAdjustmentMode: chosen.quantityAdjustmentMode },
+            r.quantity,
+            r.note,
+            { requestedQuantity: r.requestedQuantity ?? r.quantity, acknowledged: true, message: r.adjustmentMessage }
           );
         }
       }
@@ -129,6 +133,7 @@ export default function ExcelOrderPage() {
                     Dòng {r.row}: {r.input} <span className="text-[#59665f]">× {r.quantity}</span>
                   </p>
                   {r.note && <p className="text-xs text-[#59665f]/70 italic">{r.note}</p>}
+                  {r.adjustmentMessage && <p className="text-xs text-amber-800 bg-amber-50 rounded-lg p-2 mt-1">{r.adjustmentMessage} Nhập ban đầu: {r.requestedQuantity} · Số lượng đặt: {r.quantity} {r.product?.unit}</p>}
                 </div>
                 <StatusBadge status={r.status} />
               </div>

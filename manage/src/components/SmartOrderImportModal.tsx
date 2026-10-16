@@ -24,6 +24,12 @@ export type PosSmartImportItem = {
   note: string;
   price: number;
   imageUrl?: string | null;
+  minOrderQty?: number | null;
+  orderStep?: number | null;
+  enforceOrderStep?: boolean | null;
+  quantityPrecision?: number | null;
+  quantityAdjustmentMode?: 'reject' | 'ceil_to_step' | null;
+  packagingNote?: string | null;
 };
 type Line = {
   id: string;

@@ -124,8 +124,7 @@ export default function OrdersPage() {
         <div>
           <h1 className="text-xl sm:text-2xl font-black text-[#17231d]">Đơn hàng của tôi</h1>
           <p className="text-[#59665f] text-xs sm:text-sm mt-0.5">
-            {session?.name || session?.company} · Mã KH: <strong className="font-mono text-[#17231d]">{session?.code}</strong>{' '}
-            {session?.tier ? `· Hạng ${session.tier}` : ''}
+            {session?.name || session?.company} · Mã KH: <strong className="font-mono text-[#17231d]">{session?.code}</strong>
           </p>
         </div>
 

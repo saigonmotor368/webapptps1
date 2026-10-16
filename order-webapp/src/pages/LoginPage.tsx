@@ -243,7 +243,7 @@ export default function LoginPage() {
                     value={code}
                     onChange={(e) => setCode(e.target.value.toUpperCase())}
                     className="glass-input w-full rounded-2xl py-3.5 pl-12 pr-4 text-white font-medium tracking-wide placeholder:text-white/25 placeholder:font-normal focus:outline-none"
-                    placeholder="VD: VIP001, KH-TOYOTA..."
+                    placeholder="VD: TPS1-MEKONS, KH-TOYOTA..."
                     autoCapitalize="characters"
                     autoComplete="username"
                     required

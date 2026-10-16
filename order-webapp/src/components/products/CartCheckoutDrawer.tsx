@@ -29,6 +29,7 @@ interface CartCheckoutDrawerProps {
   activeTab: OrderTab;
   onUpdateTab: (updater: (prev: OrderTab) => OrderTab) => void;
   onUpdateQty: (productId: string, qty: number) => void;
+  onNormalizeQty: (productId: string) => void;
   onUpdateNote: (productId: string, note: string) => void;
   onRemoveItem: (productId: string) => void;
   onSubmitOrder: () => void;
@@ -43,6 +44,7 @@ export default function CartCheckoutDrawer({
   activeTab,
   onUpdateTab,
   onUpdateQty,
+  onNormalizeQty,
   onUpdateNote,
   onRemoveItem,
   onSubmitOrder,
@@ -50,6 +52,7 @@ export default function CartCheckoutDrawer({
   errorMessage,
 }: CartCheckoutDrawerProps) {
   const [isDeliveryExpanded, setIsDeliveryExpanded] = useState(true);
+  const [quantityDrafts, setQuantityDrafts] = useState<Record<string, string>>({});
 
   if (!isOpen) return null;
 
@@ -147,7 +150,7 @@ export default function CartCheckoutDrawer({
                     {(() => {
                       const step = item.product.orderStep || 1;
                       const lineErr = item.product.enforceOrderStep
-                        ? validateOrderQuantity(item.quantity, item.product.minOrderQty, item.product.orderStep, true)
+                        ? validateOrderQuantity(item.quantity, item.product.minOrderQty, item.product.orderStep, true, item.product.quantityPrecision, item.product.quantityAdjustmentMode, item.product.unit)
                         : null;
                       return (
                         <>
@@ -168,14 +171,23 @@ export default function CartCheckoutDrawer({
                                 -
                               </button>
                               <input
-                                type="number"
-                                min={0.001}
-                                step={step}
-                                value={item.quantity}
+                                type="text"
+                                inputMode="decimal"
+                                value={quantityDrafts[lineKey] ?? String(item.quantity)}
                                 onChange={(e) => {
-                                  const val = parseFloat(e.target.value);
-                                  onUpdateQty(lineKey, isNaN(val) ? 0 : val);
+                                  const raw = e.target.value;
+                                  setQuantityDrafts(prev => ({ ...prev, [lineKey]: raw }));
+                                  const val = Number(raw.replace(',', '.'));
+                                  if (Number.isFinite(val) && val > 0) onUpdateQty(lineKey, val);
                                 }}
+                                onBlur={() => {
+                                  const raw = quantityDrafts[lineKey]; const val = Number((raw ?? '').replace(',', '.'));
+                                  if (Number.isFinite(val) && val > 0) onUpdateQty(lineKey, val);
+                                  else setQuantityDrafts(prev => ({ ...prev, [lineKey]: String(item.quantity) }));
+                                  onNormalizeQty(lineKey);
+                                  setQuantityDrafts(prev => { const next = { ...prev }; delete next[lineKey]; return next; });
+                                }}
+                                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); onNormalizeQty(lineKey); setQuantityDrafts(prev => { const next = { ...prev }; delete next[lineKey]; return next; }); } }}
                                 className="w-14 text-center font-bold text-sm bg-transparent focus:outline-none"
                               />
                               <button
@@ -206,6 +218,7 @@ export default function CartCheckoutDrawer({
                               <span>{lineErr}</span>
                             </p>
                           )}
+                        {item.quantityAdjustmentMessage && <p className="text-[10px] text-amber-800 bg-amber-50 rounded px-2 py-1 mt-1">{item.quantityAdjustmentMessage}<span className="block mt-0.5">Nhập ban đầu: {formatQuantityVN(item.requestedQuantity ?? item.quantity)} · Số lượng đặt: {formatQuantityVN(item.quantity)} {item.product.unit}</span></p>}
                         </>
                       );
                     })()}
@@ -393,7 +406,7 @@ export default function CartCheckoutDrawer({
             const hasInvalidItems = activeTab.items.some(
               (item) =>
                 item.product.enforceOrderStep &&
-                validateOrderQuantity(item.quantity, item.product.minOrderQty, item.product.orderStep, true) !== null
+                validateOrderQuantity(item.quantity, item.product.minOrderQty, item.product.orderStep, true, item.product.quantityPrecision, item.product.quantityAdjustmentMode, item.product.unit) !== null
             );
             return (
               <>
