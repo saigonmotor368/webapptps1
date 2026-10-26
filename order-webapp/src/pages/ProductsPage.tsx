@@ -26,7 +26,8 @@ const STORAGE_KEY = 'tps1_b2b_pos_tabs_v1';
 const PRODUCT_CACHE_TTL_MS = 2 * 60 * 1000;
 const productSearchCache = new Map<string, { expiresAt: number; products: Product[] }>();
 const PRODUCT_CATALOG_TTL_MS = 5 * 60 * 1000;
-const productCatalogMemoryCache = new Map<string, { expiresAt: number; products: Product[] }>();
+const PRODUCT_CATALOG_STORAGE_PREFIX = 'tps1_product_catalog_v2_';
+const productCatalogMemoryCache = new Map<string, { expiresAt: number; version: string | null; products: Product[] }>();
 const productSearchKeys = new Map<string, string>();
 
 function normalizeSearch(value: string) {
@@ -287,56 +288,79 @@ export default function ProductsPage() {
 
   // Tải toàn bộ Catalog vào bộ nhớ ở nền để tìm kiếm tức thì cho các lần sau.
   // Trì hoãn nhẹ để request đầu tiên và khung thao tác của khách được ưu tiên.
+  //
+  // Bản đang giữ (bộ nhớ/sessionStorage) được hiện ngay, rồi hỏi API phiên bản
+  // danh mục (vài chục byte). Chỉ tải lại toàn bộ khi admin đã sửa sản phẩm,
+  // để mô tả/giá mới hiện sau khi làm mới trang mà không chờ hết 5 phút.
   useEffect(() => {
     const customerId = session?.id;
     if (!customerId) return;
     const now = Date.now();
-    const memory = productCatalogMemoryCache.get(customerId);
-    if (memory && memory.expiresAt > now) {
-      setCatalogProducts(memory.products);
-      setSearchResults(memory.products.slice(0, 48));
-      setCatalogLoading(false);
-      return;
-    }
-
-    const storageKey = `tps1_product_catalog_v1_${customerId}`;
+    const storageKey = `${PRODUCT_CATALOG_STORAGE_PREFIX}${customerId}`;
     try {
-      const saved = sessionStorage.getItem(storageKey);
-      if (saved) {
-        const parsed = JSON.parse(saved) as { expiresAt: number; catalog: ProductCatalogResponse };
-        if (parsed.expiresAt > now && Array.isArray(parsed.catalog?.items)) {
-          const products = decodeCatalog(parsed.catalog);
-          productCatalogMemoryCache.set(customerId, { expiresAt: parsed.expiresAt, products });
-          setCatalogProducts(products);
-          setSearchResults(products.slice(0, 48));
-          setCatalogLoading(false);
-          return;
+      // Bản v1 không có phiên bản nên không kiểm tra được; bỏ đi.
+      sessionStorage.removeItem(`tps1_product_catalog_v1_${customerId}`);
+    } catch {}
+
+    let cached = productCatalogMemoryCache.get(customerId);
+    if (!cached || cached.expiresAt <= now) {
+      cached = undefined;
+      try {
+        const saved = sessionStorage.getItem(storageKey);
+        if (saved) {
+          const parsed = JSON.parse(saved) as { expiresAt: number; version: string | null; catalog: ProductCatalogResponse };
+          if (parsed.expiresAt > now && Array.isArray(parsed.catalog?.items)) {
+            cached = { expiresAt: parsed.expiresAt, version: parsed.version ?? null, products: decodeCatalog(parsed.catalog) };
+            productCatalogMemoryCache.set(customerId, cached);
+          } else {
+            sessionStorage.removeItem(storageKey);
+          }
         }
+      } catch {
         sessionStorage.removeItem(storageKey);
       }
-    } catch {
-      sessionStorage.removeItem(storageKey);
     }
 
     const controller = new AbortController();
     catalogAbortRef.current = controller;
-    const timer = window.setTimeout(() => void api
+    const loadCatalog = () => api
       .productCatalog(controller.signal)
       .then((catalog) => {
         if (controller.signal.aborted) return;
         const products = decodeCatalog(catalog);
         const expiresAt = Date.now() + PRODUCT_CATALOG_TTL_MS;
-        productCatalogMemoryCache.set(customerId, { expiresAt, products });
+        const version = catalog.version ?? null;
+        productCatalogMemoryCache.set(customerId, { expiresAt, version, products });
         setCatalogProducts(products);
         setSearchResults((current) => (searchQuery.trim() ? current : products.slice(0, 48)));
         setCatalogLoading(false);
         try {
-          sessionStorage.setItem(storageKey, JSON.stringify({ expiresAt, catalog }));
+          sessionStorage.setItem(storageKey, JSON.stringify({ expiresAt, version, catalog }));
         } catch {}
-      })
-      .catch((error) => {
-        if (!controller.signal.aborted) console.warn('Không tải được catalog nền:', error);
-      })
+      });
+    const warn = (error: unknown) => {
+      if (!controller.signal.aborted) console.warn('Không tải được catalog nền:', error);
+    };
+
+    if (cached) {
+      const cachedVersion = cached.version;
+      setCatalogProducts(cached.products);
+      setSearchResults(cached.products.slice(0, 48));
+      setCatalogLoading(false);
+      if (cachedVersion) {
+        void api
+          .productCatalogVersion(controller.signal)
+          .then((res) => {
+            if (controller.signal.aborted || !res.version || res.version === cachedVersion) return;
+            return loadCatalog();
+          })
+          .catch(warn);
+      }
+      return () => controller.abort();
+    }
+
+    const timer = window.setTimeout(() => void loadCatalog()
+      .catch(warn)
       .finally(() => {
         if (!controller.signal.aborted) setCatalogLoading(false);
       }), 1200);

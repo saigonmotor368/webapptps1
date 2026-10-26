@@ -32,9 +32,9 @@ export class ApiError extends Error {
 
 async function request<T = any>(
   path: string,
-  opts: { method?: string; body?: unknown; auth?: boolean; formData?: FormData; signal?: AbortSignal } = {}
+  opts: { method?: string; body?: unknown; auth?: boolean; formData?: FormData; signal?: AbortSignal; cache?: RequestCache } = {}
 ): Promise<T> {
-  const { method = 'GET', body, auth = true, formData, signal } = opts;
+  const { method = 'GET', body, auth = true, formData, signal, cache } = opts;
   const headers: Record<string, string> = {};
   if (!formData) headers['Content-Type'] = 'application/json';
   if (auth) {
@@ -46,6 +46,7 @@ async function request<T = any>(
     headers,
     body: formData ? formData : body !== undefined ? JSON.stringify(body) : undefined,
     signal,
+    cache,
   });
   let data: any = null;
   try {
@@ -116,8 +117,12 @@ export const api = {
   },
   productCategories: () =>
     request<{ ok: true; categories: string[] }>('/api/customer/products?meta=1'),
+  // Không dùng HTTP cache của trình duyệt: ProductsPage tự cache theo phiên bản.
   productCatalog: (signal?: AbortSignal) =>
-    request<ProductCatalogResponse>('/api/customer/products?catalog=1', { signal }),
+    request<ProductCatalogResponse>('/api/customer/products?catalog=1', { signal, cache: 'no-cache' }),
+  // API cũ chưa có endpoint này sẽ trả danh sách phân trang, không có `version`.
+  productCatalogVersion: (signal?: AbortSignal) =>
+    request<{ ok: true; version?: string }>('/api/customer/products?catalogVersion=1', { signal, cache: 'no-store' }),
 
   orders: () => request<{ ok: true; orders: Order[] }>('/api/customer/orders'),
   orderConfig: () =>
@@ -248,6 +253,8 @@ export interface CustomerAccountResponse {
 export interface ProductCatalogResponse {
   ok: true;
   count: number;
+  /** Phiên bản danh mục trong DB; đổi khi sản phẩm được sửa ở bất kỳ đâu. */
+  version?: string;
   imageBaseUrl: string;
   items: ProductCatalogTuple[];
 }
