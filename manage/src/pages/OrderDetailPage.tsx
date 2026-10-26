@@ -44,6 +44,7 @@ interface LineItem {
   productId?: string;
   name: string;
   sku?: string;
+  shortDescription?: string | null;
   unit: string;
   quantity: number;
   base_unit_price: number;
@@ -299,6 +300,7 @@ export default function OrderDetailPage() {
         productId: item.product_id,
         name: item.name,
         sku: item.sku,
+        shortDescription: item.short_description_snapshot || null,
         unit: item.unit || 'Kg',
         quantity: Number(item.quantity),
         base_unit_price: Number(item.base_unit_price),
@@ -871,6 +873,7 @@ export default function OrderDetailPage() {
                               </span>
                             )}
                           </div>
+                          {line.shortDescription && <p className="text-xs text-slate-500 mt-1">{line.shortDescription}</p>}
                           <p className="text-xs text-slate-400">{line.sku ? `SKU: ${line.sku} · ` : ''}Giá gốc {money(line.base_unit_price)}</p>
                           {!isLocked && (
                             <input type="text" value={line.pricing_note || ''} onChange={e => updateLine(idx, 'pricing_note', e.target.value)}

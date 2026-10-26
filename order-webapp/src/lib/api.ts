@@ -207,6 +207,7 @@ export interface Product {
   enforceOrderStep?: boolean;
   quantityPrecision?: number;
   quantityAdjustmentMode?: 'reject' | 'ceil_to_step';
+  shortDescription?: string | null;
 }
 
 export type ProductCatalogTuple = [
@@ -224,6 +225,8 @@ export type ProductCatalogTuple = [
   enforceOrderStep?: boolean,
   quantityPrecision?: number,
   quantityAdjustmentMode?: 'reject' | 'ceil_to_step',
+  shortDescription?: string | null,
+  imageUrl?: string | null,
 ];
 
 export interface CustomerAddress {
@@ -277,6 +280,7 @@ export interface Order {
     productId: string;
     sku?: string;
     name: string;
+    shortDescription?: string | null;
     unit?: string;
     quantity: number;
     price: number;

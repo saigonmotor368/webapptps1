@@ -124,6 +124,7 @@ export default function CartCheckoutDrawer({
                             {item.product.priceOnRequest ? 'Liên hệ' : money(item.product.price)}
                           </strong>
                         </p>
+                        {item.product.shortDescription && <p className="text-[10px] text-[#59665f] mt-0.5 line-clamp-2">{item.product.shortDescription}</p>}
                         {item.product.packagingNote && (
                           <p className="text-[10px] text-[#0f7a4f] bg-[#0f7a4f]/8 px-1.5 py-0.2 rounded inline-block font-medium mt-0.5">
                             📦 {item.product.packagingNote}

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { Search, RefreshCw, AlertTriangle, ChevronLeft, ChevronRight, Plus, ChevronRight as Arrow, Upload, Download, X, CheckCircle2 } from 'lucide-react';
+import { Search, RefreshCw, AlertTriangle, ChevronLeft, ChevronRight, Plus, ChevronRight as Arrow, Upload, Download, X, CheckCircle2, Layers } from 'lucide-react';
 
 function money(v: number) { return new Intl.NumberFormat('vi-VN').format(Math.round(Number(v) || 0)) + 'đ'; }
 
@@ -21,11 +21,12 @@ interface Product {
   order_step?: number | null;
   enforce_order_step?: boolean | null;
   packaging_note?: string | null;
+  short_description?: string | null;
 }
 
-// Trang "Hàng hóa" (Giai đoạn B) — danh sách tìm/lọc; bấm vào 1 sản phẩm mở
-// trang chi tiết (/hang-hoa/:id) để sửa TOÀN BỘ thông tin (ảnh, mô tả, giá
-// theo hạng, tồn kho...). Chỉ admin/thu_mua sửa được, role khác chỉ xem.
+// Trang "Hàng hóa" — danh sách tìm/lọc; bấm vào 1 sản phẩm mở
+// trang chi tiết (/hang-hoa/:id) để sửa thông tin, ảnh, mô tả và tồn kho.
+// Giá được quản lý riêng tại phân hệ Thiết lập giá.
 export default function ProductsPage() {
   const { token } = useAuth();
   const navigate = useNavigate();
@@ -45,7 +46,6 @@ export default function ProductsPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [showImport, setShowImport] = useState(false);
-  const [showPricebookImport, setShowPricebookImport] = useState(false);
 
   useEffect(() => {
     if (!token) return;
@@ -103,9 +103,9 @@ export default function ProductsPage() {
                 className="px-3 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 flex items-center gap-1.5">
                 <Upload size={16} /> Nhập kho từ Excel
               </button>
-              <button onClick={() => setShowPricebookImport(true)}
+              <button onClick={() => navigate('/thiet-lap-gia')}
                 className="px-3 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 flex items-center gap-1.5">
-                <Upload size={16} /> Nhập bảng giá từ Excel
+                <Layers size={16} /> Thiết lập giá
               </button>
               <button onClick={() => navigate('/hang-hoa/moi')}
                 className="px-3 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 flex items-center gap-1.5">
@@ -128,14 +128,6 @@ export default function ProductsPage() {
         />
       )}
 
-      {showPricebookImport && (
-        <ImportPricebookModal
-          apiBase={apiBase}
-          token={token}
-          onClose={() => setShowPricebookImport(false)}
-          onDone={() => { setShowPricebookImport(false); fetchProducts(); }}
-        />
-      )}
 
       <div className="flex flex-wrap gap-2">
         <div className="relative flex-1 min-w-[220px]">
@@ -183,6 +175,7 @@ export default function ProductsPage() {
                 )}
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-slate-800 text-sm truncate">{p.name}</p>
+                  {p.short_description && <p className="text-[11px] text-slate-500 truncate" title={p.short_description}>{p.short_description}</p>}
                   <div className="flex items-center gap-2 flex-wrap text-xs text-slate-400 mt-0.5">
                     <span className="font-mono text-slate-500 font-semibold">{p.sku || '—'}</span>
                     <span>·</span>
@@ -347,146 +340,6 @@ function ImportInventoryModal({ apiBase, token, onClose, onDone }: { apiBase: st
             <button onClick={() => runImport(true)} disabled={applying || summary.ok === 0}
               className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50">
               {applying ? 'Đang ghi...' : `Xác nhận nhập ${summary.ok} mã`}
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-interface PricebookSummary {
-  total: number; ok: number; notFound: number; noChanges: number; tierPriceUpdates: number; productFieldUpdates: number;
-}
-interface PricebookProblem {
-  row: number; sku: string; status: string; productName?: string;
-}
-const PRICEBOOK_PROBLEM_LABELS: Record<string, string> = {
-  not_found: 'Không tìm thấy mã hàng',
-  no_changes: 'Không có cột nào có giá trị để cập nhật',
-};
-
-// Modal "Nhập bảng giá từ Excel" (mục 14.2-3 KE_HOACH) — khớp file thật
-// File bảng giá: Mã hàng + Giá vốn + Giá nhập cuối + N cột
-// giá theo hạng khách. Có tùy chọn "% từ giá vốn" thay vì gõ số tiền tay,
-// đúng yêu cầu gốc trong brief. Cùng nguyên tắc dry-run trước khi ghi thật.
-function ImportPricebookModal({ apiBase, token, onClose, onDone }: { apiBase: string; token: string | null; onClose: () => void; onDone: () => void }) {
-  const [file, setFile] = useState<File | null>(null);
-  const [mode, setMode] = useState<'amount' | 'markup_percent'>('amount');
-  const [checking, setChecking] = useState(false);
-  const [applying, setApplying] = useState(false);
-  const [summary, setSummary] = useState<PricebookSummary | null>(null);
-  const [problems, setProblems] = useState<PricebookProblem[]>([]);
-  const [error, setError] = useState('');
-
-  const runImport = async (apply: boolean) => {
-    if (!file) return;
-    setError('');
-    apply ? setApplying(true) : setChecking(true);
-    try {
-      const form = new FormData();
-      form.append('file', file);
-      form.append('mode', mode);
-      if (apply) form.append('apply', '1');
-      const res = await fetch(`${apiBase}/api/admin/products/import-pricebook`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: form,
-      });
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error);
-      setSummary(data.summary);
-      setProblems(data.problems || []);
-      if (apply) {
-        alert(`✅ Đã cập nhật bảng giá cho ${data.summary.ok} mã hàng`);
-        onDone();
-      }
-    } catch (err: any) {
-      setError(err.message || 'Không xử lý được file');
-    } finally {
-      apply ? setApplying(false) : setChecking(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl max-w-lg w-full p-5 space-y-4 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between">
-          <h2 className="font-bold text-slate-800">Nhập bảng giá từ Excel</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={20} /></button>
-        </div>
-
-        <a href={`${apiBase}/api/admin/products/import-pricebook`} target="_blank" rel="noreferrer"
-          onClick={(e) => {
-            e.preventDefault();
-            fetch(`${apiBase}/api/admin/products/import-pricebook`, { headers: { Authorization: `Bearer ${token}` } })
-              .then((r) => r.blob())
-              .then((blob) => {
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url; a.download = 'mau-bang-gia.xlsx'; a.click();
-                URL.revokeObjectURL(url);
-              });
-          }}
-          className="flex items-center gap-1.5 text-sm text-green-600 hover:text-green-700 font-medium">
-          <Download size={14} /> Tải file mẫu
-        </a>
-
-        <div>
-          <p className="text-xs font-semibold text-slate-500 mb-1.5">Cách tính giá từ các cột "Giá VIPx"</p>
-          <div className="flex gap-2">
-            <label className={`flex-1 flex items-center gap-2 px-3 py-2 border rounded-lg text-sm cursor-pointer ${mode === 'amount' ? 'border-green-500 bg-green-50 text-green-700' : 'border-slate-200 text-slate-600'}`}>
-              <input type="radio" checked={mode === 'amount'} onChange={() => setMode('amount')} /> Số tiền trực tiếp
-            </label>
-            <label className={`flex-1 flex items-center gap-2 px-3 py-2 border rounded-lg text-sm cursor-pointer ${mode === 'markup_percent' ? 'border-green-500 bg-green-50 text-green-700' : 'border-slate-200 text-slate-600'}`}>
-              <input type="radio" checked={mode === 'markup_percent'} onChange={() => setMode('markup_percent')} /> % cộng thêm từ giá vốn
-            </label>
-          </div>
-        </div>
-
-        <div>
-          <input type="file" accept=".xlsx,.xls" onChange={(e) => { setFile(e.target.files?.[0] || null); setSummary(null); setProblems([]); setError(''); }}
-            className="text-sm w-full border border-slate-200 rounded-lg px-3 py-2" />
-        </div>
-
-        {error && <div className="p-2.5 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">{error}</div>}
-
-        {summary && (
-          <div className="space-y-2">
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <div className="p-2.5 bg-green-50 rounded-lg text-green-700 flex items-center gap-2">
-                <CheckCircle2 size={16} /> Hợp lệ: <b>{summary.ok}</b>
-              </div>
-              <div className="p-2.5 bg-slate-50 rounded-lg text-slate-600">Tổng dòng: <b>{summary.total}</b></div>
-              <div className="p-2.5 bg-slate-50 rounded-lg text-slate-600">Giá theo hạng sẽ cập nhật: <b>{summary.tierPriceUpdates}</b></div>
-              <div className="p-2.5 bg-slate-50 rounded-lg text-slate-600">Giá vốn/nhập cuối sẽ cập nhật: <b>{summary.productFieldUpdates}</b></div>
-              {summary.notFound > 0 && <div className="p-2.5 bg-red-50 rounded-lg text-red-600">Không tìm thấy: <b>{summary.notFound}</b></div>}
-              {summary.noChanges > 0 && <div className="p-2.5 bg-amber-50 rounded-lg text-amber-700">Không có gì thay đổi: <b>{summary.noChanges}</b></div>}
-            </div>
-            {problems.length > 0 && (
-              <div className="border border-slate-200 rounded-lg max-h-40 overflow-y-auto text-xs">
-                {problems.map((p, i) => (
-                  <div key={i} className="px-2.5 py-1.5 border-b border-slate-50 last:border-0 flex justify-between gap-2">
-                    <span>Dòng {p.row}: {p.sku} {p.productName ? `(${p.productName})` : ''}</span>
-                    <span className="text-slate-400 shrink-0">{PRICEBOOK_PROBLEM_LABELS[p.status] || p.status}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        <div className="flex justify-end gap-2 pt-2 border-t border-slate-50">
-          <button onClick={onClose} className="px-4 py-2 border border-slate-200 rounded-lg text-sm text-slate-600 hover:bg-slate-50">Đóng</button>
-          {!summary ? (
-            <button onClick={() => runImport(false)} disabled={!file || checking}
-              className="px-4 py-2 bg-slate-800 text-white rounded-lg text-sm font-medium hover:bg-slate-900 disabled:opacity-50">
-              {checking ? 'Đang kiểm tra...' : 'Xem trước'}
-            </button>
-          ) : (
-            <button onClick={() => runImport(true)} disabled={applying || summary.ok === 0}
-              className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50">
-              {applying ? 'Đang ghi...' : `Xác nhận cập nhật ${summary.ok} mã`}
             </button>
           )}
         </div>

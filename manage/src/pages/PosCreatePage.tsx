@@ -42,6 +42,7 @@ interface CartItem {
   stockQty?: number | null;
   lowStock?: boolean;
   packagingNote?: string | null;
+  shortDescription?: string | null;
   minOrderQty?: number;
   orderStep?: number;
   enforceOrderStep?: boolean;
@@ -584,6 +585,7 @@ export default function PosCreatePage() {
         stockQty: p.stockQty ?? null,
         lowStock: !!p.lowStock,
         packagingNote: p.packagingNote || null,
+        shortDescription: p.shortDescription || null,
         minOrderQty: p.minOrderQty != null ? Number(p.minOrderQty) : 1,
         orderStep: p.orderStep != null ? Number(p.orderStep) : 1,
         enforceOrderStep: Boolean(p.enforceOrderStep),
@@ -1372,6 +1374,7 @@ export default function PosCreatePage() {
                             📦 {item.packagingNote}
                           </span>
                         )}
+                        {item.shortDescription && <span className="text-[11px] text-slate-500 line-clamp-1">{item.shortDescription}</span>}
                         {item.enforceOrderStep && (
                           <span className="text-[10px] text-slate-500 font-medium">
                             Min: {formatQuantityVN(item.minOrderQty || 1)} · Bước: {formatQuantityVN(item.orderStep || 1)} {item.unit}

@@ -251,6 +251,10 @@ export default function CartPage() {
                       </strong>
                     </p>
 
+                    {product.shortDescription && (
+                      <p className="text-[11px] text-[#59665f] mt-1 line-clamp-2">{product.shortDescription}</p>
+                    )}
+
                     {/* Quy cách đóng gói */}
                     {product.packagingNote && (
                       <div className="text-[11px] text-[#0f7a4f] bg-[#0f7a4f]/8 px-1.5 py-0.5 rounded inline-block font-medium mt-1">

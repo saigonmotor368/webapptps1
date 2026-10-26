@@ -22,6 +22,7 @@ export interface SearchProductItem {
   lowStock?: boolean;
   categoryLabel?: string;
   packagingNote?: string | null;
+  shortDescription?: string | null;
   minOrderQty?: number;
   orderStep?: number;
   enforceOrderStep?: boolean;
@@ -204,6 +205,7 @@ export default function ProductSearchBox({
             lowStock: !!p.lowStock,
             categoryLabel: p.category || '',
             packagingNote: p.packaging_note || null,
+            shortDescription: p.short_description || null,
             minOrderQty: p.min_order_qty == null ? 1 : Number(p.min_order_qty),
             orderStep: p.order_step == null ? 1 : Number(p.order_step),
             enforceOrderStep: Boolean(p.enforce_order_step),
@@ -392,6 +394,7 @@ export default function ProductSearchBox({
                         <span className="text-slate-400">· ĐVT: {product.unit}</span>
                       </div>
 
+                      {product.shortDescription && <p className="text-[11px] text-slate-500 mt-1 line-clamp-2">{product.shortDescription}</p>}
                       {product.packagingNote && (
                         <p className="text-[11px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded inline-block font-medium mt-1 border border-emerald-200">
                           📦 {product.packagingNote}

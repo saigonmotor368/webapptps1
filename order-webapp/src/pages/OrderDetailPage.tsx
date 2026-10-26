@@ -359,6 +359,7 @@ export default function OrderDetailPage() {
                       <p className="font-bold text-xs sm:text-sm text-[#17231d] leading-snug">
                         {item.name}
                       </p>
+                      {item.shortDescription && <p className="text-xs text-slate-500 mt-1">{item.shortDescription}</p>}
                       <div className="flex items-center gap-2 text-[11px] text-[#59665f] mt-0.5">
                         {item.sku && <span className="font-mono font-semibold">SKU: {item.sku}</span>}
                         <span>·</span>

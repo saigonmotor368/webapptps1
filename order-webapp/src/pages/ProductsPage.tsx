@@ -42,8 +42,8 @@ function normalizeSearch(value: string) {
 
 function decodeCatalog(catalog: ProductCatalogResponse): Product[] {
   const imageBaseUrl = catalog.imageBaseUrl.replace(/\/$/, '');
-  return catalog.items.map(([id, sku, name, category, unit, price, priceOnRequest, hasImage, packagingNote, minOrderQty, orderStep, enforceOrderStep, quantityPrecision, quantityAdjustmentMode]) => {
-    const imageUrl = hasImage && imageBaseUrl ? `${imageBaseUrl}/${id}.webp` : null;
+  return catalog.items.map(([id, sku, name, category, unit, price, priceOnRequest, hasImage, packagingNote, minOrderQty, orderStep, enforceOrderStep, quantityPrecision, quantityAdjustmentMode, shortDescription, sourceImageUrl]) => {
+    const imageUrl = sourceImageUrl || (hasImage && imageBaseUrl ? `${imageBaseUrl}/${id}.webp` : null);
     const product: Product = {
       id,
       sku,
@@ -56,6 +56,7 @@ function decodeCatalog(catalog: ProductCatalogResponse): Product[] {
       thumbUrl: imageUrl,
       available: true,
       packagingNote: packagingNote || null,
+      shortDescription: shortDescription || null,
       minOrderQty: minOrderQty != null ? Number(minOrderQty) : 1,
       orderStep: orderStep != null ? Number(orderStep) : 1,
       enforceOrderStep: Boolean(enforceOrderStep),

@@ -22,6 +22,7 @@ const TEXT_FIELDS: { key: string; label: string }[] = [
   { key: 'unit', label: 'Đơn vị tính' },
   { key: 'supplier', label: 'Nhà cung cấp' },
   { key: 'origin', label: 'Xuất xứ' },
+  { key: 'short_description', label: 'Mô tả ngắn hiển thị cho khách' },
   { key: 'tags', label: 'Thẻ (phân cách bởi dấu phẩy)' },
 ];
 
@@ -32,7 +33,6 @@ export default function ProductDetailPage() {
   const { token } = useAuth();
   const apiBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 
-  const [tiers, setTiers] = useState<{ code: string; name: string }[]>([]);
   const [product, setProduct] = useState<Record<string, any>>({
     name: '',
     unit: 'Kg',
@@ -43,7 +43,6 @@ export default function ProductDetailPage() {
     quantity_adjustment_mode: 'reject',
     packaging_note: '',
   });
-  const [tierDrafts, setTierDrafts] = useState<Record<string, string>>({});
   const [history, setHistory] = useState<any[]>([]);
   const [canEdit, setCanEdit] = useState(false);
   const [loading, setLoading] = useState(!isNew);
@@ -61,16 +60,6 @@ export default function ProductDetailPage() {
     setToast({ type, message });
     setTimeout(() => setToast(null), 3500);
   };
-
-  const fetchMeta = useCallback(async () => {
-    try {
-      const res = await fetch(`${apiBase}/api/admin/products?meta=1`, { headers: { Authorization: `Bearer ${token}` } });
-      const data = await res.json();
-      if (data.ok) setTiers(data.tiers || []);
-    } catch (e) {
-      console.warn('Lỗi fetch meta tiers:', e);
-    }
-  }, [apiBase, token]);
 
   const fetchProduct = useCallback(async () => {
     if (isNew || !id) return;
@@ -94,18 +83,11 @@ export default function ProductDetailPage() {
       });
       setCanEdit(!!data.canEdit);
       setHistory(data.inventoryHistory || []);
-      const drafts: Record<string, string> = {};
-      const tierCodes = tiers.length ? tiers : [{ code: 'VIP0' }, { code: 'VIP1' }, { code: 'VIP2' }, { code: 'VIP3' }];
-      for (const t of tierCodes) {
-        drafts[t.code] = data.product.tierPrices?.[t.code] != null ? String(data.product.tierPrices[t.code]) : '';
-      }
-      setTierDrafts(drafts);
     } finally {
       setLoading(false);
     }
-  }, [apiBase, token, id, isNew, navigate, tiers]);
+  }, [apiBase, token, id, isNew, navigate]);
 
-  useEffect(() => { fetchMeta(); }, [fetchMeta]);
   useEffect(() => { fetchProduct(); }, [id]);
   useEffect(() => {
     if (isNew) setCanEdit(true);
@@ -139,6 +121,9 @@ export default function ProductDetailPage() {
     // Quy cách đóng gói tối đa 120 ký tự
     if (product.packaging_note && String(product.packaging_note).trim().length > 120) {
       errs.packaging_note = 'Mô tả quy cách đóng gói tối đa 120 ký tự';
+    }
+    if (product.short_description && String(product.short_description).trim().length > 200) {
+      errs.short_description = 'Mô tả ngắn tối đa 200 ký tự';
     }
 
     // Số lượng tối thiểu
@@ -182,6 +167,7 @@ export default function ProductDetailPage() {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           name: product.name,
+          shortDescription: product.short_description?.trim() || null,
           category: product.category,
           unit: product.unit || 'Kg',
           priceRetail: product.price_retail,
@@ -206,6 +192,7 @@ export default function ProductDetailPage() {
             enforce_order_step: !!product.enforce_order_step,
             quantity_precision: Number(product.quantity_precision) || 0,
             quantity_adjustment_mode: product.quantity_adjustment_mode || 'reject',
+            short_description: product.short_description?.trim() || null,
           },
         }),
       });
@@ -225,6 +212,7 @@ export default function ProductDetailPage() {
     try {
       const fields: Record<string, any> = {};
       for (const f of TEXT_FIELDS) fields[f.key] = product[f.key] ?? null;
+      fields.short_description = product.short_description?.trim() || null;
       fields.description = product.description ?? null;
       fields.notes = product.notes ?? null;
       fields.cost_price = Number(product.cost_price) || 0;
@@ -243,16 +231,10 @@ export default function ProductDetailPage() {
       fields.quantity_precision = Number(product.quantity_precision) || 0;
       fields.quantity_adjustment_mode = product.quantity_adjustment_mode || 'reject';
 
-      const tierPrices: Record<string, number | null> = {};
-      for (const t of tiers) {
-        const raw = tierDrafts[t.code];
-        tierPrices[t.code] = raw === '' || raw === undefined ? null : Number(raw);
-      }
-
       const res = await fetch(`${apiBase}/api/admin/products`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ productId: id, fields, tierPrices }),
+        body: JSON.stringify({ productId: id, fields }),
       });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || 'Không lưu được thay đổi');
@@ -508,7 +490,7 @@ export default function ProductDetailPage() {
         <div className="space-y-4">
           <h2 className="font-bold text-slate-800 text-base border-b border-slate-100 pb-2">Thông tin cơ bản</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {TEXT_FIELDS.map((f) => (
+            {TEXT_FIELDS.filter((f) => f.key !== 'short_description').map((f) => (
               <div key={f.key} className={f.key === 'name' ? 'md:col-span-2' : ''}>
                 <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide block mb-1">
                   {f.label}
@@ -525,6 +507,23 @@ export default function ProductDetailPage() {
                 {errors[f.key] && <p className="text-rose-600 text-xs mt-1">{errors[f.key]}</p>}
               </div>
             ))}
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide block mb-1">Mô tả ngắn hiển thị cho khách</label>
+            <textarea
+              disabled={!canEdit}
+              value={product.short_description || ''}
+              onChange={(e) => setField('short_description', e.target.value)}
+              rows={2}
+              maxLength={200}
+              placeholder="VD: Trứng gà CP, cỡ số 3; trọng lượng tham khảo khoảng 50g/quả."
+              className={`w-full border rounded-xl px-3 py-2 text-sm disabled:bg-slate-50 focus:outline-none focus:ring-2 ${errors.short_description ? 'border-rose-400 focus:ring-rose-200' : 'border-slate-200 focus:ring-emerald-500/20'}`}
+            />
+            <div className="flex justify-between mt-1 text-[11px]">
+              {errors.short_description ? <span className="text-rose-600">{errors.short_description}</span> : <span className="text-slate-400">Mô tả ngắn gọn, có căn cứ; tối đa 200 ký tự.</span>}
+              <span className="text-slate-400">{String(product.short_description || '').length}/200</span>
+            </div>
           </div>
 
           <div>
@@ -638,30 +637,6 @@ export default function ProductDetailPage() {
               />
               <span className="font-medium">Có theo dõi tồn kho</span>
             </label>
-          </div>
-        </div>
-
-        {/* Giá theo hạng */}
-        <div className="pt-2 border-t border-slate-100">
-          <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide block mb-2">
-            Giá theo hạng khách hàng (VIP)
-          </label>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-            {tiers.map((t) => (
-              <div key={t.code} className="p-2 border border-slate-200/80 rounded-xl bg-slate-50/50">
-                <label className="text-[11px] font-semibold text-slate-600 block mb-1">{t.name}</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="1000"
-                  disabled={!canEdit}
-                  value={tierDrafts[t.code] ?? ''}
-                  onChange={(e) => setTierDrafts((d) => ({ ...d, [t.code]: e.target.value }))}
-                  placeholder={money(Number(product.price_retail) || 0)}
-                  className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm font-mono bg-white disabled:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-                />
-              </div>
-            ))}
           </div>
         </div>
 
