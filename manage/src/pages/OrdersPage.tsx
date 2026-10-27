@@ -406,10 +406,18 @@ export default function OrdersPage({ view = 'orders' }: { view?: 'orders' | 'inv
                   const quantity = Number(item.quantity ?? item.qty) || 0;
                   const unitPrice = Number(item.final_unit_price ?? item.unit_price ?? item.price) || 0;
                   const lineTotal = Number(item.final_line_total ?? item.line_total) || quantity * unitPrice;
+                  const itemNote = [
+                    item.packaging_note || item.packagingNote,
+                    item.customer_note || item.customerNote,
+                    item.pricing_note || item.pricingNote,
+                  ].map((value) => String(value || '').trim()).filter(Boolean).filter((value, noteIndex, notes) => notes.indexOf(value) === noteIndex).join(' · ');
                   return (
                     <tr key={item.id || `${item.product_id}-${index}`} className="hover:bg-slate-50/70">
                       <td className="px-4 py-2.5 font-mono text-[11px] text-blue-700">{item.product_sku || item.sku || item.product_code || '—'}</td>
-                      <td className="px-4 py-2.5 font-semibold text-slate-800">{item.product_name || item.name || item.title || 'Sản phẩm'}</td>
+                      <td className="px-4 py-2.5 font-semibold text-slate-800">
+                        <div>{item.product_name || item.name || item.title || 'Sản phẩm'}</div>
+                        {itemNote && <div className="mt-0.5 max-w-[420px] whitespace-normal text-[10px] font-normal leading-4 text-amber-700">Ghi chú: {itemNote}</div>}
+                      </td>
                       <td className="px-4 py-2.5 text-right font-semibold text-slate-700">{quantity.toLocaleString('vi-VN')} {item.unit || item.unit_snapshot || ''}</td>
                       <td className="px-4 py-2.5 text-right text-slate-600">{money(unitPrice)}</td>
                       <td className="px-4 py-2.5 text-right font-extrabold text-slate-900">{money(lineTotal)}</td>
