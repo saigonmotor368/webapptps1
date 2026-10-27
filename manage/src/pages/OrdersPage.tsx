@@ -7,7 +7,7 @@ import {
   RefreshCw, Search, Eye, Printer, Clock, Truck,
   ShoppingBag, ClipboardEdit, FileSpreadsheet, AlertCircle,
   ChevronLeft, ChevronRight, Trash2, Plus, Package, CheckSquare,
-  Square, ChevronDown, Download, X, Calendar, MapPin, MessageSquare
+  Square, ChevronDown, Download, X, Calendar, MapPin
 } from 'lucide-react';
 
 const PAGE_SIZE = 50;
@@ -79,10 +79,6 @@ function dt(val: string | null | undefined) {
   return new Date(val).toLocaleString('vi-VN', {
     hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric'
   });
-}
-
-function getOrderNote(order: Record<string, any>) {
-  return String(order.note || order.customer_note || '').trim();
 }
 
 export default function OrdersPage({ view = 'orders' }: { view?: 'orders' | 'invoices' }) {
@@ -410,6 +406,8 @@ export default function OrdersPage({ view = 'orders' }: { view?: 'orders' | 'inv
                     item.packaging_note || item.packagingNote,
                     item.customer_note || item.customerNote,
                     item.pricing_note || item.pricingNote,
+                    item.item_note || item.itemNote,
+                    item.note,
                   ].map((value) => String(value || '').trim()).filter(Boolean).filter((value, noteIndex, notes) => notes.indexOf(value) === noteIndex).join(' · ');
                   return (
                     <tr key={item.id || `${item.product_id}-${index}`} className="hover:bg-slate-50/70">
@@ -919,8 +917,6 @@ export default function OrdersPage({ view = 'orders' }: { view?: 'orders' | 'inv
               const isSelected = selectedOrderIds.has(order.id);
               const hasReq = changeRequestsMap.has(order.id);
               const req = changeRequestsMap.get(order.id);
-              const orderNote = getOrderNote(order);
-
               return (
                 <article
                   key={order.id}
@@ -1012,13 +1008,6 @@ export default function OrdersPage({ view = 'orders' }: { view?: 'orders' | 'inv
                     {view === 'orders' && (
                       <p className={`text-[11px] mt-1 font-semibold ${order.processing_by_name ? 'text-blue-700' : 'text-amber-700'}`}>
                         {order.processing_by_name ? `Đang xử lý: ${order.processing_by_name}` : 'Chưa có nhân viên tiếp nhận'}
-                      </p>
-                    )}
-                    {orderNote && (
-                      <p className="mt-1 flex items-start gap-1.5 text-[11px] text-amber-800" title={orderNote}>
-                        <MessageSquare size={13} className="mt-0.5 shrink-0 text-amber-600" />
-                        <span className="font-semibold shrink-0">Ghi chú:</span>
-                        <span className="line-clamp-2 min-w-0">{orderNote}</span>
                       </p>
                     )}
                   </div>
@@ -1157,8 +1146,6 @@ export default function OrdersPage({ view = 'orders' }: { view?: 'orders' | 'inv
                   const isSelected = selectedOrderIds.has(order.id);
                   const hasReq = changeRequestsMap.has(order.id);
                   const req = changeRequestsMap.get(order.id);
-                  const orderNote = getOrderNote(order);
-
                   return (
                     <Fragment key={order.id}>
                     <tr
@@ -1219,13 +1206,6 @@ export default function OrdersPage({ view = 'orders' }: { view?: 'orders' | 'inv
                         {view === 'orders' && (
                           <p className={`text-[11px] mt-0.5 font-semibold ${order.processing_by_name ? 'text-blue-700' : 'text-amber-700'}`}>
                             {order.processing_by_name ? `Đang xử lý: ${order.processing_by_name}` : 'Chưa tiếp nhận'}
-                          </p>
-                        )}
-                        {orderNote && (
-                          <p className="mt-1 flex items-start gap-1.5 text-[11px] text-amber-800 max-w-[320px]" title={orderNote}>
-                            <MessageSquare size={13} className="mt-0.5 shrink-0 text-amber-600" />
-                            <span className="font-semibold shrink-0">Ghi chú:</span>
-                            <span className="line-clamp-2 min-w-0">{orderNote}</span>
                           </p>
                         )}
                       </td>
