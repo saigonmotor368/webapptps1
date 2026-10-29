@@ -15,6 +15,19 @@
   --font-brand: "Be Vietnam Pro", "Segoe UI", Arial, sans-serif;
 }
 
+/* Giữ biểu tượng điều hướng nhìn thấy được cả khi thanh bên thu gọn.
+   Một số stylesheet toàn cục/tiện ích trình duyệt có thể làm SVG inline biến mất. */
+.sidebar-nav-icon > svg {
+  display: block !important;
+  width: 20px !important;
+  height: 20px !important;
+  flex: none;
+  color: currentColor !important;
+  stroke: currentColor !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
 /* ══════════════════════════════════════════════════════════════════ */
 /* CHUẨN HÓA THANH CUỘN (SCROLLBAR) HIỆN ĐẠI, LOẠI BỎ THANH XÁM NGUYÊN BẢN */
 /* ══════════════════════════════════════════════════════════════════ */

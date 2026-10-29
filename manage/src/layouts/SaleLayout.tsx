@@ -125,8 +125,7 @@ export default function SaleLayout() {
                       }`}
                     >
                       <span
-                        aria-hidden="true"
-                        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors ${
+                        className={`sidebar-nav-icon flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors ${
                           isActivePath(item.path) ? 'bg-green-200/70' : 'group-hover:bg-green-100'
                         }`}
                       >
