@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { can } from '../lib/permissions';
 import {
@@ -150,25 +150,34 @@ export default function CongNoPage() {
     fetchSummary();
   }, [fetchSummary]);
 
+  const detailAbort = useRef<AbortController | null>(null);
+  useEffect(() => () => detailAbort.current?.abort(), []);
+
   // 2. Fetch Customer Detail
   const fetchCustomerDetail = useCallback(async (customerId: string) => {
+    detailAbort.current?.abort();
+    const controller = new AbortController();
+    detailAbort.current = controller;
     setDetailLoading(true);
     setDetailError(null);
     try {
       const res = await fetch(`${API_BASE}/api/admin/receivables/customers/${customerId}`, {
         headers: { Authorization: `Bearer ${token}` },
+        signal: controller.signal,
       });
       const data = await res.json();
+      if (controller.signal.aborted) return;
       if (!res.ok || !data.ok) {
         throw new Error(data.error || 'Không tải được sổ nợ khách hàng');
       }
       setCustomerDetail(data);
     } catch (err: any) {
+      if (controller.signal.aborted) return;
       console.error('Lỗi tải chi tiết khách hàng:', err);
       setCustomerDetail(null);
       setDetailError(err?.message || 'Không tải được sổ nợ khách hàng');
     } finally {
-      setDetailLoading(false);
+      if (!controller.signal.aborted) setDetailLoading(false);
     }
   }, [token]);
 
