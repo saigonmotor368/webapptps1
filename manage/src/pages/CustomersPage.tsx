@@ -119,6 +119,13 @@ export default function CustomersPage() {
     }, 4000);
   };
 
+  useEffect(() => {
+    let active = true;
+    supabase.from('admin_profiles').select('id, name, role').eq('is_active', true).order('name')
+      .then(({ data }) => { if (active && data) setStaffList(data); });
+    return () => { active = false; };
+  }, [user?.id]);
+
   const fetchCustomers = useCallback(async () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -129,16 +136,6 @@ export default function CustomersPage() {
     setLoading(true);
     setLoadError(null);
     try {
-      // 1. Tải danh sách nhân viên nếu chưa có
-      if (staffList.length === 0) {
-        const { data: staff } = await supabase
-          .from('admin_profiles')
-          .select('id, name, role')
-          .eq('is_active', true)
-          .order('name');
-        if (staff) setStaffList(staff);
-      }
-
       // 2. Query URL params (gửi page và limit xuống server)
       const params = new URLSearchParams({
         page: String(page),
@@ -154,6 +151,7 @@ export default function CustomersPage() {
         signal: controller.signal,
       });
       const json = await res.json();
+      if (controller.signal.aborted) return;
       if (!res.ok || !json.ok) {
         throw new Error(json.error || 'Không tải được danh sách khách hàng');
       }
@@ -170,9 +168,10 @@ export default function CustomersPage() {
       console.error('Lỗi tải khách hàng:', err);
       setLoadError(err?.message || 'Không thể tải danh sách khách hàng');
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) setLoading(false);
     }
-  }, [apiBase, authFetch, filterMissing, onlyPending, onlyUnassigned, page, searchTerm, selectedGroup, staffList.length]);
+  }, [apiBase, authFetch, filterMissing, onlyPending, onlyUnassigned, page, searchTerm, selectedGroup]);
+  useEffect(() => () => abortControllerRef.current?.abort(), []);
 
   useEffect(() => {
     fetchCustomers();

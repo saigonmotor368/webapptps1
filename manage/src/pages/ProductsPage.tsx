@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Search, RefreshCw, AlertTriangle, ChevronLeft, ChevronRight, Plus, ChevronRight as Arrow, Upload, Download, X, CheckCircle2, Layers } from 'lucide-react';
@@ -36,6 +36,13 @@ export default function ProductsPage() {
   const [canEdit, setCanEdit] = useState(false);
 
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const requestRef = useRef<AbortController | null>(null);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search.trim()), 250);
+    return () => clearTimeout(timer);
+  }, [search]);
+  useEffect(() => () => requestRef.current?.abort(), []);
   const [category, setCategory] = useState('');
   const [lowStockOnly, setLowStockOnly] = useState(false);
   const [page, setPage] = useState(0);
@@ -56,17 +63,22 @@ export default function ProductsPage() {
 
   const fetchProducts = useCallback(async () => {
     if (!token) return;
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
     setLoading(true);
     setLoadError('');
     try {
       const params = new URLSearchParams({ page: String(page) });
-      if (search.trim()) params.set('search', search.trim());
+      if (debouncedSearch) params.set('search', debouncedSearch);
       if (category) params.set('category', category);
       if (lowStockOnly) params.set('lowStockOnly', '1');
       const res = await fetch(`${apiBase}/api/admin/products?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
+        signal: controller.signal,
       });
       const data = await res.json();
+      if (controller.signal.aborted) return;
       if (res.status === 401 || res.status === 403) {
         setProducts([]);
         setTotal(0);
@@ -79,11 +91,11 @@ export default function ProductsPage() {
         setLoadError(data.error || 'Không tải được danh sách hàng hóa.');
       }
     } catch {
-      setLoadError('Không kết nối được máy chủ dữ liệu hàng hóa.');
+      if (!controller.signal.aborted) setLoadError('Không kết nối được máy chủ dữ liệu hàng hóa.');
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) setLoading(false);
     }
-  }, [token, apiBase, page, search, category, lowStockOnly]);
+  }, [token, apiBase, page, debouncedSearch, category, lowStockOnly]);
 
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
 
