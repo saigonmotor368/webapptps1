@@ -131,7 +131,7 @@ export default function SaleLayout() {
                       >
                         {item.icon}
                       </span>
-                      <span className={`min-w-[150px] whitespace-nowrap transition-opacity ${sidebarExpanded ? 'opacity-100' : 'opacity-0'}`}>{item.label}</span>
+                      <span className={`min-w-[150px] whitespace-nowrap ${sidebarExpanded ? 'block' : 'hidden'}`}>{item.label}</span>
                     </Link>
                   ))}
                 </div>
@@ -142,10 +142,10 @@ export default function SaleLayout() {
 
         <div className={`border-t border-slate-100 transition-[padding] duration-200 ${sidebarExpanded ? 'p-4' : 'p-2.5'}`}>
           <div className={`flex items-center bg-slate-50 rounded-xl mb-2 ${sidebarExpanded ? 'gap-3 px-4 py-3' : 'justify-center p-2'}`}>
-            <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-sm uppercase">
+            <div className="w-8 h-8 shrink-0 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-sm uppercase">
               {user?.name?.substring(0, 2) || 'AD'}
             </div>
-            <div className={`min-w-[150px] flex-1 truncate transition-opacity ${sidebarExpanded ? 'opacity-100' : 'opacity-0'}`}>
+            <div className={`min-w-[150px] flex-1 truncate ${sidebarExpanded ? 'block' : 'hidden'}`}>
               <p className="text-sm font-semibold truncate">{user?.name || 'User'}</p>
             </div>
           </div>
@@ -155,7 +155,7 @@ export default function SaleLayout() {
             className={`flex w-full items-center rounded-xl py-2.5 text-red-600 hover:bg-red-50 font-medium transition-all ${sidebarExpanded ? 'gap-3 px-4' : 'justify-center px-0'}`}
           >
             <LogOut size={18} className="shrink-0" />
-            <span className={`min-w-[150px] whitespace-nowrap transition-opacity ${sidebarExpanded ? 'opacity-100' : 'opacity-0'}`}>Đăng xuất</span>
+            <span className={`min-w-[150px] whitespace-nowrap ${sidebarExpanded ? 'block' : 'hidden'}`}>Đăng xuất</span>
           </button>
         </div>
       </aside>
