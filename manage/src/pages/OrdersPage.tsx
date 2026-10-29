@@ -81,6 +81,8 @@ function dt(val: string | null | undefined) {
   });
 }
 
+const orderListCache = new Map<string, { at: number; data: any }>();
+
 export default function OrdersPage({ view = 'orders' }: { view?: 'orders' | 'invoices' }) {
   const { user, token } = useAuth();
   const navigate = useNavigate();
@@ -103,7 +105,36 @@ export default function OrdersPage({ view = 'orders' }: { view?: 'orders' | 'inv
   const [page, setPage] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
-  const [stats, setStats] = useState({ pending: 0, preparing: 0, shipping: 0, completed: 0, revenue: 0 });
+  const [stats, setStats] = useState({ pending: '—' as number | string, preparing: '—' as number | string, shipping: '—' as number | string });
+  const listAbort = useRef<AbortController | null>(null);
+  const listSequence = useRef(0);
+  const [auxVersion, setAuxVersion] = useState(0);
+  const previousFilters = useRef('');
+
+  useEffect(() => {
+    if (!token) return;
+    const controller = new AbortController();
+    const headers = { Authorization: `Bearer ${token}` };
+    setStats({ pending: '—', preparing: '—', shipping: '—' });
+    const params = new URLSearchParams();
+    if (dateFrom) params.set('dateFrom', dateFrom);
+    if (dateTo) params.set('dateTo', dateTo);
+    fetch(`${apiBase}/api/admin/orders/stats?${params}`, { headers, signal: controller.signal })
+      .then(r => r.ok ? r.json() : null).then(d => { if (d?.ok && !controller.signal.aborted) setStats(d.stats); }).catch(() => {});
+    return () => controller.abort();
+  }, [token, apiBase, dateFrom, dateTo, auxVersion]);
+
+  useEffect(() => {
+    if (!token) return;
+    const controller = new AbortController();
+    fetch(`${apiBase}/api/admin/order-change-requests?status=open`, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal })
+      .then(r => r.ok ? r.json() : null).then(d => {
+        if (!d?.ok || !Array.isArray(d.requests) || controller.signal.aborted) return;
+        setChangeRequests(d.requests);
+        setChangeRequestsMap(new Map(d.requests.map((r: any) => [r.orderId, r])));
+      }).catch(() => {});
+    return () => controller.abort();
+  }, [token, apiBase, auxVersion]);
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
   const [previewLoadingId, setPreviewLoadingId] = useState<string | null>(null);
   const [orderPreviewCache, setOrderPreviewCache] = useState<Record<string, any>>({});
@@ -134,56 +165,55 @@ export default function OrdersPage({ view = 'orders' }: { view?: 'orders' | 'inv
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const fetchOrders = useCallback(async () => {
+  const fetchOrders = useCallback(async (force: unknown = true) => {
+    const filters = JSON.stringify([dateFrom, dateTo, filterStatus, filterPayment, debouncedSearch, view]);
+    if (previousFilters.current !== filters) {
+      previousFilters.current = filters;
+      setOrders([]);
+      setTotalCount(0);
+      if (page !== 0) { setPage(0); return; }
+    }
+    if (force !== false) { orderListCache.clear(); setAuxVersion(v => v + 1); setOrderPreviewCache({}); }
+    listAbort.current?.abort();
+    const controller = new AbortController();
+    listAbort.current = controller;
+    const sequence = ++listSequence.current;
     setLoading(true);
     try {
-      if (token) {
-        fetch(`${apiBase}/api/admin/order-change-requests?status=open`, {
-          headers: { Authorization: `Bearer ${token}` },
-        })
-          .then((r) => r.ok ? r.json() : null)
-          .then((d) => {
-            if (d && d.ok && Array.isArray(d.requests)) {
-              setChangeRequests(d.requests);
-              const m = new Map<string, any>();
-              d.requests.forEach((r: any) => m.set(r.orderId, r));
-              setChangeRequestsMap(m);
-            }
-          })
-          .catch((e) => console.warn('Lỗi tải order-change-requests:', e));
-      }
-
       if (!token) throw new Error('Phiên đăng nhập đã hết hạn');
-      const params = new URLSearchParams({ mode: view, page: String(page), pageSize: String(PAGE_SIZE), compact: '1' });
+      const params = new URLSearchParams({ mode: view, page: String(page), pageSize: String(PAGE_SIZE), compact: '1', includeStats: '0' });
       if (dateFrom) params.set('dateFrom', dateFrom);
       if (dateTo) params.set('dateTo', dateTo);
       if (view === 'orders' && filterStatus) params.set('status', filterStatus);
       if (filterPayment) params.set('paymentStatus', filterPayment);
       if (debouncedSearch) params.set('search', debouncedSearch);
+      const cacheKey = `${token}:${apiBase}:${params}`;
+      const cached = orderListCache.get(cacheKey);
+      if (force === false && cached && Date.now() - cached.at < 15000) {
+        setOrders(cached.data.orders);
+        setTotalCount(cached.data.totalCount);
+      }
       const response = await fetch(`${apiBase}/api/admin/orders?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
+        signal: controller.signal,
       });
       const result = await response.json().catch(() => null);
+      if (sequence !== listSequence.current || controller.signal.aborted) return;
       if (!response.ok || !result?.ok) throw new Error(result?.error || 'Không tải được danh sách đơn hàng');
       const loadedOrders = Array.isArray(result.orders) ? result.orders : [];
       setTotalCount(Number(result.totalCount ?? result.count) || 0);
       setOrders(loadedOrders);
-      setStats(result.stats || loadedOrders.reduce((acc: any, order: any) => {
-        if (order.status === 'pending') acc.pending += 1;
-        if (order.status === 'preparing') acc.preparing += 1;
-        if (order.status === 'shipping') acc.shipping += 1;
-        if (order.status === 'completed') acc.completed += 1;
-        if (order.status !== 'canceled' && order.status !== 'merged') acc.revenue += Number(order.grand_total) || 0;
-        return acc;
-      }, { pending: 0, preparing: 0, shipping: 0, completed: 0, revenue: 0 }));
+      orderListCache.set(cacheKey, { at: Date.now(), data: { orders: loadedOrders, totalCount: Number(result.totalCount ?? result.count) || 0 } });
+      while (orderListCache.size > 10) orderListCache.delete(orderListCache.keys().next().value!);
     } catch (err) {
-      console.error('Lỗi tải đơn hàng:', err);
+      if (!controller.signal.aborted) console.error('Lỗi tải đơn hàng:', err);
     } finally {
-      setLoading(false);
+      if (sequence === listSequence.current) setLoading(false);
     }
   }, [dateFrom, dateTo, filterStatus, filterPayment, debouncedSearch, page, token, apiBase, view]);
 
-  useEffect(() => { fetchOrders(); }, [fetchOrders]);
+  useEffect(() => { fetchOrders(false); }, [fetchOrders]);
+  useEffect(() => () => { listAbort.current?.abort(); }, []);
 
   const filteredOrders = useMemo(() => {
     return orders.filter(order => !filterHasRequest || changeRequestsMap.has(order.id));
@@ -901,7 +931,7 @@ export default function OrdersPage({ view = 'orders' }: { view?: 'orders' | 'inv
 
         {/* MOBILE / TABLET CARDS (Dành cho màn hình nhỏ, giao diện như App KiotViet) */}
         <div className="lg:hidden divide-y divide-slate-100">
-          {loading ? (
+          {loading && orders.length === 0 ? (
             <div className="py-16 text-center space-y-2">
               <RefreshCw className="animate-spin text-emerald-600 mx-auto" size={26} />
               <p className="text-sm font-medium text-slate-500">Đang tải danh sách đơn hàng...</p>
@@ -1127,7 +1157,7 @@ export default function OrdersPage({ view = 'orders' }: { view?: 'orders' | 'inv
                 <td className="px-4 py-2.5 text-right font-extrabold text-emerald-700">{money(totals.grand)}</td>
                 <td colSpan={3}></td>
               </tr>
-              {loading ? (
+              {loading && orders.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="text-center py-16 text-slate-500">
                     <RefreshCw className="animate-spin text-emerald-600 mx-auto mb-2" size={24} />
