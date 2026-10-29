@@ -51,40 +51,45 @@ export default function DashboardPage() {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
-      const { count: todayOrders } = await supabase
-        .from('orders')
-        .select('*', { count: 'exact', head: true })
-        .gte('created_at', today.toISOString());
-
-      const { count: pendingOrders } = await supabase
-        .from('orders')
-        .select('*', { count: 'exact', head: true })
-        .in('status', ['draft', 'pending']);
-
-      const { count: completedOrders } = await supabase
-        .from('orders')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'completed');
-
-      const { count: customers } = await supabase
-        .from('vip_accounts')
-        .select('*', { count: 'exact', head: true })
-        .eq('is_active', true);
+      // Các thẻ thống kê và đơn gần đây không phụ thuộc nhau; tải cùng lúc
+      // để thời gian mở Dashboard không cộng dồn thành 5 lượt mạng/database.
+      const [todayResult, pendingResult, completedResult, customerResult, recentResult] = await Promise.all([
+        supabase
+          .from('orders')
+          .select('id', { count: 'exact', head: true })
+          .gte('created_at', today.toISOString()),
+        supabase
+          .from('orders')
+          .select('id', { count: 'exact', head: true })
+          .in('status', ['draft', 'pending']),
+        supabase
+          .from('orders')
+          .select('id', { count: 'exact', head: true })
+          .eq('status', 'completed'),
+        supabase
+          .from('vip_accounts')
+          .select('id', { count: 'exact', head: true })
+          .eq('is_active', true),
+        supabase
+          .from('orders')
+          .select('id, order_code, customer_name, customer_company, status, grand_total, created_at')
+          .order('created_at', { ascending: false })
+          .limit(5),
+      ]);
+      if (todayResult.error) throw todayResult.error;
+      if (pendingResult.error) throw pendingResult.error;
+      if (completedResult.error) throw completedResult.error;
+      if (customerResult.error) throw customerResult.error;
+      if (recentResult.error) throw recentResult.error;
 
       setStats({
-        todayOrders: todayOrders || 0,
-        pendingOrders: pendingOrders || 0,
-        completedOrders: completedOrders || 0,
-        customers: customers || 0,
+        todayOrders: todayResult.count || 0,
+        pendingOrders: pendingResult.count || 0,
+        completedOrders: completedResult.count || 0,
+        customers: customerResult.count || 0,
       });
 
-      const { data: recent } = await supabase
-        .from('orders')
-        .select('id, order_code, customer_name, customer_company, status, grand_total, created_at')
-        .order('created_at', { ascending: false })
-        .limit(5);
-
-      if (recent) setRecentOrders(recent);
+      setRecentOrders(recentResult.data || []);
     } catch (err) {
       console.error('Error fetching stats:', err);
     }

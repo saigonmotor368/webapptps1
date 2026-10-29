@@ -120,11 +120,18 @@ export default function SaleLayout() {
                       key={item.path}
                       to={item.path}
                       title={!sidebarExpanded ? item.label : undefined}
-                      className={`flex items-center rounded-xl py-2.5 text-sm font-semibold transition-all ${sidebarExpanded ? 'gap-3 px-4' : 'justify-center px-0'} ${
+                      className={`group flex items-center rounded-xl py-2.5 text-sm font-semibold transition-all ${sidebarExpanded ? 'gap-3 px-4' : 'justify-center px-0'} ${
                         isActivePath(item.path) ? 'bg-green-100 text-green-800 shadow-sm' : 'text-slate-600 hover:bg-green-50 hover:text-green-700'
                       }`}
                     >
-                      <span className="shrink-0">{item.icon}</span>
+                      <span
+                        aria-hidden="true"
+                        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors ${
+                          isActivePath(item.path) ? 'bg-green-200/70' : 'group-hover:bg-green-100'
+                        }`}
+                      >
+                        {item.icon}
+                      </span>
                       <span className={`min-w-[150px] whitespace-nowrap transition-opacity ${sidebarExpanded ? 'opacity-100' : 'opacity-0'}`}>{item.label}</span>
                     </Link>
                   ))}

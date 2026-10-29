@@ -154,7 +154,7 @@ export default function OrdersPage({ view = 'orders' }: { view?: 'orders' | 'inv
       }
 
       if (!token) throw new Error('Phiên đăng nhập đã hết hạn');
-      const params = new URLSearchParams({ mode: view, page: String(page), pageSize: String(PAGE_SIZE) });
+      const params = new URLSearchParams({ mode: view, page: String(page), pageSize: String(PAGE_SIZE), compact: '1' });
       if (dateFrom) params.set('dateFrom', dateFrom);
       if (dateTo) params.set('dateTo', dateTo);
       if (view === 'orders' && filterStatus) params.set('status', filterStatus);

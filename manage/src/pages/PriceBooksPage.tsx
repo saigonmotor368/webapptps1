@@ -64,6 +64,8 @@ export default function PriceBooksPage() {
   // Filters & Search
   const [skuSearch, setSkuSearch] = useState('');
   const [nameSearch, setNameSearch] = useState('');
+  const [debouncedSkuSearch, setDebouncedSkuSearch] = useState('');
+  const [debouncedNameSearch, setDebouncedNameSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [customerGroupFilter, setCustomerGroupFilter] = useState('');
   const [customerFilter, setCustomerFilter] = useState('');
@@ -82,6 +84,9 @@ export default function PriceBooksPage() {
   const [pendingBookIds, setPendingBookIds] = useState<string[]>([]);
   const [priceBookSearch, setPriceBookSearch] = useState('');
   const columnPickerRef = useRef<HTMLDivElement>(null);
+  const skipInitialBookSelectionFetch = useRef(false);
+  const latestGridRequest = useRef(0);
+  const inFlightGridRequest = useRef<{ key: string; promise: Promise<void> } | null>(null);
 
   // Inline cell editing: { productId, priceBookId, currentVal, isNew }
   const [editingCell, setEditingCell] = useState<{ productId: string; priceBookId: string; value: string } | null>(null);
@@ -121,6 +126,15 @@ export default function PriceBooksPage() {
     return () => clearTimeout(timer);
   }, [toast]);
 
+  // Chỉ truy vấn sau khi người dùng ngừng gõ; tránh gọi API cho từng ký tự.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSkuSearch(skuSearch.trim());
+      setDebouncedNameSearch(nameSearch.trim());
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [skuSearch, nameSearch]);
+
   // Click outside to close column picker
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -143,6 +157,16 @@ export default function PriceBooksPage() {
 
   // ─── FETCH GRID DATA ───────────────────────────────────────────────
   const fetchGridData = useCallback(async () => {
+    const requestKey = JSON.stringify([
+      page, pageSize, debouncedSkuSearch, debouncedNameSearch, categoryFilter,
+      customerGroupFilter, customerFilter, selectedBookIds,
+    ]);
+    // React StrictMode có thể chạy effect khởi tạo hai lần ở môi trường dev.
+    // Dùng chung request đang chạy để không gọi API lặp cho cùng bộ lọc.
+    if (inFlightGridRequest.current?.key === requestKey) return inFlightGridRequest.current.promise;
+    const requestId = ++latestGridRequest.current;
+
+    const request = (async () => {
     setLoadingGrid(true);
     try {
       const params = new URLSearchParams({
@@ -150,8 +174,8 @@ export default function PriceBooksPage() {
         pageSize: String(pageSize),
       });
 
-      if (skuSearch.trim()) params.set('sku', skuSearch.trim());
-      if (nameSearch.trim()) params.set('name', nameSearch.trim());
+      if (debouncedSkuSearch) params.set('sku', debouncedSkuSearch);
+      if (debouncedNameSearch) params.set('name', debouncedNameSearch);
       if (categoryFilter) params.set('category', categoryFilter);
       if (customerGroupFilter) params.set('groupName', customerGroupFilter);
       if (customerFilter) params.set('customerId', customerFilter);
@@ -164,6 +188,7 @@ export default function PriceBooksPage() {
       });
       const data = await res.json();
 
+      if (requestId !== latestGridRequest.current) return;
       if (data.ok && data.data) {
         setGridProducts(data.data.products || []);
         setDisplayedBooks(data.data.priceBooks || []);
@@ -175,22 +200,33 @@ export default function PriceBooksPage() {
 
         // Initialize selectedBookIds if empty
         if (selectedBookIds.length === 0 && data.data.priceBooks?.length > 0) {
+          // Phản hồi đầu đã chứa đúng cột mặc định, không cần tải lại cùng dữ liệu.
+          skipInitialBookSelectionFetch.current = true;
           setSelectedBookIds(data.data.priceBooks.map((b: any) => b.id));
         }
       } else {
         setToast({ type: 'error', text: data.error || 'Không tải được dữ liệu bảng giá' });
       }
     } catch {
-      setToast({ type: 'error', text: 'Lỗi kết nối máy chủ thiết lập giá' });
+      if (requestId === latestGridRequest.current) {
+        setToast({ type: 'error', text: 'Lỗi kết nối máy chủ thiết lập giá' });
+      }
     } finally {
-      setLoadingGrid(false);
+      if (requestId === latestGridRequest.current) setLoadingGrid(false);
+      if (inFlightGridRequest.current?.key === requestKey) inFlightGridRequest.current = null;
     }
-  }, [apiBase, token, page, pageSize, skuSearch, nameSearch, categoryFilter, customerGroupFilter, customerFilter, selectedBookIds]);
+    })();
+    inFlightGridRequest.current = { key: requestKey, promise: request };
+    return request;
+  }, [apiBase, token, page, pageSize, debouncedSkuSearch, debouncedNameSearch, categoryFilter, customerGroupFilter, customerFilter, selectedBookIds]);
 
   useEffect(() => {
-    if (activeTab === 'grid') {
-      fetchGridData();
+    if (activeTab !== 'grid') return;
+    if (skipInitialBookSelectionFetch.current) {
+      skipInitialBookSelectionFetch.current = false;
+      return;
     }
+    fetchGridData();
   }, [activeTab, fetchGridData]);
 
   // ─── INLINE PRICE UPDATE & ADD ─────────────────────────────────────
