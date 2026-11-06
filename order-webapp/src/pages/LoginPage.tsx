@@ -34,10 +34,10 @@ export default function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
 
-  // Tự động đồng bộ việc lưu/xoá mã khách hàng khi toggle rememberCode
+  // Ghi nhớ giá trị đăng nhập khách đã chọn.
   useEffect(() => {
     if (rememberCode && code.trim()) {
-      localStorage.setItem(REMEMBER_KEY, code.trim().toUpperCase());
+      localStorage.setItem(REMEMBER_KEY, code.trim());
     } else if (!rememberCode) {
       localStorage.removeItem(REMEMBER_KEY);
     }
@@ -46,10 +46,10 @@ export default function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    const cleanCode = code.trim().toUpperCase();
+    const cleanCode = code.trim();
 
     if (!cleanCode) {
-      setError('Vui lòng nhập mã khách hàng');
+      setError('Vui lòng nhập SĐT hoặc tên đăng nhập');
       return;
     }
     if (!password) {
@@ -223,16 +223,16 @@ export default function LoginPage() {
                 </span>
               </div>
               <p className="text-sm text-emerald-100/65 mt-1.5 leading-relaxed">
-                Nhập mã khách hàng và mật khẩu được TPS1 cấp để truy cập bảng giá &amp; đặt hàng.
+                Đăng nhập để đặt hàng và theo dõi đơn.
               </p>
             </div>
 
             {/* Form */}
             <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-5">
-              {/* Field: Mã khách hàng */}
+              {/* Field: SĐT, tên đăng nhập hoặc mã khách hàng cũ */}
               <div>
                 <label className="block text-xs font-semibold text-emerald-100/75 uppercase tracking-wider mb-2">
-                  Mã khách hàng
+                  SĐT hoặc tên đăng nhập
                 </label>
                 <div className="relative">
                   <div className="absolute left-4 top-1/2 -translate-y-1/2 text-emerald-400/70">
@@ -241,10 +241,10 @@ export default function LoginPage() {
                   <input
                     type="text"
                     value={code}
-                    onChange={(e) => setCode(e.target.value.toUpperCase())}
+                    onChange={(e) => setCode(e.target.value)}
                     className="glass-input w-full rounded-2xl py-3.5 pl-12 pr-4 text-white font-medium tracking-wide placeholder:text-white/25 placeholder:font-normal focus:outline-none"
-                    placeholder="VD: TPS1-MEKONS, KH-TOYOTA..."
-                    autoCapitalize="characters"
+                    placeholder="SĐT hoặc tên đăng nhập"
+                    autoCapitalize="none"
                     autoComplete="username"
                     required
                   />
@@ -308,7 +308,7 @@ export default function LoginPage() {
                     onChange={(e) => setRememberCode(e.target.checked)}
                     className="w-4 h-4 rounded-md border-white/20 bg-white/10 text-emerald-500 focus:ring-emerald-400/30 accent-emerald-500 cursor-pointer"
                   />
-                  <span>Ghi nhớ mã khách hàng</span>
+                  <span>Ghi nhớ đăng nhập</span>
                 </label>
               </div>
 

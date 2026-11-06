@@ -90,10 +90,10 @@ export interface CustomerSession {
 }
 
 export const api = {
-  login: (code: string, password: string) =>
+  login: (identifier: string, password: string) =>
     request<{ ok: true; session: CustomerSession }>('/api/customer/login', {
       method: 'POST',
-      body: { code, password },
+      body: { identifier, code: identifier, password },
       auth: false,
     }),
 
