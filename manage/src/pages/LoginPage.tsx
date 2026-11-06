@@ -71,7 +71,7 @@ export default function LoginPage() {
         <form onSubmit={handleLogin} className="space-y-5">
           <div>
             <label className="block text-xs font-semibold text-green-100/60 uppercase tracking-wider mb-2">
-              Email nhân viên hoặc Mã khách hàng
+              Email nhân viên / SĐT hoặc tên đăng nhập khách
             </label>
             <div className="relative">
               <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40" />
@@ -80,7 +80,7 @@ export default function LoginPage() {
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
                 className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-4 text-white placeholder:text-white/20 focus:outline-none focus:border-green-500/50 focus:ring-1 focus:ring-green-500/50 transition-all"
-                placeholder="vd: sale@tps1.vn hoặc VIP001"
+                placeholder="Email, SĐT hoặc tên đăng nhập"
                 autoCapitalize="none"
                 required
               />
