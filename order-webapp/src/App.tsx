@@ -1,20 +1,27 @@
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { lazy, Suspense, useEffect } from 'react';
+import { Capacitor } from '@capacitor/core';
+import { App as NativeApp } from '@capacitor/app';
+import { SplashScreen } from '@capacitor/splash-screen';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { CartProvider } from './contexts/CartContext';
 import CustomerLayout from './layouts/CustomerLayout';
 import LoginPage from './pages/LoginPage';
-import ChangePasswordPage from './pages/ChangePasswordPage';
 import ProductsPage from './pages/ProductsPage';
-import CartPage from './pages/CartPage';
-import OrdersPage from './pages/OrdersPage';
-import OrderDetailPage from './pages/OrderDetailPage';
-import ExcelOrderPage from './pages/ExcelOrderPage';
-import AccountPage from './pages/AccountPage';
+import RegisterPage from './pages/RegisterPage';
+import { LanguageProvider } from './contexts/LanguageContext';
+
+const ChangePasswordPage = lazy(() => import('./pages/ChangePasswordPage'));
+const CartPage = lazy(() => import('./pages/CartPage'));
+const OrdersPage = lazy(() => import('./pages/OrdersPage'));
+const OrderDetailPage = lazy(() => import('./pages/OrderDetailPage'));
+const ExcelOrderPage = lazy(() => import('./pages/ExcelOrderPage'));
+const AccountPage = lazy(() => import('./pages/AccountPage'));
 
 const LoadingScreen = () => (
   <div className="fixed inset-0 min-h-screen bg-white flex flex-col items-center justify-center z-50">
     <img
-      src="/images/tps1-logo-vertical.png"
+      src={`${import.meta.env.BASE_URL}images/tps1-logo-vertical.png`}
       alt="Thực Phẩm Số Một"
       className="w-36 max-w-[50vw] h-auto object-contain mb-6 animate-pulse"
     />
@@ -40,13 +47,32 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   return <>{children}</>;
 };
 
+function NativeBackButton() {
+  const location = useLocation();
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    const listener = NativeApp.addListener('backButton', () => {
+      if (location.pathname === '/') void NativeApp.exitApp();
+      else window.history.back();
+    });
+    return () => { void listener.then(handle => handle.remove()); };
+  }, [location.pathname]);
+  return null;
+}
+
 function App() {
+  useEffect(() => {
+    if (Capacitor.isNativePlatform()) void SplashScreen.hide();
+  }, []);
+  const Router = Capacitor.isNativePlatform() ? HashRouter : BrowserRouter;
   return (
-    <AuthProvider>
+    <LanguageProvider><AuthProvider>
       <CartProvider>
         <Router>
-          <Routes>
+          <NativeBackButton />
+          <Suspense fallback={<LoadingScreen />}><Routes>
             <Route path="/dang-nhap" element={<LoginPage />} />
+            <Route path="/dang-ky" element={<RegisterPage />} />
             <Route
               path="/"
               element={
@@ -60,14 +86,14 @@ function App() {
               <Route path="dat-hang/excel" element={<ExcelOrderPage />} />
               <Route path="don-hang" element={<OrdersPage />} />
               <Route path="don-hang/:id" element={<OrderDetailPage />} />
-              <Route path="doi-mat-khau" element={<ChangePasswordPage />} />
               <Route path="tai-khoan" element={<AccountPage />} />
+              <Route path="doi-mat-khau" element={<ChangePasswordPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+          </Routes></Suspense>
         </Router>
       </CartProvider>
-    </AuthProvider>
+    </AuthProvider></LanguageProvider>
   );
 }
 

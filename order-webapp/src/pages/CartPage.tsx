@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   CheckCircle2,
@@ -19,8 +19,8 @@ import {
 import { useCart } from '../contexts/CartContext';
 import { useAuth } from '../contexts/AuthContext';
 import { api, ApiError } from '../lib/api';
-import { normalizeOrderQuantity, validateOrderQuantity, formatQuantityVN } from '../lib/quantityRules';
 import ProductThumbnail from '../components/products/ProductThumbnail';
+import { useLanguage } from '../contexts/LanguageContext';
 
 function money(v: number) {
   return new Intl.NumberFormat('vi-VN').format(Number(v) || 0) + 'đ';
@@ -36,6 +36,7 @@ function getTomorrowDateStr() {
 }
 
 export default function CartPage() {
+  const { t, errorText, productName, productUnit } = useLanguage();
   const { lines, total, setQty, setNote: setLineNote, removeItem, clear } = useCart();
   const { session } = useAuth();
   const navigate = useNavigate();
@@ -47,14 +48,26 @@ export default function CartPage() {
   const [deliveryName, setDeliveryName] = useState(defaultShipping?.name || session?.name || '');
   const [deliveryPhone, setDeliveryPhone] = useState(defaultShipping?.phone || session?.phone || '');
   const [deliveryDate, setDeliveryDate] = useState(getTomorrowDateStr());
+  const [earliestDate, setEarliestDate] = useState('');
+  const [cutoffTimeStr, setCutoffTimeStr] = useState('');
   const [deliveryShift, setDeliveryShift] = useState('Ca sáng sớm (05:00 - 07:00)');
   const [generalNote, setGeneralNote] = useState('');
-  const [quantityDrafts, setQuantityDrafts] = useState<Record<string, string>>({});
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [successCode, setSuccessCode] = useState('');
+  const [submittedPendingPriceCount, setSubmittedPendingPriceCount] = useState(0);
   const idempotencyKey = useRef(crypto.randomUUID());
+  useEffect(() => {
+    let alive = true;
+    api.orderConfig().then(info => {
+      if (!alive) return;
+      setEarliestDate(info.earliestDate);
+      setCutoffTimeStr(info.cutoffTimeStr);
+      setDeliveryDate(current => current < info.earliestDate ? info.earliestDate : current);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
 
   const submitOrder = async () => {
     setError('');
@@ -62,19 +75,11 @@ export default function CartPage() {
       setError('Giỏ hàng đang trống');
       return;
     }
+    if (!navigator.onLine) { setError(t('Không có kết nối mạng. Giỏ hàng của bạn đã được lưu.')); return; }
+    if (earliestDate && deliveryDate < earliestDate) { setError(t('Đã quá giờ chốt đơn. Vui lòng chọn ngày giao mới.')); setDeliveryDate(earliestDate); return; }
     if (!deliveryAddress.trim() || !deliveryName.trim() || !deliveryPhone.trim()) {
       setError('Vui lòng nhập đầy đủ Tên người nhận, SĐT và Địa chỉ nhận hàng');
       return;
-    }
-
-    for (const l of lines) {
-      if (l.product.enforceOrderStep) {
-        const err = validateOrderQuantity(l.quantity, l.product.minOrderQty, l.product.orderStep, true, l.product.quantityPrecision, l.product.quantityAdjustmentMode, l.product.unit);
-        if (err) {
-          setError(`Mặt hàng "${l.product.name}" chưa đúng quy cách: ${err}`);
-          return;
-        }
-      }
     }
 
     setSubmitting(true);
@@ -98,8 +103,6 @@ export default function CartPage() {
           productId: l.product.id,
           name: l.product.name,
           quantity: l.quantity,
-          requestedQuantity: l.requestedQuantity ?? l.quantity,
-          adjustmentAcknowledged: Boolean(l.adjustmentAcknowledged),
           note: l.note?.trim() || undefined,
         })),
         deliveryAlias: deliveryAlias.trim() || undefined,
@@ -112,10 +115,12 @@ export default function CartPage() {
       });
 
       setSuccessCode(res.orderCode);
+      setSubmittedPendingPriceCount(res.pendingPriceCount || 0);
+      idempotencyKey.current = crypto.randomUUID();
       clear();
     } catch (err) {
       setError(
-        err instanceof ApiError ? err.message : 'Không gửi được đơn hàng, vui lòng thử lại sau.'
+        err instanceof ApiError ? errorText(err) : t('Không gửi được đơn hàng, vui lòng thử lại sau.')
       );
     } finally {
       setSubmitting(false);
@@ -129,14 +134,16 @@ export default function CartPage() {
           <div className="w-20 h-20 rounded-full bg-emerald-50 border border-emerald-200 text-[#0f7a4f] flex items-center justify-center mx-auto shadow-inner">
             <CheckCircle2 size={42} />
           </div>
-          <h2 className="text-2xl font-black text-[#17231d]">Đặt hàng thành công!</h2>
+          <h2 className="text-2xl font-black text-[#17231d]">{t('Gửi đơn đặt hàng thành công!')}</h2>
           <p className="text-sm text-[#59665f] leading-relaxed">
-            Mã đơn hàng của bạn là{' '}
+            {t('Mã đơn hàng:')}{' '}
             <strong className="text-[#0f7a4f] font-mono text-base px-2 py-0.5 bg-[#0f7a4f]/10 rounded-lg">
               {successCode}
             </strong>
-            . Nhân viên kinh doanh TPS1 sẽ liên hệ xác nhận giá thực tế và sắp xếp xe lạnh giao theo đúng ca hẹn.
+            . {t('TPS1 sẽ liên hệ xác nhận giá và lịch giao hàng.')}
           </p>
+          {session?.verificationStatus === 'pending' && <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">{t('Đã gửi đơn, chờ TPS1 xác minh tài khoản và xác nhận đơn.')}</p>}
+          {submittedPendingPriceCount > 0 && <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">{t('Có mặt hàng đang chờ sale báo giá. Sale sẽ nhập giá hoặc bỏ mặt hàng không có hàng trước khi xác nhận đơn.')}</p>}
 
           <div className="flex flex-col sm:flex-row gap-3 justify-center pt-3">
             <button
@@ -147,13 +154,13 @@ export default function CartPage() {
               className="px-5 py-3 rounded-xl border border-[#17231d]/15 text-[#17231d] font-bold text-xs hover:bg-[#f5f7f3] transition-colors cursor-pointer flex items-center justify-center gap-1.5"
             >
               <ShoppingBag size={15} />
-              <span>Tiếp tục đặt hàng</span>
+              <span>{t('Tiếp tục đặt đơn')}</span>
             </button>
             <button
               onClick={() => navigate('/don-hang')}
               className="px-5 py-3 rounded-xl bg-[#0f7a4f] hover:bg-[#0b4f34] text-white font-bold text-xs shadow-md shadow-[#0f7a4f]/25 transition-all cursor-pointer flex items-center justify-center gap-1.5"
             >
-              <span>Xem đơn hàng của tôi</span>
+              <span>{t('Đơn hàng của tôi')}</span>
               <ArrowRight size={15} />
             </button>
           </div>
@@ -186,6 +193,7 @@ export default function CartPage() {
   }
 
   const totalQuantity = lines.reduce((s, l) => s + l.quantity, 0);
+  const pendingPriceCount = lines.filter(line => line.product.priceOnRequest || line.product.price <= 0).length;
 
   return (
     <div className="max-w-4xl mx-auto space-y-5 pb-10">
@@ -210,7 +218,7 @@ export default function CartPage() {
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px] gap-5 items-start">
         {/* Danh sách mặt hàng (Card layout) */}
         <div className="space-y-3">
-          {lines.map(({ product, quantity, note, requestedQuantity, quantityAdjustmentMessage }) => {
+          {lines.map(({ product, quantity, note }) => {
             const lineTotal = quantity * (product.price || 0);
             return (
               <div
@@ -229,8 +237,9 @@ export default function CartPage() {
                           </span>
                         )}
                         <h3 className="font-bold text-sm text-[#17231d] mt-0.5 leading-snug">
-                          {product.name}
+                          {productName(product.name)}
                         </h3>
+                        {productName(product.name) !== product.name && <p className="text-[11px] text-[#59665f]">{product.name}</p>}
                       </div>
 
                       <button
@@ -244,107 +253,55 @@ export default function CartPage() {
                     </div>
 
                     <p className="text-xs text-[#59665f] mt-1 font-medium">
-                      ĐVT: <strong className="text-[#17231d]">{product.unit || 'Kg'}</strong> ·{' '}
+                      {t('ĐVT:')} <strong className="text-[#17231d]">{productUnit(product.unit || 'Kg')}</strong> ·{' '}
                       Đơn giá:{' '}
                       <strong className="text-[#0f7a4f]">
-                        {product.priceOnRequest ? 'Liên hệ' : money(product.price)}
+                        {product.priceOnRequest ? t('Chờ sale báo giá') : money(product.price)}
                       </strong>
                     </p>
-
-                    {product.shortDescription && (
-                      <p className="text-[11px] text-[#59665f] mt-1 line-clamp-2">{product.shortDescription}</p>
-                    )}
-
-                    {/* Quy cách đóng gói */}
-                    {product.packagingNote && (
-                      <div className="text-[11px] text-[#0f7a4f] bg-[#0f7a4f]/8 px-1.5 py-0.5 rounded inline-block font-medium mt-1">
-                        📦 {product.packagingNote}
-                      </div>
-                    )}
-
-                    {/* Quy cách đặt hàng bắt buộc */}
-                    {product.enforceOrderStep && (
-                      <div className="text-[10px] text-[#59665f] font-medium mt-0.5">
-                        Tối thiểu: <strong className="text-[#17231d]">{formatQuantityVN(product.minOrderQty || 1)}</strong> · Bước: <strong className="text-[#17231d]">{formatQuantityVN(product.orderStep || 1)}</strong> {product.unit || 'Kg'}
-                      </div>
-                    )}
                   </div>
                 </div>
 
                 {/* Bộ Stepper số lượng & Thành tiền dòng */}
-                {(() => {
-                  const step = product.orderStep || 1;
-                  const lineErr = product.enforceOrderStep
-                    ? validateOrderQuantity(quantity, product.minOrderQty, product.orderStep, true, product.quantityPrecision, product.quantityAdjustmentMode, product.unit)
-                    : null;
-                  return (
-                    <>
-                      <div className="flex items-center justify-between pt-2 border-t border-[#17231d]/5">
-                        <div className="flex items-center gap-1.5 bg-[#f5f7f3] p-1 rounded-xl border border-[#17231d]/10">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const next = Math.round((quantity - step) * 1000) / 1000;
-                              if (product.enforceOrderStep && product.minOrderQty && next < product.minOrderQty) {
-                                removeItem(product.id);
-                              } else {
-                                setQty(product.id, Math.max(0, next));
-                              }
-                            }}
-                            className="w-8 h-8 rounded-lg bg-white font-bold text-sm text-[#17231d] active:scale-95 flex items-center justify-center shadow-xs cursor-pointer select-none"
-                          >
-                            <Minus size={14} />
-                          </button>
-                          <input
-                            type="text"
-                            inputMode="decimal"
-                            value={quantityDrafts[product.id] ?? String(quantity)}
-                            onChange={(e) => {
-                              const raw = e.target.value;
-                              setQuantityDrafts(prev => ({ ...prev, [product.id]: raw }));
-                              const val = Number(raw.replace(',', '.'));
-                              if (Number.isFinite(val) && val > 0) setQty(product.id, val);
-                            }}
-                            onBlur={() => {
-                              const raw = quantityDrafts[product.id]; const requested = Number((raw ?? '').replace(',', '.'));
-                              if (Number.isFinite(requested) && requested > 0) {
-                                const normalized = normalizeOrderQuantity(requested, product.minOrderQty, product.orderStep, product.enforceOrderStep, product.quantityPrecision, product.quantityAdjustmentMode, product.unit);
-                                if (normalized.ok) setQty(product.id, normalized.normalizedQuantity, { requestedQuantity: requested, acknowledged: true, message: normalized.message || undefined });
-                              }
-                              setQuantityDrafts(prev => { const next = { ...prev }; delete next[product.id]; return next; });
-                            }}
-                            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (e.currentTarget as HTMLInputElement).blur(); } }}
-                            className="w-16 text-center font-bold text-sm text-[#0b4f34] bg-transparent focus:outline-none"
-                            aria-label={`Số lượng ${product.name}`}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setQty(product.id, Math.round((quantity + step) * 1000) / 1000)}
-                            className="w-8 h-8 rounded-lg bg-white font-bold text-sm text-[#0f7a4f] active:scale-95 flex items-center justify-center shadow-xs cursor-pointer select-none"
-                          >
-                            <Plus size={14} />
-                          </button>
-                        </div>
+                <div className="flex items-center justify-between pt-2 border-t border-[#17231d]/5">
+                  <div className="flex items-center gap-1.5 bg-[#f5f7f3] p-1 rounded-xl border border-[#17231d]/10">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setQty(product.id, Math.max(0, Number((quantity - 1).toFixed(2))))
+                      }
+                      className="w-8 h-8 rounded-lg bg-white font-bold text-sm text-[#17231d] active:scale-95 flex items-center justify-center shadow-xs cursor-pointer select-none"
+                    >
+                      <Minus size={14} />
+                    </button>
+                    <input
+                      type="number"
+                      min={0.1}
+                      step="any"
+                      value={quantity}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        setQty(product.id, isNaN(val) ? 0 : val);
+                      }}
+                      className="w-16 text-center font-bold text-sm text-[#0b4f34] bg-transparent focus:outline-none"
+                      aria-label={`Số lượng ${product.name}`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setQty(product.id, Number((quantity + 1).toFixed(2)))}
+                      className="w-8 h-8 rounded-lg bg-white font-bold text-sm text-[#0f7a4f] active:scale-95 flex items-center justify-center shadow-xs cursor-pointer select-none"
+                    >
+                      <Plus size={14} />
+                    </button>
+                  </div>
 
-                        <div className="text-right">
-                          <span className="text-[10px] text-[#59665f] block">Thành tiền</span>
-                          <span className="font-mono font-bold text-sm sm:text-base text-[#0f7a4f]">
-                            {product.priceOnRequest ? 'Tạm tính 0đ' : money(lineTotal)}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Thông báo lỗi quy cách từng dòng nếu có */}
-                      {lineErr && (
-                        <div className="px-2.5 py-1 bg-rose-50 border border-rose-200 rounded-lg flex items-center gap-1.5 text-xs text-rose-700">
-                          <AlertCircle size={14} className="shrink-0 text-rose-500" />
-                          <span>{lineErr}</span>
-                        </div>
-                      )}
-                      {quantityAdjustmentMessage && <p className="text-[11px] text-amber-800 bg-amber-50 rounded-lg p-2 mt-1">{quantityAdjustmentMessage}<span className="block mt-0.5">Nhập ban đầu: {formatQuantityVN(requestedQuantity ?? quantity)} · Số lượng đặt: {formatQuantityVN(quantity)} {product.unit}</span></p>}
-                    </>
-                  );
-                })()}
+                  <div className="text-right">
+                    <span className="text-[10px] text-[#59665f] block">Thành tiền</span>
+                    <span className="font-mono font-bold text-sm sm:text-base text-[#0f7a4f]">
+                      {product.priceOnRequest ? t('Chờ sale báo giá') : money(lineTotal)}
+                    </span>
+                  </div>
+                </div>
 
                 {/* Ghi chú quy cách theo dòng */}
                 <div>
@@ -407,12 +364,13 @@ export default function CartPage() {
                   <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#59665f]/60" size={14} />
                     <input
                       type="date"
-                      min={new Date().toLocaleDateString('en-CA')}
+                      min={earliestDate}
                     value={deliveryDate}
                     onChange={(e) => setDeliveryDate(e.target.value)}
                     className="w-full pl-8 pr-2.5 py-2 bg-[#f8faf7] border border-[#17231d]/15 rounded-xl text-xs font-semibold focus:outline-none focus:bg-white focus:border-[#0f7a4f]"
                   />
                 </div>
+                {earliestDate && <p className="mt-1 text-[11px] text-[#59665f]">{t('Ngày giao sớm nhất')}: {earliestDate}{cutoffTimeStr ? ` · ${t('Giờ chốt đơn')}: ${cutoffTimeStr}` : ''}</p>}
               </div>
 
               <div>
@@ -426,10 +384,10 @@ export default function CartPage() {
                     onChange={(e) => setDeliveryShift(e.target.value)}
                     className="w-full pl-8 pr-2.5 py-2 bg-[#f8faf7] border border-[#17231d]/15 rounded-xl text-xs font-semibold focus:outline-none focus:bg-white focus:border-[#0f7a4f] cursor-pointer"
                   >
-                    <option value="Ca sáng sớm (05:00 - 07:00)">Ca sáng sớm (05:00 - 07:00)</option>
-                    <option value="Ca sáng (07:00 - 09:00)">Ca sáng (07:00 - 09:00)</option>
-                    <option value="Ca trưa (09:30 - 11:00)">Ca trưa (09:30 - 11:00)</option>
-                    <option value="Ca chiều (14:00 - 16:00)">Ca chiều (14:00 - 16:00)</option>
+                    <option value="Ca sáng sớm (05:00 - 07:00)">{t('Ca sáng sớm (05:00 - 07:00)')}</option>
+                    <option value="Ca sáng (07:00 - 09:00)">{t('Ca sáng (07:00 - 09:00)')}</option>
+                    <option value="Ca trưa (09:30 - 11:00)">{t('Ca trưa (09:30 - 11:00)')}</option>
+                    <option value="Ca chiều (14:00 - 16:00)">{t('Ca chiều (14:00 - 16:00)')}</option>
                   </select>
                 </div>
               </div>
@@ -525,6 +483,7 @@ export default function CartPage() {
                   Giá hiển thị theo bảng giá hiện tại. TPS1 sẽ xác nhận lại các mặt hàng cần báo giá hoặc có điều chỉnh.
                 </span>
               </p>
+              {pendingPriceCount > 0 && <p className="rounded-xl bg-amber-50 p-2 text-xs font-semibold text-amber-800">{t('Tạm tính chưa gồm hàng chờ giá')} ({pendingPriceCount}). {t('Sale sẽ nhập giá hoặc bỏ mặt hàng không có hàng trước khi xác nhận đơn.')}</p>}
             </div>
 
             {error && (
@@ -534,40 +493,23 @@ export default function CartPage() {
               </div>
             )}
 
-            {(() => {
-              const hasInvalidLines = lines.some((l) =>
-                l.product.enforceOrderStep &&
-                validateOrderQuantity(l.quantity, l.product.minOrderQty, l.product.orderStep, true) !== null
-              );
-              return (
+            <button
+              onClick={submitOrder}
+              disabled={submitting || lines.length === 0}
+              className="w-full bg-[#0f7a4f] hover:bg-[#0b4f34] text-white font-bold py-3.5 rounded-xl transition-all shadow-md shadow-[#0f7a4f]/25 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 uppercase text-xs sm:text-sm tracking-wider touch-target cursor-pointer"
+            >
+              {submitting ? (
                 <>
-                  {hasInvalidLines && (
-                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 flex items-center gap-2">
-                      <AlertCircle size={15} className="shrink-0 text-amber-600" />
-                      <span>Giỏ hàng có sản phẩm chưa đúng quy cách đặt hàng. Vui lòng điều chỉnh số lượng trước khi xác nhận.</span>
-                    </div>
-                  )}
-
-                  <button
-                    onClick={submitOrder}
-                    disabled={submitting || lines.length === 0 || hasInvalidLines}
-                    className="w-full bg-[#0f7a4f] hover:bg-[#0b4f34] text-white font-bold py-3.5 rounded-xl transition-all shadow-md shadow-[#0f7a4f]/25 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 uppercase text-xs sm:text-sm tracking-wider touch-target cursor-pointer"
-                  >
-                    {submitting ? (
-                      <>
-                        <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                        <span>Đang gửi đơn...</span>
-                      </>
-                    ) : (
-                      <>
-                        <span>Xác nhận đặt hàng</span>
-                        <ArrowRight size={16} />
-                      </>
-                    )}
-                  </button>
+                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  <span>Đang gửi đơn...</span>
                 </>
-              );
-            })()}
+              ) : (
+                <>
+                  <span>Xác nhận đặt hàng</span>
+                  <ArrowRight size={16} />
+                </>
+              )}
+            </button>
           </div>
         </div>
       </div>

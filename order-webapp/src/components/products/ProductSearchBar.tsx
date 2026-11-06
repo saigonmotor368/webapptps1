@@ -1,180 +1,21 @@
-import React from 'react';
-import { Search, X, Loader2, Plus } from 'lucide-react';
-import type { Product } from '../../lib/api';
-import ProductThumbnail from './ProductThumbnail';
+import { Search, X } from 'lucide-react';
+import { useLanguage } from '../../contexts/LanguageContext';
 
-function money(v: number) {
-  return new Intl.NumberFormat('vi-VN').format(Number(v) || 0) + 'đ';
-}
-
-interface ProductSearchBarProps {
-  searchQuery: string;
-  onSearchChange: (val: string) => void;
-  addQty: number;
-  onAddQtyChange: (val: number) => void;
-  searchResults: Product[];
-  searchLoading: boolean;
-  isDropdownOpen: boolean;
-  onOpenDropdown: () => void;
-  onCloseDropdown: () => void;
-  selectedResultIndex: number;
-  onSelectIndex: (idx: number) => void;
-  selectedProduct: Product | null;
-  onSelectProduct: (product: Product) => void;
-  onAddProduct: (product: Product, qty?: number, options?: { resetSearch?: boolean; keepFocus?: boolean }) => void;
-  searchInputRef: React.RefObject<HTMLInputElement | null>;
-  dropdownRef: React.RefObject<HTMLDivElement | null>;
-  onKeyDown: (e: React.KeyboardEvent) => void;
-}
-
-export default function ProductSearchBar({
-  searchQuery,
-  onSearchChange,
-  addQty,
-  onAddQtyChange,
-  searchResults,
-  searchLoading,
-  isDropdownOpen,
-  onOpenDropdown,
-  selectedResultIndex,
-  onSelectIndex,
-  selectedProduct,
-  onSelectProduct,
-  onAddProduct,
-  searchInputRef,
-  dropdownRef,
-  onKeyDown,
-}: ProductSearchBarProps) {
-  return (
-    <div className="relative flex-1 flex items-center gap-2">
-      {/* Ô tìm kiếm hàng hóa */}
-      <div className="relative flex-1">
-        <Search
-          className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#59665f]/50 pointer-events-none"
-          size={18}
-        />
-        <input
-          ref={searchInputRef}
-          type="text"
-          value={searchQuery}
-          onChange={(e) => onSearchChange(e.target.value)}
-          onKeyDown={onKeyDown}
-          onFocus={onOpenDropdown}
-          placeholder="Tìm hàng hóa theo tên, mã SKU, nhóm hàng (F3)..."
-          className="w-full pl-10 pr-9 py-2.5 bg-[#f8faf7] border border-[#17231d]/12 rounded-xl text-sm font-medium text-[#17231d] placeholder:text-[#59665f]/55 focus:outline-none focus:bg-white focus:ring-2 focus:ring-[#0f7a4f]/25 focus:border-[#0f7a4f] transition-all"
-        />
-        {searchQuery ? (
-          <button
-            type="button"
-            onClick={() => onSearchChange('')}
-            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#59665f]/50 hover:text-[#17231d] p-1 rounded-lg transition-colors cursor-pointer"
-            aria-label="Xóa tìm kiếm"
-          >
-            <X size={15} />
-          </button>
-        ) : (
-          <kbd className="hidden sm:inline absolute right-2.5 top-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[#17231d]/5 text-[#59665f]/60 border border-[#17231d]/10 pointer-events-none">
-            F3
-          </kbd>
-        )}
+export default function ProductSearchBar({ value, onChange, onSubmit, inputRef }: {
+  value: string; onChange: (value: string) => void; onSubmit: () => void; inputRef: React.RefObject<HTMLInputElement | null>;
+}) {
+  const { t } = useLanguage();
+  return <form className="w-full" onSubmit={event => { event.preventDefault(); onSubmit(); }}>
+    <label className="mb-2 block text-sm font-bold text-[#18382b]">{t('Tìm sản phẩm')}</label>
+    <div className="flex gap-2">
+      <div className="relative min-w-0 flex-1">
+        <Search size={19} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#718579]" />
+        <input ref={inputRef} value={value} onChange={event => onChange(event.target.value)}
+          placeholder={t('Tìm theo tên tiếng Việt, tiếng Trung, tiếng Anh hoặc SKU')}
+          className="h-12 w-full rounded-xl border border-[#d6e2d9] bg-[#f8faf7] pl-11 pr-10 text-sm text-[#17231d] outline-none placeholder:text-[#83948a] focus:border-[#0f7a4f] focus:bg-white focus:ring-2 focus:ring-[#0f7a4f]/15" />
+        {value && <button type="button" onClick={() => onChange('')} aria-label={t('Xóa tìm kiếm')} className="absolute right-1 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-lg text-[#708579]"><X size={17}/></button>}
       </div>
-
-      {/* Chọn sản phẩm trước, sau đó nhập số lượng và bấm Thêm */}
-      <div
-        className="flex items-center gap-1 bg-[#f8faf7] border border-[#17231d]/12 rounded-xl px-2 py-1.5 shrink-0"
-        title="Số lượng mặc định khi bấm Enter hoặc chọn sản phẩm"
-      >
-        <span className="text-xs text-[#59665f] font-semibold hidden sm:inline">SL:</span>
-        <input
-          type="number"
-          min={0.1}
-          step="any"
-          value={addQty}
-          onChange={(e) => onAddQtyChange(Math.max(0.1, parseFloat(e.target.value) || 1))}
-          className="w-12 bg-transparent text-center text-sm font-bold text-[#17231d] focus:outline-none"
-          aria-label="Số lượng thêm nhanh"
-        />
-      </div>
-
-      <button
-        type="button"
-        disabled={!selectedProduct}
-        onClick={() => selectedProduct && onAddProduct(selectedProduct, addQty, { resetSearch: true, keepFocus: true })}
-        className="flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-[#0f7a4f] text-white text-sm font-bold hover:bg-[#0b6340] disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
-      >
-        <Plus size={16} /> Thêm
-      </button>
-
-      {/* Dropdown kết quả tìm kiếm */}
-      {isDropdownOpen && (
-        <div
-          ref={dropdownRef}
-          className="absolute left-0 right-0 top-full mt-2 bg-white rounded-2xl shadow-2xl border border-[#17231d]/15 z-50 overflow-hidden max-h-[380px] overflow-y-auto"
-        >
-          {searchLoading ? (
-            <div className="py-7 text-center text-sm text-[#59665f] flex items-center justify-center gap-2">
-              <Loader2 className="w-4 h-4 text-[#0f7a4f] animate-spin" />
-              <span>Đang tra cứu danh mục hàng hóa...</span>
-            </div>
-          ) : searchResults.length === 0 ? (
-            <div className="py-7 px-4 text-center text-sm text-[#59665f]">
-              Không tìm thấy sản phẩm nào khớp với <span className="font-bold text-[#17231d]">"{searchQuery}"</span>
-            </div>
-          ) : (
-            <div className="divide-y divide-[#17231d]/5">
-              <div className="bg-[#f8faf7] px-3.5 py-2 text-[11px] font-bold text-[#59665f] uppercase tracking-wider flex justify-between">
-                <span>Hình ảnh • Mã SKU • Tên mặt hàng</span>
-                <span>ĐVT • Giá khách hàng</span>
-              </div>
-              {searchResults.map((p, idx) => {
-                const isSelected = idx === selectedResultIndex;
-                return (
-                  <div
-                    key={p.id}
-                    onClick={() => onSelectProduct(p)}
-                    onMouseEnter={() => onSelectIndex(idx)}
-                    className={`px-3.5 py-2.5 flex items-center justify-between gap-3 cursor-pointer transition-colors ${
-                      isSelected
-                        ? 'bg-[#0f7a4f]/10 text-[#0b4f34]'
-                        : 'hover:bg-[#f5f7f3] text-[#17231d]'
-                    }`}
-                  >
-                    <ProductThumbnail product={p} size="sm" />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        {p.sku && (
-                          <span className="text-xs font-mono font-bold bg-[#17231d]/5 px-1.5 py-0.5 rounded text-[#59665f]">
-                            {p.sku}
-                          </span>
-                        )}
-                        <span className="text-sm font-semibold truncate">{p.name}</span>
-                      </div>
-                      {p.category && (
-                        <span className="text-[11px] text-[#59665f] mt-0.5 block">
-                          Nhóm: {p.category}
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="text-right shrink-0">
-                      <div className="text-sm font-bold text-[#0f7a4f]">
-                        {p.priceOnRequest ? (
-                          <span className="text-[#e0742f] text-xs font-semibold">Liên hệ báo giá</span>
-                        ) : (
-                          money(p.price)
-                        )}
-                      </div>
-                      <div className="text-xs text-[#59665f] mt-0.5 font-medium">
-                        {p.unit || 'Kg'} • <span className="text-emerald-700 font-semibold">Nhận đặt</span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
+      <button type="submit" className="flex h-12 shrink-0 items-center gap-2 rounded-xl bg-[#0f7a4f] px-4 text-sm font-bold text-white"><Search size={17}/><span>{t('Tìm')}</span></button>
     </div>
-  );
+  </form>;
 }

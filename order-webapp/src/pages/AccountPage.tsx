@@ -1,76 +1,70 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Building2, Check, ChevronRight, KeyRound, LogOut, MapPin, PackageCheck, Pencil, Plus, ShieldCheck, Truck, UserRound, X } from 'lucide-react';
-import { api, type CustomerAccountResponse, type CustomerAddress, type CustomerAddressInput } from '../lib/api';
+import { Building2, KeyRound, MapPin, Phone, Mail, LogOut, ChevronRight, ShieldCheck, Plus, Trash2 } from 'lucide-react';
+import { api, type AccountProfile } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
-
-const money = (value: number) => new Intl.NumberFormat('vi-VN').format(Number(value) || 0) + 'đ';
-const date = (value?: string | null) => value ? new Intl.DateTimeFormat('vi-VN').format(new Date(value)) : '—';
-const emptyAddress = (): CustomerAddressInput => ({ label: '', address: '', contactName: '', contactPhone: '', isDefault: false });
+import { useLanguage } from '../contexts/LanguageContext';
 
 export default function AccountPage() {
-  const { logout, refresh } = useAuth();
+  const { session, logout, setSession } = useAuth();
+  const { t } = useLanguage();
   const navigate = useNavigate();
-  const [data, setData] = useState<CustomerAccountResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
+  const [profile, setProfile] = useState<AccountProfile | null>(null);
+  const [profileForm, setProfileForm] = useState({ name: session?.name || '', company: session?.company || '', taxCode: session?.taxCode || '' });
   const [editingProfile, setEditingProfile] = useState(false);
-  const [profile, setProfile] = useState({ name: '', phone: '', email: '', address: '' });
-  const [editingAddress, setEditingAddress] = useState<CustomerAddress | 'new' | null>(null);
-  const [addressForm, setAddressForm] = useState<CustomerAddressInput>(emptyAddress());
-  const [legalOpen, setLegalOpen] = useState(false);
-  const [legal, setLegal] = useState({ company: '', taxCode: '', reason: '' });
-  const [saving, setSaving] = useState(false);
-
-  const load = async () => {
-    try {
-      setError('');
-      const result = await api.account();
-      setData(result);
-      setProfile({ name: result.profile.contactName || '', phone: result.profile.phone || '', email: result.profile.email || '', address: result.profile.address || '' });
-    } catch (e: any) { setError(e?.message || 'Không tải được tài khoản'); }
-    finally { setLoading(false); }
-  };
-  useEffect(() => { load(); }, []);
-
-  const saveProfile = async () => {
-    try { setSaving(true); const result = await api.updateProfile(profile); await refresh(); setEditingProfile(false); setNotice('Đã cập nhật thông tin liên hệ.'); setData(prev => prev ? { ...prev, profile: { ...prev.profile, contactName: result.session.name, phone: result.session.phone, email: result.session.email, address: result.session.address } } : prev); }
-    catch (e: any) { setError(e?.message || 'Không lưu được thông tin'); } finally { setSaving(false); }
-  };
-  const openAddress = (address?: CustomerAddress) => {
-    setEditingAddress(address || 'new');
-    setAddressForm(address ? { label: address.label, address: address.address, contactName: address.contact_name, contactPhone: address.contact_phone, isDefault: address.is_default } : emptyAddress());
-  };
-  const saveAddress = async () => {
-    try { setSaving(true); if (editingAddress === 'new') await api.createAddress(addressForm); else if (editingAddress) await api.updateAddress(editingAddress.id, addressForm); setEditingAddress(null); setNotice('Đã lưu địa chỉ giao hàng.'); await load(); }
-    catch (e: any) { setError(e?.message || 'Không lưu được địa chỉ'); } finally { setSaving(false); }
-  };
-  const setDefault = async (id: string) => { try { await api.setDefaultAddress(id); await load(); } catch (e: any) { setError(e?.message || 'Không đổi được địa chỉ mặc định'); } };
-  const deactivate = async (address: CustomerAddress) => { if (address.is_default) return setError('Hãy chọn địa chỉ mặc định khác trước khi ngừng sử dụng địa chỉ này.'); try { await api.deactivateAddress(address.id); await load(); } catch (e: any) { setError(e?.message || 'Không ngừng được địa chỉ'); } };
-  const sendLegalRequest = async () => { try { setSaving(true); await api.requestLegalProfileChange(legal); setLegalOpen(false); setLegal({ company: '', taxCode: '', reason: '' }); setNotice('Yêu cầu đã được gửi tới TPS1.'); await load(); } catch (e: any) { setError(e?.message || 'Không gửi được yêu cầu'); } finally { setSaving(false); } };
-
-  if (loading) return <div className="grid lg:grid-cols-3 gap-4 animate-pulse"><div className="h-72 bg-white rounded-2xl"/><div className="lg:col-span-2 h-72 bg-white rounded-2xl"/></div>;
-  if (!data) return <div className="bg-white rounded-2xl p-8 text-center text-red-600">{error || 'Không tải được tài khoản'} <button onClick={load} className="ml-2 underline">Thử lại</button></div>;
-  const { profile: p, orderSummary: stats } = data;
-
-  return <div className="space-y-4">
-    <div className="flex items-center justify-between gap-3"><div><h1 className="text-xl sm:text-2xl font-bold text-[#17231d]">Tài khoản khách hàng</h1><p className="text-sm text-[#59665f]">Quản lý hồ sơ, địa chỉ giao hàng và bảo mật</p></div><span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700"><ShieldCheck size={14}/> Tài khoản đang hoạt động</span></div>
-    {(error || notice) && <div className={`rounded-xl px-4 py-3 text-sm ${error ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>{error || notice}</div>}
-    <div className="grid lg:grid-cols-[0.9fr_1.6fr] gap-4 items-start">
-      <section className="bg-white rounded-2xl border border-[#17231d]/10 shadow-sm p-5 space-y-4">
-        <div className="flex items-start justify-between"><div className="flex gap-3"><div className="w-11 h-11 rounded-xl bg-emerald-50 text-[#0f7a4f] flex items-center justify-center"><Building2/></div><div><p className="font-bold text-[#17231d]">{p.company || p.contactName}</p><p className="text-xs text-[#59665f] font-mono">{p.code}</p></div></div><button onClick={() => setEditingProfile(v => !v)} className="p-2 rounded-lg hover:bg-slate-100" aria-label="Sửa hồ sơ"><Pencil size={16}/></button></div>
-        {editingProfile ? <div className="space-y-3">{[['Người liên hệ','name'],['Số điện thoại','phone'],['Email','email'],['Địa chỉ liên hệ','address']].map(([label,key]) => <label key={key} className="block text-xs font-semibold text-slate-600">{label}<input value={(profile as any)[key]} onChange={e => setProfile(v => ({...v,[key]:e.target.value}))} className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"/></label>)}<div className="flex gap-2"><button onClick={saveProfile} disabled={saving} className="flex-1 rounded-xl bg-[#0f7a4f] text-white py-2.5 font-semibold">Lưu</button><button onClick={() => setEditingProfile(false)} className="rounded-xl border px-4">Hủy</button></div></div> : <dl className="grid grid-cols-[110px_1fr] gap-y-2.5 text-sm"><dt className="text-slate-500">Người liên hệ</dt><dd>{p.contactName || '—'}</dd><dt className="text-slate-500">Điện thoại</dt><dd>{p.phone || '—'}</dd><dt className="text-slate-500">Email</dt><dd className="break-all">{p.email || '—'}</dd><dt className="text-slate-500">Địa chỉ</dt><dd>{p.address || '—'}</dd><dt className="text-slate-500">Mã số thuế</dt><dd>{p.taxCode || '—'}</dd><dt className="text-slate-500">Bảng giá</dt><dd className="font-semibold text-[#0f7a4f]">{p.priceBook?.name || 'Bảng giá chung'}</dd></dl>}
-        <button onClick={() => setLegalOpen(true)} className="w-full rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm font-semibold text-amber-800">Yêu cầu đổi tên công ty / mã số thuế</button>
-        <div className="border-t pt-3 space-y-2"><Link to="/doi-mat-khau" className="flex items-center justify-between rounded-xl px-3 py-2.5 hover:bg-slate-50 text-sm font-semibold"><span className="flex items-center gap-2"><KeyRound size={17}/> Đổi mật khẩu</span><ChevronRight size={16}/></Link><button onClick={() => { logout(); navigate('/dang-nhap'); }} className="w-full flex items-center gap-2 rounded-xl px-3 py-2.5 hover:bg-red-50 text-sm font-semibold text-red-600"><LogOut size={17}/> Đăng xuất</button></div>
-      </section>
-      <div className="space-y-4">
-        <section className="grid grid-cols-2 xl:grid-cols-4 gap-3">{[[PackageCheck,'Tổng đơn',stats.total],[UserRound,'Đang xử lý',stats.processing],[Truck,'Đang giao',stats.shipping],[Check,'Hoàn thành',stats.completed]].map(([Icon,label,value]: any) => <div key={label} className="bg-white rounded-2xl border p-4"><Icon size={19} className="text-[#0f7a4f]"/><p className="mt-3 text-2xl font-bold">{value}</p><p className="text-xs text-slate-500">{label}</p></div>)}</section>
-        <section className="bg-white rounded-2xl border border-[#17231d]/10 overflow-hidden"><div className="p-4 border-b flex justify-between"><div><h2 className="font-bold">Đơn hàng gần đây</h2><p className="text-xs text-slate-500">5 đơn mới nhất</p></div><Link to="/don-hang" className="text-sm font-semibold text-[#0f7a4f]">Xem tất cả</Link></div>{data.recentOrders.length ? data.recentOrders.map(o => <Link key={o.id} to={`/don-hang/${o.id}`} className="grid grid-cols-[1fr_auto] gap-3 px-4 py-3 border-b last:border-0 hover:bg-slate-50"><div><p className="font-semibold text-sm">{o.order_code}</p><p className="text-xs text-slate-500">{date(o.created_at)} · {o.status}</p></div><p className="font-bold text-sm">{money(o.grand_total)}</p></Link>) : <p className="p-6 text-center text-sm text-slate-500">Chưa có đơn hàng</p>}</section>
-        <section className="bg-white rounded-2xl border border-[#17231d]/10"><div className="p-4 border-b flex items-center justify-between"><div><h2 className="font-bold">Địa chỉ giao hàng</h2><p className="text-xs text-slate-500">Đơn cũ vẫn giữ nguyên địa chỉ đã giao</p></div><button onClick={() => openAddress()} className="inline-flex items-center gap-1 rounded-xl bg-[#0f7a4f] text-white px-3 py-2 text-sm font-semibold"><Plus size={16}/> Thêm</button></div><div className="p-3 grid md:grid-cols-2 gap-3">{data.addresses.map(a => <div key={a.id} className="rounded-xl border p-3"><div className="flex justify-between gap-2"><p className="font-bold text-sm flex items-center gap-1.5"><MapPin size={15} className="text-[#0f7a4f]"/>{a.label}{a.is_default && <span className="text-[10px] bg-emerald-50 text-emerald-700 rounded px-1.5 py-0.5">Mặc định</span>}</p><button onClick={() => openAddress(a)} className="p-1"><Pencil size={14}/></button></div><p className="mt-2 text-sm">{a.address}</p><p className="mt-1 text-xs text-slate-500">{a.contact_name} · {a.contact_phone}</p><div className="mt-3 flex gap-2">{!a.is_default && <button onClick={() => setDefault(a.id)} className="text-xs font-semibold text-[#0f7a4f]">Đặt mặc định</button>}{!a.is_default && <button onClick={() => deactivate(a)} className="text-xs text-red-600">Ngừng dùng</button>}</div></div>)}</div></section>
-      </div>
-    </div>
-    {editingAddress && <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-3"><div className="bg-white rounded-2xl w-full max-w-lg p-5"><div className="flex justify-between"><h2 className="font-bold text-lg">{editingAddress === 'new' ? 'Thêm địa chỉ' : 'Sửa địa chỉ'}</h2><button onClick={() => setEditingAddress(null)}><X/></button></div><div className="grid sm:grid-cols-2 gap-3 mt-4">{[['Tên gợi nhớ','label'],['Người nhận','contactName'],['Số điện thoại','contactPhone'],['Địa chỉ đầy đủ','address']].map(([label,key]) => <label key={key} className={key === 'address' ? 'sm:col-span-2 text-xs font-semibold' : 'text-xs font-semibold'}>{label}<input value={(addressForm as any)[key]} onChange={e => setAddressForm(v => ({...v,[key]:e.target.value}))} className="mt-1 w-full rounded-xl border px-3 py-2.5 text-sm"/></label>)}</div><button onClick={saveAddress} disabled={saving} className="mt-4 w-full rounded-xl bg-[#0f7a4f] text-white py-3 font-bold">Lưu địa chỉ</button></div></div>}
-    {legalOpen && <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-3"><div className="bg-white rounded-2xl w-full max-w-lg p-5"><div className="flex justify-between"><div><h2 className="font-bold text-lg">Yêu cầu cập nhật hồ sơ pháp lý</h2><p className="text-xs text-slate-500">TPS1 sẽ kiểm tra trước khi cập nhật.</p></div><button onClick={() => setLegalOpen(false)}><X/></button></div><div className="space-y-3 mt-4"><input placeholder={`Tên công ty mới (hiện tại: ${p.company || 'chưa có'})`} value={legal.company} onChange={e => setLegal(v => ({...v,company:e.target.value}))} className="w-full rounded-xl border px-3 py-2.5"/><input placeholder={`Mã số thuế mới (hiện tại: ${p.taxCode || 'chưa có'})`} value={legal.taxCode} onChange={e => setLegal(v => ({...v,taxCode:e.target.value}))} className="w-full rounded-xl border px-3 py-2.5"/><textarea placeholder="Lý do cập nhật" value={legal.reason} onChange={e => setLegal(v => ({...v,reason:e.target.value}))} className="w-full rounded-xl border px-3 py-2.5 min-h-24"/></div><button onClick={sendLegalRequest} disabled={saving} className="mt-3 w-full rounded-xl bg-[#0f7a4f] text-white py-3 font-bold">Gửi yêu cầu</button></div></div>}
+  const [profileBusy, setProfileBusy] = useState(false);
+  const [profileError, setProfileError] = useState('');
+  const [usernameInput, setUsernameInput] = useState('');
+  const [usernameBusy, setUsernameBusy] = useState(false);
+  const [usernameMessage, setUsernameMessage] = useState('');
+  const [addresses, setAddresses] = useState<Awaited<ReturnType<typeof api.addresses>>['addresses']>([]);
+  const [showAddressForm, setShowAddressForm] = useState(false);
+  const [addressForm, setAddressForm] = useState({ label: '', address: '', contactName: session?.name || '', contactPhone: session?.phone || '', isDefault: false });
+  const [addressError, setAddressError] = useState('');
+  const reloadAddresses = () => api.addresses().then(result => setAddresses(result.addresses)).catch(() => setAddressError(t('Không tải được sổ địa chỉ')));
+  useEffect(() => { let live = true; api.account().then(({ account }) => { if (live) { setProfile(account); setUsernameInput(account.username); setProfileForm({ name: account.name, company: account.company, taxCode: account.taxCode }); } }).catch(() => undefined); return () => { live = false; }; }, []);
+  useEffect(() => { let live = true; api.addresses().then(r => { if (live) setAddresses(r.addresses); }).catch(() => undefined); return () => { live = false; }; }, []);
+  const rows = [
+    { icon: Building2, label: t('Công ty / cửa hàng'), value: profile?.company || session?.company || '—' },
+    { icon: Phone, label: t('Số điện thoại'), value: session?.phone || '—' },
+    { icon: Mail, label: t('Email'), value: session?.email || '—' },
+    { icon: MapPin, label: t('Địa chỉ giao hàng mặc định'), value: addresses.find(address => address.isDefault)?.address || session?.defaultShippingAddress?.address || session?.address || '—' },
+    { icon: Building2, label: t('Mã số thuế'), value: profile?.taxCode || session?.taxCode || '—' },
+  ];
+  return <div className="mx-auto max-w-3xl space-y-5 pb-6">
+    <header className="flex items-start justify-between gap-3"><div><h1 className="text-2xl font-black text-[#17382a]">{t('Tài khoản của tôi')}</h1></div><button onClick={() => { logout(); navigate('/dang-nhap'); }} className="flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl border border-rose-200 bg-white px-3 text-sm font-bold text-rose-700"><LogOut size={16}/>{t('Đăng xuất')}</button></header>
+    <section className="overflow-hidden rounded-3xl bg-gradient-to-br from-[#0b4f34] to-[#13875b] p-5 text-white shadow-lg sm:p-7">
+      <div className="flex items-start justify-between gap-3"><label className="relative flex size-14 cursor-pointer items-center justify-center overflow-hidden rounded-2xl bg-white/15 text-xl font-black">{profile?.avatarUrl ? <img src={profile.avatarUrl} alt={t('Ảnh đại diện')} className="size-full object-cover" /> : (profile?.name || session?.name || 'K').slice(0,1).toUpperCase()}<input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={async event => { const file = event.target.files?.[0]; if (!file) return; setProfileBusy(true); setProfileError(''); try { const result = await api.uploadAvatar(file); setProfile(result.account); } catch { setProfileError(t('Không lưu được ảnh đại diện')); } finally { setProfileBusy(false); event.target.value = ''; } }} /></label>
+        <span className="rounded-full bg-white/15 px-3 py-1.5 text-xs font-bold">{session?.verificationStatus === 'pending' ? t('Chưa xác minh') : session?.verificationStatus === 'rejected' ? t('Đã từ chối') : t('Đã xác minh')}</span></div>
+      <h2 className="mt-4 text-xl font-extrabold">{profile?.name || session?.name || session?.company}</h2><p className="mt-1 text-sm text-white/75">{t('Mã khách hàng')}: <strong className="font-mono text-white">{session?.code}</strong> · {t('Chạm ảnh để đổi')}</p>
+    </section>
+    <section className="rounded-2xl border border-[#17231d]/10 bg-white p-4 shadow-sm"><div className="flex items-center justify-between"><h3 className="font-bold text-[#17382a]">{t('Hồ sơ')}</h3><button type="button" onClick={() => setEditingProfile(value => !value)} className="text-sm font-bold text-[#0f7a4f]">{t(editingProfile ? 'Đóng' : 'Chỉnh sửa')}</button></div>
+      {editingProfile && <form className="mt-3 grid gap-3" onSubmit={async event => { event.preventDefault(); setProfileBusy(true); setProfileError(''); try { const result = await api.saveAccount(profileForm); setProfile(result.account); if (session) setSession({ ...session, name: result.account.name }); setEditingProfile(false); } catch { setProfileError(t('Không lưu được hồ sơ')); } finally { setProfileBusy(false); } }}>{([['name','Tên người liên hệ'],['company','Tên công ty / cửa hàng'],['taxCode','Mã số thuế']] as const).map(([key,label]) => <label key={key} className="text-xs font-semibold text-[#53695c]">{t(label)}<input required={key !== 'taxCode'} value={profileForm[key]} onChange={event => setProfileForm(form => ({ ...form, [key]: event.target.value }))} className="mt-1 h-11 w-full rounded-lg border border-[#d7e3d9] px-3 text-sm" /></label>)}<button disabled={profileBusy} className="min-h-11 rounded-lg bg-[#0f7a4f] font-bold text-white disabled:opacity-50">{t('Lưu hồ sơ')}</button></form>}
+      {profile?.request?.status === 'pending' && <p className="mt-3 rounded-lg bg-amber-50 p-2 text-xs text-amber-900">{t('Tên công ty/MST đang chờ duyệt')}: {profile.request.company} · {profile.request.tax_code || '—'}</p>}
+      {profile?.request?.status === 'rejected' && <p className="mt-3 text-xs text-rose-700">{t('Yêu cầu thay đổi đã bị từ chối')}</p>}
+      {profileError && <p className="mt-2 text-sm text-rose-700">{profileError}</p>}
+    </section>
+    <section className="rounded-2xl border border-[#17231d]/10 bg-white p-4 shadow-sm">
+      <h3 className="font-bold text-[#17382a]">{t('Tên đăng nhập')}</h3>
+      <p className="mt-1 text-xs text-[#718579]">{t('Dùng tên này hoặc SĐT để đăng nhập. Có thể đổi sau 30 ngày.')}</p>
+      <form className="mt-3 flex gap-2" onSubmit={async event => { event.preventDefault(); setUsernameBusy(true); setUsernameMessage(''); try { const result = await api.saveUsername(usernameInput); setProfile(current => current ? { ...current, username: result.username, usernameChangedAt: new Date().toISOString() } : current); setUsernameMessage(t('Đã lưu tên đăng nhập')); } catch (cause) { setUsernameMessage(cause instanceof Error ? cause.message : t('Không lưu được tên đăng nhập')); } finally { setUsernameBusy(false); } }}>
+        <input aria-label={t('Tên đăng nhập')} value={usernameInput} onChange={event => setUsernameInput(event.target.value)} autoCapitalize="none" autoComplete="username" pattern="[a-zA-Z][a-zA-Z0-9._-]{3,29}" minLength={4} maxLength={30} required className="min-w-0 h-11 flex-1 rounded-lg border border-[#d7e3d9] px-3 text-sm" />
+        <button disabled={usernameBusy || usernameInput.trim().toLowerCase() === profile?.username} className="h-11 rounded-lg bg-[#0f7a4f] px-4 text-sm font-bold text-white disabled:opacity-50">{t('Lưu')}</button>
+      </form>
+      {usernameMessage && <p role="status" className="mt-2 text-xs text-[#53695c]">{usernameMessage}</p>}
+    </section>
+    <section className="overflow-hidden rounded-2xl border border-[#17231d]/10 bg-white shadow-sm"><h3 className="border-b border-[#17231d]/8 px-4 py-3 text-sm font-bold text-[#17382a]">{t('Thông tin khách hàng')}</h3>
+      {rows.map(({icon: Icon,label,value}) => <div key={label} className="flex gap-3 border-b border-[#17231d]/5 px-4 py-3.5 last:border-0"><span className="mt-0.5 text-[#0f7a4f]"><Icon size={18}/></span><div className="min-w-0"><p className="text-xs text-[#75857b]">{label}</p><p className="mt-0.5 break-words text-sm font-semibold text-[#263e31]">{value}</p></div></div>)}
+    </section>
+    <section className="space-y-3 rounded-2xl border border-[#17231d]/10 bg-white p-4 shadow-sm">
+      <div className="flex items-center justify-between"><h3 className="font-bold text-[#17382a]">{t('Sổ địa chỉ')}</h3><button onClick={()=>setShowAddressForm(v=>!v)} className="flex min-h-10 items-center gap-1 rounded-lg bg-[#eaf6ef] px-3 text-sm font-bold text-[#0f7a4f]"><Plus size={16}/>{t('Thêm địa chỉ')}</button></div>
+      {addresses.map(a=><div key={a.id} className="rounded-xl border border-[#e2eae4] p-3"><div className="flex items-start gap-2"><MapPin size={17} className="mt-0.5 text-[#0f7a4f]"/><div className="min-w-0 flex-1"><p className="font-bold text-[#263e31]">{a.label} {a.isDefault&&<span className="ml-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] text-emerald-700">{t('Mặc định')}</span>}</p><p className="mt-1 text-sm text-[#53695c]">{a.address}</p><p className="mt-1 text-xs text-[#718579]">{a.contactName} · {a.contactPhone}</p></div><button aria-label={t('Xóa địa chỉ')} onClick={()=>api.deleteAddress(a.id).then(reloadAddresses)} className="p-2 text-rose-600"><Trash2 size={17}/></button></div>{!a.isDefault&&<button onClick={()=>api.setDefaultAddress(a.id).then(reloadAddresses)} className="mt-2 text-xs font-bold text-[#0f7a4f]">{t('Đặt làm mặc định')}</button>}</div>)}
+      {showAddressForm&&<form className="grid gap-2 sm:grid-cols-2" onSubmit={e=>{e.preventDefault();setAddressError('');api.addAddress(addressForm).then(()=>{setAddressForm({label:'',address:'',contactName:session?.name||'',contactPhone:session?.phone||'',isDefault:false});setShowAddressForm(false);reloadAddresses()}).catch(()=>setAddressError(t('Không lưu được địa chỉ')))}}>{([['label','Tên địa chỉ'],['address','Địa chỉ giao hàng'],['contactName','Người nhận'],['contactPhone','Số điện thoại']] as const).map(([key,label])=><label key={key} className="text-xs font-semibold text-[#53695c]">{t(label)}<input required value={addressForm[key]} onChange={e=>setAddressForm(v=>({...v,[key]:e.target.value}))} className="mt-1 h-11 w-full rounded-lg border border-[#d7e3d9] px-3 text-sm"/></label>)}<label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={addressForm.isDefault} onChange={e=>setAddressForm(v=>({...v,isDefault:e.target.checked}))}/>{t('Đặt làm mặc định')}</label><button className="min-h-11 rounded-lg bg-[#0f7a4f] font-bold text-white">{t('Lưu địa chỉ')}</button></form>}
+      {addressError&&<p className="text-sm text-rose-700">{addressError}</p>}
+    </section>
+    <section className="overflow-hidden rounded-2xl border border-[#17231d]/10 bg-white shadow-sm">
+      <Link to="/doi-mat-khau" className="flex items-center gap-3 px-4 py-4 text-sm font-semibold text-[#263e31]"><KeyRound size={18} className="text-[#0f7a4f]"/>{t('Đổi mật khẩu')}<ChevronRight size={17} className="ml-auto text-[#829087]"/></Link>
+    </section>
+    <p className="flex items-center gap-2 px-1 text-xs text-[#718579]"><ShieldCheck size={16} className="text-[#0f7a4f]"/>{t('Thông tin tài khoản được bảo mật')}</p>
   </div>;
 }

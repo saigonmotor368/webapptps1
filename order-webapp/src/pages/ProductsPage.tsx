@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Clock, ScanLine } from 'lucide-react';
+import { Clock } from 'lucide-react';
 import {
   api,
   type Product,
@@ -9,10 +9,10 @@ import {
   type FrequentItem,
   ApiError,
 } from '../lib/api';
-import { normalizeOrderQuantity, validateOrderQuantity } from '../lib/quantityRules';
 import { useAuth } from '../contexts/AuthContext';
+import { useLanguage } from '../contexts/LanguageContext';
 
-import OrderTabsBar, { type OrderTab } from '../components/products/OrderTabsBar';
+import type { OrderTab } from '../components/products/OrderTabsBar';
 import ProductSearchBar from '../components/products/ProductSearchBar';
 import QuickOrderSections from '../components/products/QuickOrderSections';
 import ProductGrid from '../components/products/ProductGrid';
@@ -20,14 +20,12 @@ import CartSummarySidebar from '../components/products/CartSummarySidebar';
 import CartFloatingBar from '../components/products/CartFloatingBar';
 import CartCheckoutDrawer from '../components/products/CartCheckoutDrawer';
 import OrderSuccessModal from '../components/products/OrderSuccessModal';
-import SmartOrderImportModal, { type SmartImportItem } from '../components/SmartOrderImportModal';
 
-const STORAGE_KEY = 'tps1_b2b_pos_tabs_v1';
+const storageKeyFor = (customerId: string) => `tps1_b2b_pos_tabs_v2_${customerId}`;
 const PRODUCT_CACHE_TTL_MS = 2 * 60 * 1000;
 const productSearchCache = new Map<string, { expiresAt: number; products: Product[] }>();
 const PRODUCT_CATALOG_TTL_MS = 5 * 60 * 1000;
-const PRODUCT_CATALOG_STORAGE_PREFIX = 'tps1_product_catalog_v2_';
-const productCatalogMemoryCache = new Map<string, { expiresAt: number; version: string | null; products: Product[] }>();
+const productCatalogMemoryCache = new Map<string, { expiresAt: number; products: Product[] }>();
 const productSearchKeys = new Map<string, string>();
 
 function normalizeSearch(value: string) {
@@ -37,14 +35,14 @@ function normalizeSearch(value: string) {
     .replace(/đ/g, 'd')
     .replace(/Đ/g, 'D')
     .toLocaleLowerCase('vi-VN')
-    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim();
 }
 
 function decodeCatalog(catalog: ProductCatalogResponse): Product[] {
   const imageBaseUrl = catalog.imageBaseUrl.replace(/\/$/, '');
-  return catalog.items.map(([id, sku, name, category, unit, price, priceOnRequest, hasImage, packagingNote, minOrderQty, orderStep, enforceOrderStep, quantityPrecision, quantityAdjustmentMode, shortDescription, sourceImageUrl]) => {
-    const imageUrl = sourceImageUrl || (hasImage && imageBaseUrl ? `${imageBaseUrl}/${id}.webp` : null);
+  return catalog.items.map(([id, sku, name, category, unit, price, priceOnRequest, hasImage]) => {
+    const imageUrl = hasImage && imageBaseUrl ? `${imageBaseUrl}/${id}.webp` : null;
     const product: Product = {
       id,
       sku,
@@ -56,35 +54,25 @@ function decodeCatalog(catalog: ProductCatalogResponse): Product[] {
       imageUrl,
       thumbUrl: imageUrl,
       available: true,
-      packagingNote: packagingNote || null,
-      shortDescription: shortDescription || null,
-      minOrderQty: minOrderQty != null ? Number(minOrderQty) : 1,
-      orderStep: orderStep != null ? Number(orderStep) : 1,
-      enforceOrderStep: Boolean(enforceOrderStep),
-      quantityPrecision: quantityPrecision != null ? Number(quantityPrecision) : 3,
-      quantityAdjustmentMode: quantityAdjustmentMode || 'reject',
     };
     productSearchKeys.set(id, normalizeSearch(`${sku} ${name} ${category || ''}`));
     return product;
   });
 }
 
-function searchLocalCatalog(products: Product[], rawQuery: string): Product[] {
+function searchLocalCatalog(products: Product[], rawQuery: string, productName: (name: string) => string): Product[] {
   const query = normalizeSearch(rawQuery);
   if (!query) return products.slice(0, 48);
-  const compactQuery = query.replace(/\s+/g, '');
   const words = query.split(' ').filter(Boolean);
   const ranked: Array<{ product: Product; score: number }> = [];
 
   for (const product of products) {
-    const key = productSearchKeys.get(product.id) || normalizeSearch(`${product.sku} ${product.name}`);
-    const compactKey = key.replace(/\s+/g, '');
-    if (!words.every((word) => key.includes(word)) && !compactKey.includes(compactQuery)) continue;
+    const key = normalizeSearch(`${productSearchKeys.get(product.id) || `${product.sku} ${product.name} ${product.category || ''}`} ${productName(product.name)} ${product.category ? productName(product.category) : ''}`);
+    if (!words.every((word) => key.includes(word))) continue;
     const sku = normalizeSearch(product.sku || '');
-    const name = normalizeSearch(product.name);
-    const compactName = name.replace(/\s+/g, '');
+    const name = normalizeSearch(productName(product.name));
     const score =
-      sku === query ? 0 : sku.startsWith(query) ? 1 : name === query ? 2 : compactName === compactQuery ? 3 : name.startsWith(query) || compactName.startsWith(compactQuery) ? 4 : 5;
+      sku === query ? 0 : sku.startsWith(query) ? 1 : name === query ? 2 : name.startsWith(query) ? 3 : 4;
     ranked.push({ product, score });
   }
 
@@ -122,12 +110,12 @@ function getDefaultDelivery(session: any) {
   };
 }
 
-function createDefaultTab(index: number, session: any): OrderTab {
+function createDefaultTab(session: any): OrderTab {
   const defaultDelivery = getDefaultDelivery(session);
   return {
     id: `tab-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
     idempotencyKey: crypto.randomUUID(),
-    title: `Đặt hàng ${index}`,
+    title: 'Đặt hàng',
     items: [],
     note: '',
     deliveryDate: getTomorrowDateStr(),
@@ -139,57 +127,69 @@ function createDefaultTab(index: number, session: any): OrderTab {
 
 export default function ProductsPage() {
   const { session, logout } = useAuth();
+  const { t, errorText, productName } = useLanguage();
   const navigate = useNavigate();
 
-  // 1. Quản lý hệ thống Đa tab đặt hàng
-  const [tabs, setTabs] = useState<OrderTab[]>(() => {
+  // Một giỏ đặt hàng; gom các giỏ cũ vào một giỏ khi nâng cấp từ bản beta trước.
+  const [activeTab, setActiveTab] = useState<OrderTab>(() => {
     try {
-      const saved = sessionStorage.getItem(STORAGE_KEY);
+      const saved = localStorage.getItem(storageKeyFor(session?.id || 'guest'));
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
           const defaultDelivery = getDefaultDelivery(session);
-          return parsed.map((tab) => ({
-            ...tab,
-            idempotencyKey: tab?.idempotencyKey || crypto.randomUUID(),
-            ...(String(tab?.deliveryAddress || '').trim() ? {} : defaultDelivery),
-          }));
+          const sourceTabs = parsed.filter((tab) => tab && typeof tab === 'object');
+          const primary = sourceTabs[0];
+          if (primary) {
+            const mergedItems = new Map<string, OrderTab['items'][number]>();
+            for (const tab of sourceTabs) {
+              for (const item of Array.isArray(tab.items) ? tab.items : []) {
+                if (!item?.product?.id) continue;
+                const current = mergedItems.get(item.product.id);
+                mergedItems.set(item.product.id, current
+                  ? { ...current, quantity: Number((current.quantity + (Number(item.quantity) || 0)).toFixed(2)), note: [current.note, item.note].filter(Boolean).join('; ') || undefined, sourceImportLineId: undefined }
+                  : { ...item, quantity: Number(item.quantity) || 1, sourceImportLineId: undefined });
+              }
+            }
+            return {
+              ...primary,
+              id: primary.id || `tab-${Date.now()}`,
+              idempotencyKey: sourceTabs.length === 1 && primary.idempotencyKey ? primary.idempotencyKey : crypto.randomUUID(),
+              title: 'Đặt hàng',
+              items: [...mergedItems.values()],
+              note: [...new Set(sourceTabs.map((tab) => String(tab.note || '').trim()).filter(Boolean))].join('\n'),
+              sourceImportBatchId: undefined,
+              ...(String(primary.deliveryAddress || '').trim() ? {} : defaultDelivery),
+            } as OrderTab;
+          }
         }
       }
     } catch {}
-    return [createDefaultTab(1, session)];
+    return createDefaultTab(session);
   });
-  const [activeTabId, setActiveTabId] = useState<string>(() => tabs[0]?.id || '');
 
   useEffect(() => {
-    if (!tabs.some((t) => t.id === activeTabId) && tabs.length > 0) {
-      setActiveTabId(tabs[0].id);
-    }
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(tabs));
-  }, [tabs, activeTabId]);
-
-  const activeTab = tabs.find((t) => t.id === activeTabId) || tabs[0];
+    localStorage.setItem(storageKeyFor(session?.id || 'guest'), JSON.stringify([activeTab]));
+  }, [activeTab, session?.id]);
 
   // 2. Search & Catalog state
   const [searchQuery, setSearchQuery] = useState('');
-  const [addQty, setAddQty] = useState(1);
+  const [searchInput, setSearchInput] = useState('');
   const [searchResults, setSearchResults] = useState<Product[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [selectedResultIndex, setSelectedResultIndex] = useState(0);
-  const [selectedSearchProduct, setSelectedSearchProduct] = useState<Product | null>(null);
+  const [initialProducts, setInitialProducts] = useState<Product[]>([]);
   const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
+  const [browseLimit, setBrowseLimit] = useState(40);
   const [cutoffInfo, setCutoffInfo] = useState<{ earliestDate: string; cutoffTimeStr: string } | null>(null);
   const [selectedCategory, setSelectedCategory] = useState('');
   const [recentOrders, setRecentOrders] = useState<Order[]>([]);
   const [frequentItems, setFrequentItems] = useState<FrequentItem[]>([]);
   const [loadingLatestOrder, setLoadingLatestOrder] = useState(false);
-  const [showSmartImport, setShowSmartImport] = useState(false);
-  const [importNotice, setImportNotice] = useState('');
+  const hasSubmittedSearch = Boolean(searchQuery.trim()) && searchInput.trim() === searchQuery.trim();
   const [favoriteIds, setFavoriteIds] = useState<string[]>(() => {
     try {
-      const saved = localStorage.getItem('tps1_favorite_products_v1');
+      const saved = localStorage.getItem(`tps1_favorite_products_v2_${session?.id || 'guest'}`);
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -200,10 +200,9 @@ export default function ProductsPage() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-  const [successOrder, setSuccessOrder] = useState<{ code: string; total: number } | null>(null);
+  const [successOrder, setSuccessOrder] = useState<{ code: string; total: number; pendingPriceCount: number } | null>(null);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
   const searchTimeoutRef = useRef<any>(null);
   const searchAbortRef = useRef<AbortController | null>(null);
   const searchRequestRef = useRef(0);
@@ -213,20 +212,18 @@ export default function ProductsPage() {
   // Lưu danh sách yêu thích
   useEffect(() => {
     try {
-      localStorage.setItem('tps1_favorite_products_v1', JSON.stringify(favoriteIds));
+      localStorage.setItem(`tps1_favorite_products_v2_${session?.id || 'guest'}`, JSON.stringify(favoriteIds));
     } catch {}
-  }, [favoriteIds]);
+  }, [favoriteIds, session?.id]);
 
   // Tìm kiếm qua Search API khi catalog cục bộ chưa sẵn sàng
   const loadProducts = useCallback(
-    async (rawQuery: string, openDropdown = true) => {
+    async (rawQuery: string) => {
       const query = rawQuery.trim();
       const cacheKey = `${session?.id || 'anonymous'}:${query.toLocaleLowerCase('vi-VN')}`;
       const cached = productSearchCache.get(cacheKey);
       if (cached && cached.expiresAt > Date.now()) {
         setSearchResults(cached.products);
-        setIsDropdownOpen(openDropdown);
-        setSelectedResultIndex(0);
         return;
       }
 
@@ -244,8 +241,6 @@ export default function ProductsPage() {
           products,
         });
         setSearchResults(products);
-        setIsDropdownOpen(openDropdown);
-        setSelectedResultIndex(0);
       } catch (err) {
         if (controller.signal.aborted) return;
         if (err instanceof ApiError && err.status === 401) {
@@ -269,101 +264,87 @@ export default function ProductsPage() {
     return () => controller.abort();
   }, []);
 
+  // Nạp đơn gần nhất để khách có thể đặt lại ngay ở màn hình mặc định.
+  useEffect(() => {
+    void api.orders()
+      .then((res) => setRecentOrders((res.orders || []).slice(0, 1)))
+      .catch(() => undefined);
+  }, []);
+
   // Hiển thị nhóm hàng đầu tiên trước. Không bắt khách chờ toàn bộ catalog
   // 5.000+ mặt hàng; tìm kiếm sẽ gọi API theo từ khóa trong lúc catalog nền
   // chưa sẵn sàng.
   useEffect(() => {
+    const cached = productCatalogMemoryCache.get(session?.id || '');
+    if (cached && cached.expiresAt > Date.now()) return;
     const controller = new AbortController();
     void api.products({}, controller.signal)
       .then((res) => {
         if (controller.signal.aborted) return;
-        setSearchResults(res.products || []);
+        setInitialProducts(res.products || []);
         setCatalogLoading(false);
       })
       .catch(() => {
         if (!controller.signal.aborted) setCatalogLoading(false);
       });
     return () => controller.abort();
-  }, []);
+  }, [session?.id]);
 
   // Tải toàn bộ Catalog vào bộ nhớ ở nền để tìm kiếm tức thì cho các lần sau.
   // Trì hoãn nhẹ để request đầu tiên và khung thao tác của khách được ưu tiên.
-  //
-  // Bản đang giữ (bộ nhớ/sessionStorage) được hiện ngay, rồi hỏi API phiên bản
-  // danh mục (vài chục byte). Chỉ tải lại toàn bộ khi admin đã sửa sản phẩm,
-  // để mô tả/giá mới hiện sau khi làm mới trang mà không chờ hết 5 phút.
   useEffect(() => {
     const customerId = session?.id;
     if (!customerId) return;
     const now = Date.now();
-    const storageKey = `${PRODUCT_CATALOG_STORAGE_PREFIX}${customerId}`;
-    try {
-      // Bản v1 không có phiên bản nên không kiểm tra được; bỏ đi.
-      sessionStorage.removeItem(`tps1_product_catalog_v1_${customerId}`);
-    } catch {}
+    const memory = productCatalogMemoryCache.get(customerId);
+    if (memory && memory.expiresAt > now) {
+      setCatalogProducts(memory.products);
+      setCatalogLoading(false);
+      return;
+    }
 
-    let cached = productCatalogMemoryCache.get(customerId);
-    if (!cached || cached.expiresAt <= now) {
-      cached = undefined;
-      try {
-        const saved = sessionStorage.getItem(storageKey);
-        if (saved) {
-          const parsed = JSON.parse(saved) as { expiresAt: number; version: string | null; catalog: ProductCatalogResponse };
-          if (parsed.expiresAt > now && Array.isArray(parsed.catalog?.items)) {
-            cached = { expiresAt: parsed.expiresAt, version: parsed.version ?? null, products: decodeCatalog(parsed.catalog) };
-            productCatalogMemoryCache.set(customerId, cached);
-          } else {
-            sessionStorage.removeItem(storageKey);
-          }
+    const storageKey = `tps1_product_catalog_v1_${customerId}`;
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        const parsed = JSON.parse(saved) as { expiresAt: number; catalog: ProductCatalogResponse };
+        if ((parsed.expiresAt > now || !navigator.onLine) && Array.isArray(parsed.catalog?.items)) {
+          const products = decodeCatalog(parsed.catalog);
+          productCatalogMemoryCache.set(customerId, { expiresAt: parsed.expiresAt, products });
+          setCatalogProducts(products);
+          setCatalogLoading(false);
+          return;
         }
-      } catch {
-        sessionStorage.removeItem(storageKey);
+        localStorage.removeItem(storageKey);
       }
+    } catch {
+      localStorage.removeItem(storageKey);
     }
 
     const controller = new AbortController();
     catalogAbortRef.current = controller;
-    const loadCatalog = () => api
+    const timer = window.setTimeout(() => void api
       .productCatalog(controller.signal)
       .then((catalog) => {
         if (controller.signal.aborted) return;
         const products = decodeCatalog(catalog);
         const expiresAt = Date.now() + PRODUCT_CATALOG_TTL_MS;
-        const version = catalog.version ?? null;
-        productCatalogMemoryCache.set(customerId, { expiresAt, version, products });
+        productCatalogMemoryCache.set(customerId, { expiresAt, products });
         setCatalogProducts(products);
-        setSearchResults((current) => (searchQuery.trim() ? current : products.slice(0, 48)));
         setCatalogLoading(false);
         try {
-          sessionStorage.setItem(storageKey, JSON.stringify({ expiresAt, version, catalog }));
+          localStorage.setItem(storageKey, JSON.stringify({ expiresAt, catalog }));
         } catch {}
-      });
-    const warn = (error: unknown) => {
-      if (!controller.signal.aborted) console.warn('Không tải được catalog nền:', error);
-    };
-
-    if (cached) {
-      const cachedVersion = cached.version;
-      setCatalogProducts(cached.products);
-      setSearchResults(cached.products.slice(0, 48));
-      setCatalogLoading(false);
-      if (cachedVersion) {
-        void api
-          .productCatalogVersion(controller.signal)
-          .then((res) => {
-            if (controller.signal.aborted || !res.version || res.version === cachedVersion) return;
-            return loadCatalog();
-          })
-          .catch(warn);
-      }
-      return () => controller.abort();
-    }
-
-    const timer = window.setTimeout(() => void loadCatalog()
-      .catch(warn)
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          setCatalogLoading(false);
+          console.warn('Không tải được catalog nền:', error);
+        }
+      })
       .finally(() => {
         if (!controller.signal.aborted) setCatalogLoading(false);
-      }), 1200);
+      }), 3000);
 
     return () => {
       window.clearTimeout(timer);
@@ -388,20 +369,14 @@ export default function ProductsPage() {
   useEffect(() => {
     const q = searchQuery.trim();
     if (!q) {
-      setIsDropdownOpen(false);
-      return;
-    }
-    if (selectedSearchProduct && q === selectedSearchProduct.name) {
-      setIsDropdownOpen(false);
+      setSearchResults([]);
       return;
     }
 
     if (catalogProducts.length > 0) {
       searchAbortRef.current?.abort();
       setSearchLoading(false);
-      setSearchResults(searchLocalCatalog(catalogProducts, q));
-      setIsDropdownOpen(true);
-      setSelectedResultIndex(0);
+      setSearchResults(searchLocalCatalog(catalogProducts, q, productName));
       return;
     }
 
@@ -409,31 +384,14 @@ export default function ProductsPage() {
     searchTimeoutRef.current = setTimeout(() => void loadProducts(q), 120);
 
     return () => clearTimeout(searchTimeoutRef.current);
-  }, [searchQuery, loadProducts, catalogProducts, selectedSearchProduct]);
-
-  // Đóng dropdown khi click ngoài
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(e.target as Node) &&
-        !searchInputRef.current?.contains(e.target as Node)
-      ) {
-        setIsDropdownOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  }, [searchQuery, loadProducts, catalogProducts, productName]);
 
   // Update tab helper
   const updateActiveTab = useCallback(
     (updater: (prev: OrderTab) => OrderTab) => {
-      setTabs((prevTabs) =>
-        prevTabs.map((tab) => (tab.id === activeTab.id ? updater(tab) : tab))
-      );
+      setActiveTab(updater);
     },
-    [activeTab.id]
+    []
   );
 
   // Lấy ngày giao sớm nhất do server tính theo giờ Việt Nam. Không dùng giờ
@@ -454,48 +412,28 @@ export default function ProductsPage() {
   // Thao tác Thêm / Sửa số lượng / Ghi chú dòng
   const handleAddProduct = (
     product: Product,
-    quantityToAdd?: number,
+    quantityToAdd: number = 1,
     options?: { resetSearch?: boolean; keepFocus?: boolean }
   ) => {
-    const defaultQty = product.enforceOrderStep && product.minOrderQty ? product.minOrderQty : (product.orderStep || 1);
-    const requestedQty = quantityToAdd != null && quantityToAdd > 0 ? quantityToAdd : defaultQty;
-    const normalized = normalizeOrderQuantity(requestedQty, product.minOrderQty, product.orderStep, product.enforceOrderStep, product.quantityPrecision, product.quantityAdjustmentMode, product.unit);
-    if (!normalized.ok) { setErrorMessage(`${product.name}: ${normalized.message}`); return; }
-    const qty = normalized.normalizedQuantity;
-    const currentLine = activeTab.items.find((item) => item.product.id === product.id && !item.note?.trim());
-    const mergedResult = currentLine
-      ? normalizeOrderQuantity(currentLine.quantity + requestedQty, product.minOrderQty, product.orderStep, product.enforceOrderStep, product.quantityPrecision, product.quantityAdjustmentMode, product.unit)
-      : null;
-    if (mergedResult && !mergedResult.ok) { setErrorMessage(`${product.name}: ${mergedResult.message}`); return; }
+    const qty = Math.max(0.1, Number(quantityToAdd) || 1);
     updateActiveTab((tab) => {
       const existingIdx = tab.items.findIndex((item) => item.product.id === product.id && !item.note?.trim());
       if (existingIdx >= 0) {
-        const step = product.orderStep || 1;
-        const addAmount = quantityToAdd != null && quantityToAdd > 0 ? quantityToAdd : step;
-        const result = mergedResult && mergedResult.ok ? mergedResult : null;
         const updated = [...tab.items];
         updated[existingIdx] = {
           ...updated[existingIdx],
-          quantity: result?.normalizedQuantity ?? Math.round((updated[existingIdx].quantity + addAmount) * 1000) / 1000,
-          requestedQuantity: result?.requestedQuantity ?? updated[existingIdx].quantity + addAmount,
-          adjustmentAcknowledged: Boolean(result?.adjusted),
-          quantityAdjustmentMessage: result?.message || undefined,
+          quantity: Number((updated[existingIdx].quantity + qty).toFixed(2)),
         };
         return { ...tab, items: updated };
       } else {
         return {
           ...tab,
-          items: [...tab.items, { product, quantity: qty, requestedQuantity: requestedQty, adjustmentAcknowledged: normalized.adjusted, quantityAdjustmentMessage: normalized.message || undefined }],
+          items: [...tab.items, { product, quantity: qty }],
         };
       }
     });
 
-    if (options?.resetSearch) {
-      setSearchQuery('');
-      setSelectedSearchProduct(null);
-      setIsDropdownOpen(false);
-      setAddQty(1);
-    }
+    if (options?.resetSearch) { setSearchQuery(''); setSearchInput(''); }
     if (options?.keepFocus) {
       searchInputRef.current?.focus();
     }
@@ -510,18 +448,9 @@ export default function ProductsPage() {
     updateActiveTab((tab) => ({
       ...tab,
       items: tab.items.map((item) =>
-        (item.lineKey || item.product.id) === lineKey ? { ...item, quantity: qty, requestedQuantity: qty, adjustmentAcknowledged: false, quantityAdjustmentMessage: undefined } : item
+        (item.lineKey || item.product.id) === lineKey ? { ...item, quantity: qty } : item
       ),
     }));
-  };
-
-  const handleNormalizeQty = (lineKey: string) => {
-    updateActiveTab((tab) => ({ ...tab, items: tab.items.map((item) => {
-      if ((item.lineKey || item.product.id) !== lineKey) return item;
-      const result = normalizeOrderQuantity(item.quantity, item.product.minOrderQty, item.product.orderStep, item.product.enforceOrderStep, item.product.quantityPrecision, item.product.quantityAdjustmentMode, item.product.unit);
-      if (!result.ok) return item;
-      return { ...item, requestedQuantity: result.requestedQuantity, quantity: result.normalizedQuantity, adjustmentAcknowledged: result.adjusted, quantityAdjustmentMessage: result.message || undefined };
-    }) }));
   };
 
   const handleUpdateItemNote = (lineKey: string, note: string) => {
@@ -538,36 +467,6 @@ export default function ProductsPage() {
       const items = tab.items.filter((item) => (item.lineKey || item.product.id) !== lineKey);
       return { ...tab, items, sourceImportBatchId: items.some((item) => item.sourceImportLineId) ? tab.sourceImportBatchId : undefined };
     });
-  };
-
-  const handleSmartImport = (sourceImportBatchId: string, imported: SmartImportItem[]) => {
-    updateActiveTab((tab) => {
-      const next = [...tab.items];
-      for (const item of imported) {
-        const note = item.note?.trim() || '';
-        const existing = next.findIndex((line) => line.product.id === item.productId && (line.note?.trim() || '') === note);
-        if (existing >= 0) {
-          next[existing] = { ...next[existing], quantity: next[existing].quantity + item.quantity, sourceImportLineId: next[existing].sourceImportLineId || item.importLineId };
-          continue;
-        }
-        next.push({
-          lineKey: `import-${item.importLineId}`,
-          sourceImportLineId: item.importLineId,
-          product: {
-            id: item.productId, sku: item.sku, name: item.name, category: item.category, unit: item.unit,
-            imageUrl: item.imageUrl, thumbUrl: item.imageUrl, price: item.price, priceOnRequest: item.price <= 0,
-	            available: true, minOrderQty: item.minOrderQty ?? undefined, orderStep: item.orderStep ?? undefined,
-	            enforceOrderStep: item.enforceOrderStep ?? undefined, packagingNote: item.packagingNote ?? undefined,
-            quantityPrecision: item.quantityPrecision ?? undefined, quantityAdjustmentMode: item.quantityAdjustmentMode ?? 'reject',
-          },
-          quantity: item.quantity,
-          note,
-        });
-      }
-      return { ...tab, items: next, sourceImportBatchId };
-    });
-    setImportNotice(`Đã thêm ${imported.length} dòng hợp lệ vào giỏ hàng.`);
-    window.setTimeout(() => setImportNotice(''), 5000);
   };
 
   // Nhận yêu cầu "Đặt lại" từ lịch sử đơn sau khi catalog đã sẵn sàng.
@@ -600,52 +499,6 @@ export default function ProductsPage() {
     }
   }, [catalogProducts, updateActiveTab]);
 
-  const handleAddNewTab = () => {
-    const nextNum = tabs.length + 1;
-    const newT = createDefaultTab(nextNum, session);
-    setTabs((prev) => [...prev, newT]);
-    setActiveTabId(newT.id);
-  };
-
-  const handleCloseTab = (tabId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (tabs.length === 1) {
-      updateActiveTab((t) => ({ ...t, items: [] }));
-      return;
-    }
-    setTabs((prev) => prev.filter((t) => t.id !== tabId));
-  };
-
-  const handleSearchKeyDown = (e: React.KeyboardEvent) => {
-    if (!isDropdownOpen) {
-      if (e.key === 'Enter' && selectedSearchProduct) {
-        e.preventDefault();
-        handleAddProduct(selectedSearchProduct, addQty, { resetSearch: true, keepFocus: true });
-      }
-      return;
-    }
-    if (searchResults.length === 0) return;
-
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setSelectedResultIndex((prev) => (prev < searchResults.length - 1 ? prev + 1 : prev));
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setSelectedResultIndex((prev) => (prev > 0 ? prev - 1 : 0));
-    } else if (e.key === 'Enter') {
-      e.preventDefault();
-      if (searchResults[selectedResultIndex]) {
-        const product = searchResults[selectedResultIndex];
-        setSelectedSearchProduct(product);
-        setSearchQuery(product.name);
-        setAddQty(product.enforceOrderStep && product.minOrderQty ? product.minOrderQty : (product.orderStep || 1));
-        setIsDropdownOpen(false);
-      }
-    } else if (e.key === 'Escape') {
-      setIsDropdownOpen(false);
-    }
-  };
-
   // Danh sách gợi ý từ catalog và lịch sử
   const frequentProducts = useMemo(
     () =>
@@ -675,29 +528,19 @@ export default function ProductsPage() {
 
   const latestOrder = recentOrders[0];
 
-  const categories = useMemo(() => {
-    const values = [
-      ...new Set(
-        catalogProducts.map((p) => String(p.category || '').trim()).filter(Boolean)
-      ),
-    ];
-    return values.sort((a, b) => a.localeCompare(b, 'vi')).slice(0, 16);
-  }, [catalogProducts]);
-
-  const categoryProducts = useMemo(() => {
-    if (!selectedCategory) return [];
-    return catalogProducts.filter((p) => p.category === selectedCategory).slice(0, 12);
-  }, [catalogProducts, selectedCategory]);
-
   const displayedProducts = useMemo(() => {
-    if (searchQuery.trim()) {
-      return searchResults;
-    }
-    if (selectedCategory) {
-      return catalogProducts.filter((p) => p.category === selectedCategory);
-    }
-    return (catalogProducts.length > 0 ? catalogProducts : searchResults).slice(0, 48);
-  }, [searchQuery, searchResults, selectedCategory, catalogProducts]);
+    return hasSubmittedSearch ? searchResults : [];
+  }, [hasSubmittedSearch, searchResults]);
+
+  const categories = useMemo(() => [...new Set(catalogProducts.map(p => String(p.category || '').trim()).filter(Boolean))].sort((a,b) => a.localeCompare(b,'vi')), [catalogProducts]);
+  const browseProducts = useMemo(
+    () => {
+      const products = catalogProducts.length ? catalogProducts : initialProducts;
+      return selectedCategory ? products.filter(product => product.category === selectedCategory) : products;
+    },
+    [catalogProducts, initialProducts, selectedCategory]
+  );
+  const visibleProducts = hasSubmittedSearch ? displayedProducts : browseProducts.slice(0, browseLimit);
 
   const toggleFavorite = (productId: string) => {
     setFavoriteIds((current) =>
@@ -737,8 +580,14 @@ export default function ProductsPage() {
   // Gửi đơn đặt hàng (Submit Order)
   const handleSubmitOrder = async () => {
     setErrorMessage('');
+    if (!navigator.onLine) { setErrorMessage(t('Không có kết nối mạng. Giỏ hàng của bạn đã được lưu.')); return; }
     if (activeTab.items.length === 0) {
-      setErrorMessage('Vui lòng thêm ít nhất 1 mặt hàng vào đơn');
+      setErrorMessage(t('Vui lòng thêm ít nhất 1 mặt hàng vào đơn'));
+      return;
+    }
+    if (cutoffInfo && activeTab.deliveryDate < cutoffInfo.earliestDate) {
+      setErrorMessage(t('Đã quá giờ chốt đơn. Vui lòng chọn ngày giao mới.'));
+      updateActiveTab(tab => ({ ...tab, deliveryDate: cutoffInfo.earliestDate }));
       return;
     }
     if (
@@ -746,27 +595,8 @@ export default function ProductsPage() {
       !activeTab.deliveryPhone.trim() ||
       !activeTab.deliveryAddress.trim()
     ) {
-      setErrorMessage('Vui lòng điền đầy đủ Tên, SĐT và Địa chỉ giao hàng');
+      setErrorMessage(t('Vui lòng điền đầy đủ Tên, SĐT và Địa chỉ giao hàng'));
       return;
-    }
-
-    // Kiểm tra quy cách từng món trong giỏ
-    for (const item of activeTab.items) {
-      if (item.product.enforceOrderStep) {
-        const err = validateOrderQuantity(
-          item.quantity,
-          item.product.minOrderQty,
-          item.product.orderStep,
-          true,
-          item.product.quantityPrecision,
-          item.product.quantityAdjustmentMode,
-          item.product.unit
-        );
-        if (err) {
-          setErrorMessage(`Mặt hàng "${item.product.name}" chưa đúng quy cách: ${err}`);
-          return;
-        }
-      }
     }
 
     setSubmitting(true);
@@ -790,8 +620,6 @@ export default function ProductsPage() {
           productId: it.product.id,
           name: it.product.name,
           quantity: it.quantity,
-          requestedQuantity: it.requestedQuantity ?? it.quantity,
-          adjustmentAcknowledged: Boolean(it.adjustmentAcknowledged),
           note: it.note?.trim() || undefined,
           sourceImportLineId: it.sourceImportLineId,
         })),
@@ -809,14 +637,14 @@ export default function ProductsPage() {
         0
       );
 
-      setSuccessOrder({ code: res.orderCode, total: subtotal });
+      setSuccessOrder({ code: res.orderCode, total: res.total ?? subtotal, pendingPriceCount: res.pendingPriceCount || 0 });
       setIsDrawerOpen(false);
 
       // Reset giỏ của tab vừa gửi
       updateActiveTab((t) => ({ ...t, items: [], note: '', idempotencyKey: crypto.randomUUID(), sourceImportBatchId: undefined }));
     } catch (err) {
       setErrorMessage(
-        err instanceof ApiError ? err.message : 'Không gửi được đơn hàng, vui lòng thử lại'
+        err instanceof ApiError ? errorText(err) : t('Không gửi được đơn hàng, vui lòng thử lại')
       );
     } finally {
       setSubmitting(false);
@@ -824,143 +652,68 @@ export default function ProductsPage() {
   };
 
   return (
-    <div className="flex flex-col gap-3.5 sm:gap-4 pb-12 lg:pb-0">
+      <div className="flex flex-col gap-3.5 sm:gap-4 pb-12 lg:pb-0">
       {/* 1. Header trang: Lời chào & Giờ chốt đơn */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 px-0.5">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 px-0.5">
         <div>
           <h1 className="text-xl sm:text-2xl font-black text-[#17231d] tracking-tight">
-            Đặt hàng cho bếp
+            {t('Đặt hàng cho bếp')}
           </h1>
-          <p className="text-xs sm:text-sm text-[#59665f] mt-0.5">
-            Chọn món quen thuộc hoặc tìm nhanh theo tên, mã SKU
-          </p>
         </div>
-        <div className="inline-flex items-center gap-2 self-start sm:self-auto px-3.5 py-1.5 rounded-xl bg-amber-500/15 border border-amber-400/35 text-amber-900 text-xs font-bold shadow-xs">
-          <Clock size={15} className="text-[#e0742f]" />
-          <span>
-            {cutoffInfo
-              ? `Ngày giao sớm nhất: ${cutoffInfo.earliestDate} · Chốt ${cutoffInfo.cutoffTimeStr}`
-              : 'Vui lòng chọn ngày và ca giao hàng phù hợp'}
-          </span>
+        <div className="inline-flex items-center gap-1.5 self-start sm:self-auto text-[11px] font-semibold text-[#8a5729]">
+          <Clock size={13} className="text-[#e0742f]" />
+          <span>{cutoffInfo ? `${t('Giao')}: ${cutoffInfo.earliestDate} · ${t('Chốt')}: ${cutoffInfo.cutoffTimeStr}` : t('Đang tải lịch giao')}</span>
         </div>
       </div>
 
-      {/* 2. Top Bar: Tìm kiếm F3 & Hệ thống Đa Tab */}
-      <div className="bg-white rounded-2xl border border-[#17231d]/10 shadow-xs p-3 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 sticky top-[58px] z-20 backdrop-blur-md bg-white/95">
-        <ProductSearchBar
-          searchQuery={searchQuery}
-          onSearchChange={(value) => {
-            setSearchQuery(value);
-            if (!selectedSearchProduct || value !== selectedSearchProduct.name) setSelectedSearchProduct(null);
-          }}
-          addQty={addQty}
-          onAddQtyChange={setAddQty}
-          searchResults={searchResults}
-          searchLoading={searchLoading}
-          isDropdownOpen={isDropdownOpen}
-          onOpenDropdown={() => {
-            if (selectedSearchProduct && searchQuery === selectedSearchProduct.name) return;
-            if (searchResults.length > 0) setIsDropdownOpen(true);
-            else void loadProducts('');
-          }}
-          onCloseDropdown={() => setIsDropdownOpen(false)}
-          selectedResultIndex={selectedResultIndex}
-          onSelectIndex={setSelectedResultIndex}
-          selectedProduct={selectedSearchProduct}
-          onSelectProduct={(product) => {
-            setSelectedSearchProduct(product);
-            setSearchQuery(product.name);
-            setAddQty(product.enforceOrderStep && product.minOrderQty ? product.minOrderQty : (product.orderStep || 1));
-            setIsDropdownOpen(false);
-          }}
-          onAddProduct={handleAddProduct}
-          searchInputRef={searchInputRef}
-          dropdownRef={dropdownRef}
-          onKeyDown={handleSearchKeyDown}
-        />
-
-        <button type="button" onClick={() => setShowSmartImport(true)} className="shrink-0 flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-[#17231d] text-white text-xs font-bold hover:bg-[#0f7a4f] transition-colors">
-          <ScanLine size={17}/> <span>Nhập đơn thông minh</span>
-        </button>
-
-        <OrderTabsBar
-          tabs={tabs}
-          activeTabId={activeTab.id}
-          onSelectTab={setActiveTabId}
-          onAddTab={handleAddNewTab}
-          onCloseTab={handleCloseTab}
-        />
+      <div className="rounded-2xl border border-[#17231d]/10 bg-white p-3 shadow-sm sm:p-4">
+        <ProductSearchBar value={searchInput} onChange={setSearchInput} inputRef={searchInputRef}
+          onSubmit={() => { const query = searchInput.trim(); setSearchQuery(query); if (!query) setSearchResults([]); }} />
       </div>
 
-      {importNotice && <div className="rounded-xl bg-green-50 border border-green-200 text-green-700 px-4 py-2.5 text-sm font-semibold">{importNotice}</div>}
+      {/* Thao tác đặt nhanh và danh mục chỉ hiện khi chưa gửi từ khóa. */}
+      {!hasSubmittedSearch && <QuickOrderSections latestOrder={latestOrder} loadingLatestOrder={loadingLatestOrder} onReorderLatest={loadLatestOrderAndAdd}
+        frequentProducts={frequentProducts} favoriteProducts={favoriteProducts} favoriteIds={favoriteIds} onToggleFavorite={toggleFavorite}
+        categories={categories} selectedCategory={selectedCategory} onSelectCategory={(category) => { setSelectedCategory(category); setBrowseLimit(40); }} onAddProduct={handleAddProduct} />}
 
-      {/* 3. Khối đặt nhanh cho bếp (Đơn gần nhất, Thường mua, Yêu thích, Nhóm hàng) */}
-      <QuickOrderSections
-        latestOrder={latestOrder}
-        loadingLatestOrder={loadingLatestOrder}
-        onReorderLatest={loadLatestOrderAndAdd}
-        frequentProducts={frequentProducts}
-        favoriteProducts={favoriteProducts}
-        favoriteIds={favoriteIds}
-        onToggleFavorite={toggleFavorite}
-        categories={categories}
-        selectedCategory={selectedCategory}
-        onSelectCategory={setSelectedCategory}
-        categoryProducts={categoryProducts}
-        onAddProduct={handleAddProduct}
-      />
-
-      {/* 4. Vùng làm việc chính: 2 Cột (Trái: Lưới sản phẩm; Phải: Sidebar Tóm tắt & Gửi đơn) */}
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_370px] gap-4 items-start">
-        {/* CỘT TRÁI: Lưới card sản phẩm */}
         <div className="space-y-3 min-w-0">
           <div className="flex items-center justify-between px-1">
             <h2 className="text-sm font-bold text-[#17231d] uppercase tracking-wider flex items-center gap-2">
               <span>
-                {searchQuery.trim()
-                  ? `Kết quả tìm kiếm ("${searchQuery}")`
-                  : selectedCategory
-                  ? `Nhóm: ${selectedCategory}`
-                  : 'Danh mục hàng hóa'}
+                {hasSubmittedSearch
+                  ? `${t('Kết quả tìm kiếm')} ("${searchQuery}")`
+                  : selectedCategory ? productName(selectedCategory) : t('Tất cả sản phẩm')}
               </span>
               <span className="text-xs font-mono font-normal text-[#59665f]">
-                ({displayedProducts.length} mặt hàng)
+                ({hasSubmittedSearch ? displayedProducts.length : browseProducts.length} {t('mặt hàng')})
               </span>
             </h2>
-
-            {selectedCategory && (
-              <button
-                type="button"
-                onClick={() => setSelectedCategory('')}
-                className="text-xs text-[#0f7a4f] hover:underline font-semibold cursor-pointer"
-              >
-                Xem tất cả nhóm
-              </button>
-            )}
           </div>
 
           <ProductGrid
-            products={displayedProducts}
+            products={visibleProducts}
             itemsInCart={activeTab.items}
             favoriteIds={favoriteIds}
             onToggleFavorite={toggleFavorite}
             onAddProduct={handleAddProduct}
             onUpdateQty={handleUpdateQty}
-            onNormalizeQty={handleNormalizeQty}
             onUpdateNote={handleUpdateItemNote}
-            searchQuery={searchQuery}
-            loading={catalogLoading || searchLoading}
+            searchQuery={hasSubmittedSearch ? searchQuery : selectedCategory}
+            loading={hasSubmittedSearch ? searchLoading : catalogLoading}
           />
+          {!hasSubmittedSearch && visibleProducts.length < browseProducts.length && <button type="button" onClick={() => setBrowseLimit(limit => limit + 40)} className="mx-auto block min-h-11 rounded-xl border border-[#0f7a4f]/25 bg-white px-5 text-sm font-bold text-[#0f7a4f]">{t('Xem thêm sản phẩm')}</button>}
         </div>
 
         {/* CỘT PHẢI (Desktop): Sidebar Tóm tắt đơn & Gửi đơn */}
         <div className="hidden lg:block min-w-0">
           <CartSummarySidebar
             session={session}
+            earliestDate={cutoffInfo?.earliestDate}
+            cutoffTimeStr={cutoffInfo?.cutoffTimeStr}
             activeTab={activeTab}
             onUpdateTab={updateActiveTab}
             onUpdateQty={handleUpdateQty}
-            onNormalizeQty={handleNormalizeQty}
             onRemoveItem={handleRemoveItem}
             onSubmitOrder={handleSubmitOrder}
             submitting={submitting}
@@ -980,10 +733,11 @@ export default function ProductsPage() {
         isOpen={isDrawerOpen}
         onClose={() => setIsDrawerOpen(false)}
         session={session}
+        earliestDate={cutoffInfo?.earliestDate}
+        cutoffTimeStr={cutoffInfo?.cutoffTimeStr}
         activeTab={activeTab}
         onUpdateTab={updateActiveTab}
         onUpdateQty={handleUpdateQty}
-        onNormalizeQty={handleNormalizeQty}
         onUpdateNote={handleUpdateItemNote}
         onRemoveItem={handleRemoveItem}
         onSubmitOrder={handleSubmitOrder}
@@ -994,9 +748,9 @@ export default function ProductsPage() {
       {/* 7. Modal thông báo đặt hàng thành công */}
       <OrderSuccessModal
         order={successOrder}
+        pendingVerification={session?.verificationStatus === 'pending'}
         onClose={() => setSuccessOrder(null)}
       />
-      <SmartOrderImportModal open={showSmartImport} onClose={() => setShowSmartImport(false)} onConfirm={handleSmartImport}/>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { api } from './api';
+import { Capacitor } from '@capacitor/core';
 
 function urlBase64ToUint8Array(base64: string) {
   const padding = '='.repeat((4 - (base64.length % 4)) % 4);
@@ -8,7 +9,7 @@ function urlBase64ToUint8Array(base64: string) {
 }
 
 export function isPushSupported() {
-  return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  return !Capacitor.isNativePlatform() && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 }
 
 export async function getPushStatus(): Promise<'unsupported' | 'denied' | 'subscribed' | 'not-subscribed'> {

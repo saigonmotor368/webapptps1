@@ -10,11 +10,12 @@ import { VitePWA } from 'vite-plugin-pwa'
 // /api/customer/** đã có sẵn trên web chính (Next.js), xác thực bằng
 // Authorization: Bearer <orderSessionToken> — cùng cơ chế Zalo Mini App đang
 // dùng, đã có CORS "*" sẵn cho hầu hết route (xem README.md mục "Backend").
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
+  base: mode === 'native' ? './' : '/',
   plugins: [
     react(),
     tailwindcss(),
-    VitePWA({
+    ...(mode === 'native' ? [] : [VitePWA({
       registerType: 'autoUpdate',
       // Service worker tự viết ở public/sw-push.js (nhận + hiện push
       // notification) — inject vào bản build của Workbox thay vì để
@@ -23,7 +24,7 @@ export default defineConfig({
       srcDir: 'src',
       filename: 'sw.ts',
       injectManifest: {
-        globPatterns: ['**/*.{js,css,html,png,svg,ico}'],
+        globPatterns: ['**/*.{js,css,html,png,svg,ico,json}'],
       },
       devOptions: { enabled: true, type: 'module' },
       manifest: {
@@ -43,7 +44,7 @@ export default defineConfig({
           { src: 'apple-touch-icon.png', sizes: '180x180', type: 'image/png' },
         ],
       },
-    }),
+    })]),
   ],
   resolve: {
     alias: {
@@ -69,5 +70,5 @@ export default defineConfig({
       },
     },
   },
-})
+}))
 

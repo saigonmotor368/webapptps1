@@ -16,7 +16,7 @@ import {
 import type { CustomerSession } from '../../lib/api';
 import type { OrderTab } from './OrderTabsBar';
 import ProductThumbnail from './ProductThumbnail';
-import { validateOrderQuantity, formatQuantityVN } from '../../lib/quantityRules';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 function money(v: number) {
   return new Intl.NumberFormat('vi-VN').format(Number(v) || 0) + 'đ';
@@ -29,12 +29,13 @@ interface CartCheckoutDrawerProps {
   activeTab: OrderTab;
   onUpdateTab: (updater: (prev: OrderTab) => OrderTab) => void;
   onUpdateQty: (productId: string, qty: number) => void;
-  onNormalizeQty: (productId: string) => void;
   onUpdateNote: (productId: string, note: string) => void;
   onRemoveItem: (productId: string) => void;
   onSubmitOrder: () => void;
   submitting: boolean;
   errorMessage: string;
+  earliestDate?: string;
+  cutoffTimeStr?: string;
 }
 
 export default function CartCheckoutDrawer({
@@ -44,19 +45,21 @@ export default function CartCheckoutDrawer({
   activeTab,
   onUpdateTab,
   onUpdateQty,
-  onNormalizeQty,
   onUpdateNote,
   onRemoveItem,
   onSubmitOrder,
   submitting,
   errorMessage,
+  earliestDate,
+  cutoffTimeStr,
 }: CartCheckoutDrawerProps) {
+  const { t, productName, productUnit } = useLanguage();
   const [isDeliveryExpanded, setIsDeliveryExpanded] = useState(true);
-  const [quantityDrafts, setQuantityDrafts] = useState<Record<string, string>>({});
 
   if (!isOpen) return null;
 
   const totalQuantity = activeTab.items.reduce((sum, item) => sum + item.quantity, 0);
+  const pendingPriceCount = activeTab.items.filter(item => item.product.priceOnRequest || item.product.price <= 0).length;
   const subtotalAmount = activeTab.items.reduce(
     (sum, item) => sum + item.quantity * (item.product.price || 0),
     0
@@ -74,7 +77,7 @@ export default function CartCheckoutDrawer({
           <div>
             <div className="w-10 h-1 rounded-full bg-[#17231d]/15 mx-auto mb-2" />
             <h3 className="font-bold text-base text-[#17231d] flex items-center gap-2">
-              <span>{activeTab.title}</span>
+              <span>{activeTab.title.startsWith('Đặt hàng ') ? `${t('Đặt hàng')} ${activeTab.title.slice('Đặt hàng '.length)}` : activeTab.title}</span>
               <span className="text-xs font-normal text-[#59665f]">
                 ({activeTab.items.length} món · {totalQuantity.toFixed(1)} ĐVT)
               </span>
@@ -106,40 +109,29 @@ export default function CartCheckoutDrawer({
             ) : (
               activeTab.items.map((item) => {
                 const lineTotal = item.quantity * (item.product.price || 0);
-                const lineKey = item.lineKey || item.product.id;
                 return (
                   <div
-                    key={lineKey}
+                    key={item.lineKey || item.product.id}
                     className="p-3 rounded-2xl border border-[#17231d]/10 bg-[#fbfcfb] space-y-2"
                   >
                     <div className="flex items-start justify-between gap-2.5">
                       <ProductThumbnail product={item.product} size="sm" />
                       <div className="min-w-0 flex-1">
                         <p className="font-bold text-xs text-[#17231d] leading-snug">
-                          {item.product.name}
+                          {productName(item.product.name)}
                         </p>
+                        {productName(item.product.name) !== item.product.name && <p className="text-[10px] text-[#59665f] truncate">{item.product.name}</p>}
                         <p className="text-[11px] text-[#59665f] mt-0.5">
-                          {item.product.unit || 'Kg'} ·{' '}
+                          {productUnit(item.product.unit || 'Kg')} ·{' '}
                           <strong className="text-[#0f7a4f]">
-                            {item.product.priceOnRequest ? 'Liên hệ' : money(item.product.price)}
+                            {item.product.priceOnRequest ? t('Chờ sale báo giá') : money(item.product.price)}
                           </strong>
                         </p>
-                        {item.product.shortDescription && <p className="text-[10px] text-[#59665f] mt-0.5 line-clamp-2">{item.product.shortDescription}</p>}
-                        {item.product.packagingNote && (
-                          <p className="text-[10px] text-[#0f7a4f] bg-[#0f7a4f]/8 px-1.5 py-0.2 rounded inline-block font-medium mt-0.5">
-                            📦 {item.product.packagingNote}
-                          </p>
-                        )}
-                        {item.product.enforceOrderStep && (
-                          <p className="text-[9px] text-[#59665f] mt-0.5">
-                            Tối thiểu: {formatQuantityVN(item.product.minOrderQty || 1)} · Bước: {formatQuantityVN(item.product.orderStep || 1)}
-                          </p>
-                        )}
                       </div>
 
                       <button
                         type="button"
-                        onClick={() => onRemoveItem(lineKey)}
+                        onClick={() => onRemoveItem(item.lineKey || item.product.id)}
                         className="text-[#59665f]/50 hover:text-red-600 p-1.5 rounded-lg active:bg-red-50"
                         title="Xóa món này"
                       >
@@ -148,89 +140,60 @@ export default function CartCheckoutDrawer({
                     </div>
 
                     {/* Stepper và tiền dòng */}
-                    {(() => {
-                      const step = item.product.orderStep || 1;
-                      const lineErr = item.product.enforceOrderStep
-                        ? validateOrderQuantity(item.quantity, item.product.minOrderQty, item.product.orderStep, true, item.product.quantityPrecision, item.product.quantityAdjustmentMode, item.product.unit)
-                        : null;
-                      return (
-                        <>
-                          <div className="flex items-center justify-between pt-1 border-t border-[#17231d]/5">
-                            <div className="flex items-center gap-1 bg-[#f5f7f3] p-1 rounded-xl border border-[#17231d]/10">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const next = Math.round((item.quantity - step) * 1000) / 1000;
-                                  if (item.product.enforceOrderStep && item.product.minOrderQty && next < item.product.minOrderQty) {
-                                    onRemoveItem(lineKey);
-                                  } else {
-                                    onUpdateQty(lineKey, Math.max(0, next));
-                                  }
-                                }}
-                                className="w-11 h-11 rounded-lg bg-white font-bold text-sm text-[#17231d] active:scale-95 flex items-center justify-center shadow-xs"
-                              >
-                                -
-                              </button>
-                              <input
-                                type="text"
-                                inputMode="decimal"
-                                value={quantityDrafts[lineKey] ?? String(item.quantity)}
-                                onChange={(e) => {
-                                  const raw = e.target.value;
-                                  setQuantityDrafts(prev => ({ ...prev, [lineKey]: raw }));
-                                  const val = Number(raw.replace(',', '.'));
-                                  if (Number.isFinite(val) && val > 0) onUpdateQty(lineKey, val);
-                                }}
-                                onBlur={() => {
-                                  const raw = quantityDrafts[lineKey]; const val = Number((raw ?? '').replace(',', '.'));
-                                  if (Number.isFinite(val) && val > 0) onUpdateQty(lineKey, val);
-                                  else setQuantityDrafts(prev => ({ ...prev, [lineKey]: String(item.quantity) }));
-                                  onNormalizeQty(lineKey);
-                                  setQuantityDrafts(prev => { const next = { ...prev }; delete next[lineKey]; return next; });
-                                }}
-                                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); onNormalizeQty(lineKey); setQuantityDrafts(prev => { const next = { ...prev }; delete next[lineKey]; return next; }); } }}
-                                className="w-14 text-center font-bold text-sm bg-transparent focus:outline-none"
-                              />
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  onUpdateQty(
-                                    lineKey,
-                                    Math.round((item.quantity + step) * 1000) / 1000
-                                  )
-                                }
-                                className="w-11 h-11 rounded-lg bg-white font-bold text-sm text-[#0f7a4f] active:scale-95 flex items-center justify-center shadow-xs"
-                              >
-                                +
-                              </button>
-                            </div>
+                    <div className="flex items-center justify-between pt-1 border-t border-[#17231d]/5">
+                      <div className="flex items-center gap-1 bg-[#f5f7f3] p-1 rounded-xl border border-[#17231d]/10">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onUpdateQty(
+                              item.lineKey || item.product.id,
+                              Math.max(0, Number((item.quantity - 1).toFixed(2)))
+                            )
+                          }
+                          className="w-11 h-11 rounded-lg bg-white font-bold text-sm text-[#17231d] active:scale-95 flex items-center justify-center shadow-xs"
+                        >
+                          -
+                        </button>
+                        <input
+                          type="number"
+                          min={0.1}
+                          step="any"
+                          value={item.quantity}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value);
+                            onUpdateQty(item.lineKey || item.product.id, isNaN(val) ? 0 : val);
+                          }}
+                          className="w-14 text-center font-bold text-sm bg-transparent focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onUpdateQty(
+                              item.lineKey || item.product.id,
+                              Number((item.quantity + 1).toFixed(2))
+                            )
+                          }
+                          className="w-11 h-11 rounded-lg bg-white font-bold text-sm text-[#0f7a4f] active:scale-95 flex items-center justify-center shadow-xs"
+                        >
+                          +
+                        </button>
+                      </div>
 
-                            <div className="text-right">
-                              <span className="text-[10px] text-[#59665f] block">Thành tiền</span>
-                              <span className="font-mono font-bold text-sm text-[#0f7a4f]">
-                                {item.product.priceOnRequest ? 'Tạm tính' : money(lineTotal)}
-                              </span>
-                            </div>
-                          </div>
-
-                          {lineErr && (
-                            <p className="text-[11px] text-rose-600 font-medium mt-1 flex items-center gap-1">
-                              <AlertCircle size={12} className="shrink-0 text-rose-500" />
-                              <span>{lineErr}</span>
-                            </p>
-                          )}
-                        {item.quantityAdjustmentMessage && <p className="text-[10px] text-amber-800 bg-amber-50 rounded px-2 py-1 mt-1">{item.quantityAdjustmentMessage}<span className="block mt-0.5">Nhập ban đầu: {formatQuantityVN(item.requestedQuantity ?? item.quantity)} · Số lượng đặt: {formatQuantityVN(item.quantity)} {item.product.unit}</span></p>}
-                        </>
-                      );
-                    })()}
+                      <div className="text-right">
+                        <span className="text-[10px] text-[#59665f] block">Thành tiền</span>
+                        <span className="font-mono font-bold text-sm text-[#0f7a4f]">
+                          {item.product.priceOnRequest ? t('Chờ sale báo giá') : money(lineTotal)}
+                        </span>
+                      </div>
+                    </div>
 
                     {/* Ghi chú từng dòng */}
                     <div>
                       <input
                         type="text"
                         value={item.note || ''}
-                        onChange={(e) => onUpdateNote(lineKey, e.target.value)}
-                        placeholder="Ghi chú quy cách (vd: sơ chế, thái lát...)"
+                        onChange={(e) => onUpdateNote(item.lineKey || item.product.id, e.target.value)}
+                        placeholder={t('Ghi chú quy cách (vd: sơ chế, thái lát...)')}
                         className="w-full text-xs py-1.5 px-2.5 bg-white border border-[#17231d]/15 rounded-lg text-[#17231d] placeholder:text-[#59665f]/50 focus:outline-none focus:border-[#0f7a4f]"
                       />
                     </div>
@@ -249,7 +212,7 @@ export default function CartCheckoutDrawer({
               type="text"
               value={activeTab.note}
               onChange={(e) => onUpdateTab((t) => ({ ...t, note: e.target.value }))}
-              placeholder="Ghi chú thêm cho bộ phận giao nhận..."
+              placeholder={t('Ghi chú thêm cho bộ phận giao nhận...')}
               className="w-full text-xs py-2 px-3 bg-[#f8faf7] border border-[#17231d]/15 rounded-xl text-[#17231d] focus:outline-none focus:bg-white focus:border-[#0f7a4f]"
             />
           </div>
@@ -263,7 +226,7 @@ export default function CartCheckoutDrawer({
             >
               <span className="flex items-center gap-1.5">
                 <MapPin size={14} className="text-[#0f7a4f]" />
-                <span>Địa chỉ và thời gian nhận hàng</span>
+                <span>{t('Địa chỉ và thời gian nhận hàng')}</span>
               </span>
               {isDeliveryExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
             </button>
@@ -280,7 +243,7 @@ export default function CartCheckoutDrawer({
                       <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#59665f]/60" size={14} />
                       <input
                         type="date"
-                        min={new Date().toLocaleDateString('en-CA')}
+                        min={earliestDate}
                         value={activeTab.deliveryDate}
                         onChange={(e) => onUpdateTab((t) => ({ ...t, deliveryDate: e.target.value }))}
                         className="w-full pl-8 pr-2.5 py-2 bg-[#f8faf7] border border-[#17231d]/15 rounded-xl text-xs font-semibold focus:outline-none focus:bg-white focus:border-[#0f7a4f]"
@@ -299,10 +262,10 @@ export default function CartCheckoutDrawer({
                         onChange={(e) => onUpdateTab((t) => ({ ...t, deliveryShift: e.target.value }))}
                         className="w-full pl-8 pr-2.5 py-2 bg-[#f8faf7] border border-[#17231d]/15 rounded-xl text-xs font-semibold focus:outline-none focus:bg-white focus:border-[#0f7a4f]"
                       >
-                        <option value="Ca sáng sớm (05:00 - 07:00)">Ca sáng sớm (05:00 - 07:00)</option>
-                        <option value="Ca sáng (07:00 - 09:00)">Ca sáng (07:00 - 09:00)</option>
-                        <option value="Ca trưa (09:30 - 11:00)">Ca trưa (09:30 - 11:00)</option>
-                        <option value="Ca chiều (14:00 - 16:00)">Ca chiều (14:00 - 16:00)</option>
+                        <option value="Ca sáng sớm (05:00 - 07:00)">{t('Ca sáng sớm (05:00 - 07:00)')}</option>
+                        <option value="Ca sáng (07:00 - 09:00)">{t('Ca sáng (07:00 - 09:00)')}</option>
+                        <option value="Ca trưa (09:30 - 11:00)">{t('Ca trưa (09:30 - 11:00)')}</option>
+                        <option value="Ca chiều (14:00 - 16:00)">{t('Ca chiều (14:00 - 16:00)')}</option>
                       </select>
                     </div>
                   </div>
@@ -320,7 +283,7 @@ export default function CartCheckoutDrawer({
                         type="text"
                         value={activeTab.deliveryName}
                         onChange={(e) => onUpdateTab((t) => ({ ...t, deliveryName: e.target.value }))}
-                        placeholder="Tên người nhận"
+                        placeholder={t('Tên người nhận')}
                         className="w-full pl-8 pr-2 py-2 bg-[#f8faf7] border border-[#17231d]/15 rounded-xl text-xs focus:outline-none focus:bg-white focus:border-[#0f7a4f]"
                       />
                     </div>
@@ -335,7 +298,7 @@ export default function CartCheckoutDrawer({
                         type="tel"
                         value={activeTab.deliveryPhone}
                         onChange={(e) => onUpdateTab((t) => ({ ...t, deliveryPhone: e.target.value }))}
-                        placeholder="SĐT người nhận"
+                        placeholder={t('SĐT người nhận')}
                         className="w-full pl-8 pr-2 py-2 bg-[#f8faf7] border border-[#17231d]/15 rounded-xl text-xs focus:outline-none focus:bg-white focus:border-[#0f7a4f]"
                       />
                     </div>
@@ -351,7 +314,7 @@ export default function CartCheckoutDrawer({
                     rows={2}
                     value={activeTab.deliveryAddress}
                     onChange={(e) => onUpdateTab((t) => ({ ...t, deliveryAddress: e.target.value }))}
-                    placeholder="Số nhà, đường, xưởng, bếp ăn..."
+                    placeholder={t('Số nhà, đường, xưởng, bếp ăn...')}
                     className="w-full px-3 py-2 bg-[#f8faf7] border border-[#17231d]/15 rounded-xl text-xs focus:outline-none focus:bg-white focus:border-[#0f7a4f] resize-none"
                   />
                 </div>
@@ -371,7 +334,7 @@ export default function CartCheckoutDrawer({
                     className="text-[11px] text-[#0f7a4f] hover:underline font-semibold flex items-center gap-1"
                   >
                     <MapPin size={12} />
-                    <span>Dùng địa chỉ mặc định của công ty</span>
+                    <span>{t('Dùng địa chỉ mặc định của công ty')}</span>
                   </button>
                 )}
               </div>
@@ -383,10 +346,10 @@ export default function CartCheckoutDrawer({
         <div className="p-4 border-t border-[#17231d]/10 bg-[#fbfcfb] space-y-3">
           <div className="flex items-center justify-between">
             <div>
-              <span className="text-xs text-[#59665f] block">Tạm tính đơn hàng</span>
+              <span className="text-xs text-[#59665f] block">{t('Tạm tính đơn hàng')}</span>
               <p className="text-[10px] text-[#59665f] flex items-center gap-1">
                 <Info size={11} className="text-[#e0742f]" />
-                <span>TPS1 sẽ xác nhận lại mặt hàng cần báo giá hoặc có điều chỉnh</span>
+                <span>{t('TPS1 sẽ xác nhận lại mặt hàng cần báo giá hoặc có điều chỉnh')}</span>
               </p>
             </div>
             <div className="text-right">
@@ -395,6 +358,8 @@ export default function CartCheckoutDrawer({
               </span>
             </div>
           </div>
+          {earliestDate && <p className="text-xs text-[#59665f]">{t('Ngày giao sớm nhất')}: {earliestDate}{cutoffTimeStr ? ` · ${t('Giờ chốt đơn')}: ${cutoffTimeStr}` : ''}</p>}
+          {pendingPriceCount > 0 && <p className="text-xs font-semibold text-amber-800 rounded-xl bg-amber-50 p-2">{t('Tạm tính chưa gồm hàng chờ giá')} ({pendingPriceCount}). {t('Sale sẽ nhập giá hoặc bỏ mặt hàng không có hàng trước khi xác nhận đơn.')}</p>}
 
           {errorMessage && (
             <div className="p-2.5 bg-red-50 border border-red-200 rounded-xl text-xs text-red-600 flex items-center gap-2">
@@ -403,42 +368,24 @@ export default function CartCheckoutDrawer({
             </div>
           )}
 
-          {(() => {
-            const hasInvalidItems = activeTab.items.some(
-              (item) =>
-                item.product.enforceOrderStep &&
-                validateOrderQuantity(item.quantity, item.product.minOrderQty, item.product.orderStep, true, item.product.quantityPrecision, item.product.quantityAdjustmentMode, item.product.unit) !== null
-            );
-            return (
-              <>
-                {hasInvalidItems && (
-                  <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 flex items-center gap-1.5">
-                    <AlertCircle size={14} className="shrink-0 text-amber-600" />
-                    <span>Có mặt hàng chưa đúng quy cách đặt hàng.</span>
-                  </div>
-                )}
-
-                <button
-                  type="button"
-                  onClick={onSubmitOrder}
-                  disabled={submitting || activeTab.items.length === 0 || hasInvalidItems}
-                  className="w-full py-3.5 rounded-2xl font-bold text-sm tracking-wider bg-[#0f7a4f] hover:bg-[#0b4f34] text-white shadow-lg shadow-[#0f7a4f]/25 active:scale-[0.98] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 uppercase touch-target"
-                >
+          <button
+            type="button"
+            onClick={onSubmitOrder}
+            disabled={submitting || activeTab.items.length === 0}
+            className="w-full py-3.5 rounded-2xl font-bold text-sm tracking-wider bg-[#0f7a4f] hover:bg-[#0b4f34] text-white shadow-lg shadow-[#0f7a4f]/25 active:scale-[0.98] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 uppercase touch-target"
+          >
             {submitting ? (
               <>
                 <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                <span>Đang gửi đơn hàng...</span>
+                <span>{t('Đang gửi đơn hàng...')}</span>
               </>
             ) : (
               <>
-                <span>Gửi đơn đặt hàng</span>
+                <span>{t('Gửi đơn đặt hàng')}</span>
                 <ArrowRight size={16} />
               </>
             )}
           </button>
-        </>
-      );
-    })()}
         </div>
       </div>
     </div>

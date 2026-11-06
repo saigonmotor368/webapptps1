@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Camera, CheckCircle2, FileText, Loader2, Search, Sparkles, Trash2, Upload, X, XCircle } from 'lucide-react';
+import { AlertTriangle, Camera, CheckCircle2, FileText, Loader2, Sparkles, Upload, X, XCircle } from 'lucide-react';
 import { getToken } from '../lib/api';
+import { useLanguage } from '../contexts/LanguageContext';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? '' : 'https://thucphamsomot.vn')).replace(/\/$/, '');
 
@@ -9,7 +10,6 @@ export type SmartImportItem = {
   imageUrl: string | null; quantity: number; inputQuantity: number; inputUnit: string; conversionFactor: number | null;
   note: string; price: number; priceSource: string; minOrderQty?: number | null; orderStep?: number | null;
   enforceOrderStep?: boolean | null; packagingNote?: string | null; quantityPrecision?: number | null;
-  quantityAdjustmentMode?: 'reject' | 'ceil_to_step' | null;
 };
 
 type ImportLine = {
@@ -18,7 +18,6 @@ type ImportLine = {
   selected_product_id?: string | null; product?: { id: string; sku: string; name: string; unit: string; packaging_note?: string | null } | null;
   suggestions?: Array<{ id: string; sku: string; name: string; unit: string; score: number; price?: number | null }>;
 };
-type ProductChoice = { id: string; sku: string; name: string; unit: string };
 
 async function apiFetch(path: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers || {});
@@ -42,10 +41,6 @@ export default function SmartOrderImportModal({ open, onClose, onConfirm }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
-  const [pickerLine, setPickerLine] = useState<ImportLine | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [searchResults, setSearchResults] = useState<ProductChoice[]>([]);
-  const [searching, setSearching] = useState(false);
 
   const summary = useMemo(() => lines.reduce((acc, line) => {
     if (line.status === 'matched') acc.valid++; else if (line.status === 'ambiguous') acc.review++; else acc.error++;
@@ -92,38 +87,6 @@ export default function SmartOrderImportModal({ open, onClose, onConfirm }: {
     finally { setBusy(false); }
   };
 
-  const removeLine = async (line: ImportLine) => {
-    if (!batchId) return;
-    setBusy(true); setError('');
-    try {
-      await apiFetch(`/api/order-import/batches/${batchId}/lines/${line.id}`, { method: 'DELETE' });
-      setLines((current) => current.filter((item) => item.id !== line.id));
-      if (pickerLine?.id === line.id) setPickerLine(null);
-    } catch (err: any) { setError(err.message || 'Không bỏ được dòng hàng'); }
-    finally { setBusy(false); }
-  };
-
-  const openProductPicker = (line: ImportLine) => {
-    setPickerLine(line); setSearchTerm(line.raw_name); setSearchResults([]);
-  };
-
-  const searchProducts = async () => {
-    const query = searchTerm.trim();
-    if (!query) return;
-    setSearching(true); setError('');
-    try {
-      const result = await apiFetch(`/api/customer/products?search=${encodeURIComponent(query)}`);
-      setSearchResults((result.products || []).map((product: any) => ({ id: product.id, sku: product.sku || '', name: product.name, unit: product.unit || 'Kg' })));
-    } catch (err: any) { setError(err.message || 'Không tìm được hàng hóa'); }
-    finally { setSearching(false); }
-  };
-
-  const chooseProduct = async (product: ProductChoice) => {
-    if (!pickerLine) return;
-    await patchLine(pickerLine, { productId: product.id, quantity: pickerLine.raw_quantity, inputUnit: pickerLine.raw_unit || product.unit });
-    setPickerLine(null); setSearchResults([]);
-  };
-
   const confirm = async () => {
     setBusy(true); setError('');
     try {
@@ -156,14 +119,13 @@ export default function SmartOrderImportModal({ open, onClose, onConfirm }: {
           )}
           {lines.length > 0 && <>
             <div className="grid grid-cols-3 gap-2"><Summary label="Hợp lệ" value={summary.valid} color="green"/><Summary label="Cần chọn" value={summary.review} color="amber"/><Summary label="Cần sửa" value={summary.error} color="red"/></div>
-            <div className="space-y-2">{lines.map((line) => <LineCard key={line.id} line={line} disabled={busy} onPatch={(update) => patchLine(line, update)} onChoose={() => openProductPicker(line)} onRemove={() => removeLine(line)}/>)}</div>
+            <div className="space-y-2">{lines.map((line) => <LineCard key={line.id} line={line} disabled={busy} onPatch={(update) => patchLine(line, update)}/>)}</div>
           </>}
           {message && <div className="flex items-center justify-center gap-2 py-3 text-sm font-semibold text-[#0f7a4f]"><Loader2 size={17} className="animate-spin"/>{message}</div>}
           {error && <div className="rounded-xl bg-red-50 border border-red-200 text-red-700 p-3 text-sm flex gap-2"><AlertTriangle size={17} className="shrink-0"/>{error}</div>}
         </div>
         {lines.length > 0 && <footer className="bg-white px-5 py-4 border-t border-[#17231d]/10 flex items-center justify-between gap-3"><p className="text-xs text-[#59665f]">Chỉ thêm dòng màu xanh. Dòng đỏ phải sửa hoặc bỏ chọn.</p><button onClick={confirm} disabled={busy || summary.valid === 0} className="px-5 py-2.5 rounded-xl bg-[#0f7a4f] text-white font-bold disabled:opacity-50 flex items-center gap-2">{busy && <Loader2 className="animate-spin" size={16}/>}Thêm {summary.valid} dòng vào giỏ</button></footer>}
       </div>
-      {pickerLine && <div className="fixed inset-0 z-[120] bg-black/45 p-4 flex items-center justify-center"><div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl p-4 space-y-3"><div className="flex items-center justify-between gap-3"><div><h3 className="font-bold text-[#17231d]">Chọn sản phẩm thay thế</h3><p className="text-xs text-[#59665f]">Dòng đọc được: {pickerLine.raw_name}</p></div><button onClick={() => setPickerLine(null)} className="p-2 rounded-lg hover:bg-slate-100"><X size={18}/></button></div><div className="flex gap-2"><input autoFocus value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && searchProducts()} placeholder="Nhập tên sản phẩm..." className="flex-1 border rounded-xl px-3 py-2 text-sm"/><button onClick={searchProducts} disabled={searching} className="px-4 py-2 rounded-xl bg-[#0f7a4f] text-white font-bold text-sm flex items-center gap-2">{searching ? <Loader2 size={16} className="animate-spin"/> : <Search size={16}/>}Tìm</button></div><div className="max-h-72 overflow-y-auto divide-y border rounded-xl">{searchResults.map((product) => <button key={product.id} onClick={() => chooseProduct(product)} className="w-full text-left px-3 py-2.5 hover:bg-emerald-50"><p className="font-semibold text-sm">{product.name}</p><p className="text-xs text-slate-500">Mã: {product.sku} · {product.unit}</p></button>)}{!searching && searchResults.length === 0 && <p className="p-4 text-sm text-center text-slate-500">Nhập tên rồi bấm Tìm để chọn đúng sản phẩm.</p>}</div></div></div>}
     </div>
   );
 }
@@ -172,16 +134,16 @@ function Summary({ label, value, color }: { label: string; value: number; color:
   const cls = color === 'green' ? 'bg-green-50 text-green-700 border-green-200' : color === 'amber' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-red-50 text-red-700 border-red-200';
   return <div className={`rounded-xl border p-3 text-center ${cls}`}><div className="text-xl font-black">{value}</div><div className="text-[11px] font-bold">{label}</div></div>;
 }
-function LineCard({ line, disabled, onPatch, onChoose, onRemove }: { line: ImportLine; disabled: boolean; onPatch: (update: Record<string, unknown>) => void; onChoose: () => void; onRemove: () => void }) {
+function LineCard({ line, disabled, onPatch }: { line: ImportLine; disabled: boolean; onPatch: (update: Record<string, unknown>) => void }) {
+  const { productName } = useLanguage();
   const isValid = line.status === 'matched'; const isReview = line.status === 'ambiguous';
   const color = isValid ? 'border-green-200 bg-green-50/60' : isReview ? 'border-amber-200 bg-amber-50/60' : 'border-red-200 bg-red-50/60';
   return <div className={`rounded-2xl border p-3.5 ${color}`}>
     <div className="flex items-start gap-3">{isValid ? <CheckCircle2 className="text-green-600 shrink-0" size={20}/> : isReview ? <AlertTriangle className="text-amber-600 shrink-0" size={20}/> : <XCircle className="text-red-600 shrink-0" size={20}/>}<div className="min-w-0 flex-1">
       <div className="flex flex-wrap justify-between gap-2"><div><p className="font-bold text-sm text-[#17231d]">{line.raw_name}</p><p className="text-xs text-[#59665f]">Đọc được: {line.raw_quantity} {line.raw_unit || ''}{line.raw_note ? ` · ${line.raw_note}` : ''}</p></div>{line.resolved_price != null && <span className="font-bold text-sm text-[#0f7a4f]">{new Intl.NumberFormat('vi-VN').format(line.resolved_price)}đ</span>}</div>
-      {line.product && <p className="mt-1.5 text-xs font-semibold text-[#0f7a4f]">→ {line.product.name} ({line.product.sku}) · {line.converted_quantity} {line.product.unit}</p>}
-      {isReview && line.suggestions?.length ? <div className="mt-2 flex flex-wrap gap-2">{line.suggestions.map((item) => <button disabled={disabled} key={item.id} onClick={() => onPatch({ productId: item.id, quantity: line.raw_quantity, inputUnit: line.raw_unit || item.unit })} className="text-xs bg-white border border-amber-300 rounded-lg px-2.5 py-1.5 hover:border-[#0f7a4f]">{item.name} · Mã: {item.sku} · {item.unit}</button>)}</div> : null}
+      {line.product && <p className="mt-1.5 text-xs font-semibold text-[#0f7a4f]">→ {productName(line.product.name)} ({line.product.sku}) · {line.converted_quantity} {line.product.unit}</p>}
+      {isReview && line.suggestions?.length ? <div className="mt-2 flex flex-wrap gap-2">{line.suggestions.map((item) => <button disabled={disabled} key={item.id} onClick={() => onPatch({ productId: item.id, quantity: line.raw_quantity, inputUnit: line.raw_unit || item.unit })} className="text-xs bg-white border border-amber-300 rounded-lg px-2.5 py-1.5 hover:border-[#0f7a4f]">{productName(item.name)} ({item.sku}) · {Math.round(item.score*100)}%</button>)}</div> : null}
       {!isValid && line.warnings?.map((warning) => <p key={warning} className="text-xs text-red-700 mt-1.5 font-semibold">{warning}</p>)}
-      {!isValid && <div className="mt-2 flex flex-wrap gap-2"><button disabled={disabled} onClick={onChoose} className="px-3 py-1.5 rounded-lg bg-[#0f7a4f] text-white text-xs font-bold flex items-center gap-1.5"><Search size={14}/>Chọn sản phẩm</button><button disabled={disabled} onClick={onRemove} className="px-3 py-1.5 rounded-lg border border-red-200 bg-white text-red-600 text-xs font-bold flex items-center gap-1.5"><Trash2 size={14}/>Bỏ dòng</button></div>}
       {line.selected_product_id && <div className="mt-2 flex flex-wrap items-center gap-2"><input type="number" min="0.001" step="any" defaultValue={line.raw_quantity} className="w-24 px-2 py-1.5 border rounded-lg text-sm" onBlur={(event) => { const qty=Number(event.target.value); if(qty!==Number(line.raw_quantity)) onPatch({ productId: line.selected_product_id, quantity: qty, inputUnit: line.raw_unit || line.product?.unit || '' }); }}/><input defaultValue={line.raw_unit || line.product?.unit || ''} className="w-24 px-2 py-1.5 border rounded-lg text-sm" onBlur={(event) => { if(event.target.value!==(line.raw_unit||'')) onPatch({ productId: line.selected_product_id, quantity: line.raw_quantity, inputUnit: event.target.value }); }}/><button disabled={disabled} onClick={() => line.selected ? onPatch({ selected: false }) : onPatch({ productId: line.selected_product_id, quantity: line.raw_quantity, inputUnit: line.raw_unit || line.product?.unit || '', selected: true })} className="text-xs underline text-[#59665f]">{line.selected ? 'Bỏ dòng này' : 'Chọn lại dòng này'}</button></div>}
     </div></div>
   </div>;

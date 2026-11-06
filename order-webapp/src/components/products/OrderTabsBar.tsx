@@ -1,5 +1,6 @@
 import React from 'react';
 import { Plus, X, ShoppingBag } from 'lucide-react';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 export interface OrderItem {
   product: import('../../lib/api').Product;
@@ -7,9 +8,6 @@ export interface OrderItem {
   note?: string;
   lineKey?: string;
   sourceImportLineId?: string;
-  requestedQuantity?: number;
-  adjustmentAcknowledged?: boolean;
-  quantityAdjustmentMessage?: string;
 }
 
 export interface OrderTab {
@@ -42,6 +40,7 @@ export default function OrderTabsBar({
   onAddTab,
   onCloseTab,
 }: OrderTabsBarProps) {
+  const { t } = useLanguage();
   return (
     <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1">
       {tabs.map((tab) => {
@@ -58,7 +57,7 @@ export default function OrderTabsBar({
             }`}
           >
             <ShoppingBag size={13} className={isActive ? 'text-white' : 'text-[#0f7a4f]'} />
-            <span>{tab.title}</span>
+            <span>{tab.title.startsWith('Đặt hàng ') ? `${t('Đặt hàng')} ${tab.title.slice('Đặt hàng '.length)}` : tab.title}</span>
 
             {count > 0 && (
               <span
@@ -78,8 +77,8 @@ export default function OrderTabsBar({
                   ? 'text-white/70 hover:text-white hover:bg-white/20'
                   : 'text-[#59665f]/60 hover:text-red-600 hover:bg-red-50'
               }`}
-              title={tabs.length > 1 ? 'Đóng tab này' : 'Làm trống đơn này'}
-              aria-label="Đóng đơn"
+              title={t(tabs.length > 1 ? 'Đóng tab này' : 'Làm trống đơn này')}
+              aria-label={t('Đóng đơn')}
             >
               <X size={13} />
             </button>
@@ -91,10 +90,10 @@ export default function OrderTabsBar({
         type="button"
         onClick={onAddTab}
         className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-[#0f7a4f] bg-[#0f7a4f]/10 hover:bg-[#0f7a4f]/18 border border-[#0f7a4f]/20 transition-all active:scale-95 shrink-0 cursor-pointer"
-        title="Thêm đơn hàng mới cho bếp khác hoặc ca khác"
+        title={t('Thêm đơn hàng mới cho bếp khác hoặc ca khác')}
       >
         <Plus size={14} strokeWidth={2.5} />
-        <span>Thêm đơn</span>
+        <span>{t('Thêm đơn')}</span>
       </button>
     </div>
   );

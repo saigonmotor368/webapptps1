@@ -3,6 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { Upload, Download, CheckCircle2, AlertTriangle, XCircle, ShoppingCart } from 'lucide-react';
 import { api, ApiError, requestFile, type ExcelMatchResult } from '../lib/api';
 import { useCart } from '../contexts/CartContext';
+import { useLanguage } from '../contexts/LanguageContext';
+import { Capacitor } from '@capacitor/core';
+import { Directory, Filesystem } from '@capacitor/filesystem';
 
 function money(v: number) {
   return new Intl.NumberFormat('vi-VN').format(Number(v) || 0) + 'đ';
@@ -14,25 +17,47 @@ function money(v: number) {
 // và Zalo Mini App) — không xử lý lại logic khớp ở phía app này.
 export default function ExcelOrderPage() {
   const { addItem } = useCart();
+  const { t, errorText, productName } = useLanguage();
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [results, setResults] = useState<ExcelMatchResult[] | null>(null);
   const [summary, setSummary] = useState<Record<string, number> | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [downloadMessage, setDownloadMessage] = useState('');
   const [chosenSuggestion, setChosenSuggestion] = useState<Record<number, string>>({});
 
   const downloadTemplate = async () => {
     try {
+      setError('');
+      setDownloadMessage('');
       const blob = await requestFile('/api/customer/order/import-excel');
+      if (blob.size < 100 || (blob.type && !blob.type.includes('spreadsheet') && !blob.type.includes('octet-stream'))) {
+        throw new Error('Tệp mẫu trả về không đúng định dạng Excel');
+      }
+      if (Capacitor.isNativePlatform()) {
+        const data = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result).split(',')[1]);
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(blob);
+        });
+        await Filesystem.writeFile({ path: 'TPS1-mau-dat-hang.xlsx', data, directory: Directory.Documents, recursive: true });
+        setDownloadMessage(t('Đã tải file mẫu vào thư mục Tài liệu'));
+        return;
+      }
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
       a.download = 'mau-dat-hang.xlsx';
+      a.style.display = 'none';
+      document.body.appendChild(a);
       a.click();
-      URL.revokeObjectURL(url);
-    } catch {
-      setError('Không tải được file mẫu, vui lòng thử lại');
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+      setDownloadMessage(t('File mẫu đã được tải xuống'));
+    } catch (cause) {
+      setError(cause instanceof Error && cause.message ? cause.message : t('Không tải được file mẫu, vui lòng thử lại'));
     }
   };
 
@@ -45,7 +70,7 @@ export default function ExcelOrderPage() {
       setResults(res.results || []);
       setSummary(res.summary || null);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Không đọc được file, kiểm tra đúng định dạng mẫu chưa');
+      setError(err instanceof ApiError ? errorText(err) : t('Không đọc được file, kiểm tra đúng định dạng mẫu chưa'));
     } finally {
       setLoading(false);
     }
@@ -56,19 +81,15 @@ export default function ExcelOrderPage() {
     for (const r of results) {
       if (r.status === 'matched' && r.product) {
         addItem(
-          { id: r.product.id, sku: r.product.sku, name: r.product.name, category: null, unit: r.product.unit, imageUrl: null, price: r.product.price, priceOnRequest: r.product.priceOnRequest, available: true, minOrderQty: r.product.minOrderQty, orderStep: r.product.orderStep, enforceOrderStep: r.product.enforceOrderStep, quantityPrecision: r.product.quantityPrecision, quantityAdjustmentMode: r.product.quantityAdjustmentMode },
-          r.quantity,
-          r.note,
-          { requestedQuantity: r.requestedQuantity ?? r.quantity, acknowledged: true, message: r.adjustmentMessage }
+          { id: r.product.id, sku: r.product.sku, name: r.product.name, category: null, unit: r.product.unit, imageUrl: null, price: r.product.price, priceOnRequest: r.product.priceOnRequest, available: true },
+          r.quantity
         );
       } else if (r.status === 'ambiguous' && chosenSuggestion[r.row]) {
         const chosen = r.suggestions?.find((s) => s.id === chosenSuggestion[r.row]);
         if (chosen) {
           addItem(
-            { id: chosen.id, sku: chosen.sku, name: chosen.name, category: null, unit: chosen.unit, imageUrl: null, price: chosen.price, priceOnRequest: chosen.priceOnRequest, available: true, minOrderQty: chosen.minOrderQty, orderStep: chosen.orderStep, enforceOrderStep: chosen.enforceOrderStep, quantityPrecision: chosen.quantityPrecision, quantityAdjustmentMode: chosen.quantityAdjustmentMode },
-            r.quantity,
-            r.note,
-            { requestedQuantity: r.requestedQuantity ?? r.quantity, acknowledged: true, message: r.adjustmentMessage }
+            { id: chosen.id, sku: chosen.sku, name: chosen.name, category: null, unit: chosen.unit, imageUrl: null, price: chosen.price, priceOnRequest: chosen.priceOnRequest, available: true },
+            r.quantity
           );
         }
       }
@@ -79,9 +100,9 @@ export default function ExcelOrderPage() {
   return (
     <div className="max-w-3xl mx-auto space-y-6">
       <header>
-        <h1 className="text-2xl font-bold text-[#14231c]">Đặt hàng bằng file Excel</h1>
+        <h1 className="text-2xl font-bold text-[#14231c]">{t('Đặt hàng bằng file Excel')}</h1>
         <p className="text-[#59665f] text-sm mt-1">
-          Tải file mẫu, điền tên/mã hàng và số lượng cần mua, sau đó tải lên lại để hệ thống tự dựng giỏ hàng.
+          {t('Tải mẫu → điền hàng và số lượng → tải lên')}
         </p>
       </header>
 
@@ -90,14 +111,14 @@ export default function ExcelOrderPage() {
           onClick={downloadTemplate}
           className="flex items-center gap-2 px-4 py-2.5 border border-[#14231c]/15 rounded-xl font-medium text-[#14231c] hover:bg-white transition-colors"
         >
-          <Download size={18} /> Tải file mẫu
+          <Download size={18} /> {t('Tải file mẫu')}
         </button>
         <button
           onClick={() => fileInputRef.current?.click()}
           disabled={loading}
           className="flex items-center gap-2 px-4 py-2.5 bg-[#0f7a4f] text-white rounded-xl font-medium hover:bg-[#0b4f34] disabled:opacity-50 transition-colors"
         >
-          <Upload size={18} /> {loading ? 'Đang xử lý...' : 'Tải lên file đã điền'}
+          <Upload size={18} /> {t(loading ? 'Đang xử lý...' : 'Tải lên file đã điền')}
         </button>
         <input
           ref={fileInputRef}
@@ -113,6 +134,7 @@ export default function ExcelOrderPage() {
       </div>
 
       {error && <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm">{error}</div>}
+      {downloadMessage && <div className="p-3 rounded-xl border border-emerald-200 bg-emerald-50 text-sm text-emerald-800">{downloadMessage}</div>}
 
       {summary && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -133,13 +155,12 @@ export default function ExcelOrderPage() {
                     Dòng {r.row}: {r.input} <span className="text-[#59665f]">× {r.quantity}</span>
                   </p>
                   {r.note && <p className="text-xs text-[#59665f]/70 italic">{r.note}</p>}
-                  {r.adjustmentMessage && <p className="text-xs text-amber-800 bg-amber-50 rounded-lg p-2 mt-1">{r.adjustmentMessage} Nhập ban đầu: {r.requestedQuantity} · Số lượng đặt: {r.quantity} {r.product?.unit}</p>}
                 </div>
                 <StatusBadge status={r.status} />
               </div>
               {r.status === 'matched' && r.product && (
                 <p className="text-xs text-[#0f7a4f] mt-1.5">
-                  → {r.product.name} ({r.product.sku}) — {r.product.priceOnRequest ? 'Liên hệ báo giá' : money(r.product.price)}
+                  → {productName(r.product.name)} ({r.product.sku}) — {r.product.priceOnRequest ? t('Chờ sale báo giá') : money(r.product.price)}
                 </p>
               )}
               {r.status === 'ambiguous' && r.suggestions && (
@@ -153,7 +174,7 @@ export default function ExcelOrderPage() {
                         checked={chosenSuggestion[r.row] === s.id}
                         onChange={() => setChosenSuggestion((prev) => ({ ...prev, [r.row]: s.id }))}
                       />
-                      {s.name} ({s.sku}) — {s.priceOnRequest ? 'Liên hệ báo giá' : money(s.price)}
+                      {productName(s.name)} ({s.sku}) — {s.priceOnRequest ? t('Chờ sale báo giá') : money(s.price)}
                     </label>
                   ))}
                 </div>
@@ -165,7 +186,7 @@ export default function ExcelOrderPage() {
             onClick={addAllMatched}
             className="w-full flex items-center justify-center gap-2 bg-[#0f7a4f] text-white font-semibold py-3 rounded-xl hover:bg-[#0b4f34] transition-colors mt-4"
           >
-            <ShoppingCart size={18} /> Thêm tất cả vào giỏ hàng
+            <ShoppingCart size={18} /> {t('Thêm tất cả vào giỏ hàng')}
           </button>
         </div>
       )}

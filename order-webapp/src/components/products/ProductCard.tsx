@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Plus, Minus, Heart, MessageSquarePlus, Check, AlertCircle } from 'lucide-react';
+import { Plus, Minus, Heart, MessageSquarePlus, Check } from 'lucide-react';
 import type { Product } from '../../lib/api';
 import ProductThumbnail from './ProductThumbnail';
-import { validateOrderQuantity, formatQuantityVN } from '../../lib/quantityRules';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 function money(v: number) {
   return new Intl.NumberFormat('vi-VN').format(Number(v) || 0) + 'đ';
@@ -16,7 +16,6 @@ interface ProductCardProps {
   onToggleFavorite: (productId: string) => void;
   onAdd: (product: Product, qty: number) => void;
   onUpdateQty: (productId: string, qty: number) => void;
-  onNormalizeQty: (productId: string) => void;
   onUpdateNote: (productId: string, note: string) => void;
 }
 
@@ -28,44 +27,22 @@ export default function ProductCard({
   onToggleFavorite,
   onAdd,
   onUpdateQty,
-  onNormalizeQty,
   onUpdateNote,
 }: ProductCardProps) {
+  const { t, productName, productUnit } = useLanguage();
   const [showNoteInput, setShowNoteInput] = useState(Boolean(itemNote));
   const [tempNote, setTempNote] = useState(itemNote);
-  const [qtyDraft, setQtyDraft] = useState(String(quantityInCart || ''));
+  const [draftQuantity, setDraftQuantity] = useState('1');
 
   useEffect(() => {
     setTempNote(itemNote);
     if (itemNote) setShowNoteInput(true);
   }, [itemNote]);
 
-  useEffect(() => { setQtyDraft(String(quantityInCart || '')); }, [quantityInCart]);
-
   const isInCart = quantityInCart > 0;
-  const step = product.orderStep || 1;
-  const initialQty = product.enforceOrderStep && product.minOrderQty ? product.minOrderQty : step;
-
-  const qtyError = isInCart && product.enforceOrderStep
-    ? validateOrderQuantity(quantityInCart, product.minOrderQty, product.orderStep, true)
-    : null;
 
   const handleNoteSave = () => {
     onUpdateNote(product.id, tempNote.trim());
-  };
-
-  const handleMinus = () => {
-    const next = Math.round((quantityInCart - step) * 1000) / 1000;
-    if (product.enforceOrderStep && product.minOrderQty && next < product.minOrderQty) {
-      onUpdateQty(product.id, 0);
-    } else {
-      onUpdateQty(product.id, Math.max(0, next));
-    }
-  };
-
-  const handlePlus = () => {
-    const next = Math.round((quantityInCart + step) * 1000) / 1000;
-    onUpdateQty(product.id, next);
   };
 
   return (
@@ -95,8 +72,9 @@ export default function ProductCard({
                   className="font-bold text-sm text-[#17231d] leading-snug line-clamp-2"
                   title={product.name}
                 >
-                  {product.name}
+                  {productName(product.name)}
                 </h3>
+                {productName(product.name) !== product.name && <p className="text-[11px] text-[#59665f] line-clamp-1" title={product.name}>{product.name}</p>}
               </div>
 
               {/* Nút tim yêu thích */}
@@ -104,8 +82,8 @@ export default function ProductCard({
                 type="button"
                 onClick={() => onToggleFavorite(product.id)}
                 className="p-1.5 -mr-1 -mt-1 text-[#59665f]/50 hover:text-rose-500 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer"
-                title={isFavorite ? 'Bỏ yêu thích' : 'Thêm vào món yêu thích của bếp'}
-                aria-label={isFavorite ? `Bỏ yêu thích ${product.name}` : `Yêu thích ${product.name}`}
+                title={isFavorite ? t('Bỏ yêu thích') : t('Thêm vào món yêu thích của bếp')}
+                aria-label={`${t(isFavorite ? 'Bỏ yêu thích' : 'Thêm vào món yêu thích của bếp')} ${productName(product.name)}`}
               >
                 <Heart
                   size={16}
@@ -116,28 +94,11 @@ export default function ProductCard({
 
             {/* Đơn vị tính & Nhóm */}
             <p className="text-xs text-[#59665f] mt-0.5 font-medium">
-              ĐVT: <strong className="text-[#17231d]">{product.unit || 'Kg'}</strong>
+              {t('ĐVT:')} <strong className="text-[#17231d]">{productUnit(product.unit || 'Kg')}</strong>
               {product.category && (
-                <span className="text-[#59665f]/70 font-normal"> · {product.category}</span>
+                <span className="text-[#59665f]/70 font-normal"> · {productName(product.category)}</span>
               )}
             </p>
-
-            {/* Quy cách đóng gói */}
-            {product.shortDescription && (
-              <p className="text-[11px] text-[#59665f] mt-1 line-clamp-2">{product.shortDescription}</p>
-            )}
-            {product.packagingNote && (
-              <div className="text-[11px] text-[#0f7a4f] bg-[#0f7a4f]/8 px-1.5 py-0.5 rounded inline-block font-medium mt-1">
-                📦 {product.packagingNote}
-              </div>
-            )}
-
-            {/* Quy cách đặt hàng bắt buộc */}
-            {product.enforceOrderStep && (
-              <div className="text-[10px] text-[#59665f] font-medium mt-0.5">
-                Tối thiểu: <strong className="text-[#17231d]">{formatQuantityVN(product.minOrderQty || 1)}</strong> · Bước: <strong className="text-[#17231d]">{formatQuantityVN(product.orderStep || 1)}</strong> {product.unit || 'Kg'}
-              </div>
-            )}
           </div>
         </div>
 
@@ -145,18 +106,18 @@ export default function ProductCard({
         <div className="pt-1 flex items-baseline justify-between">
           <div className="text-sm sm:text-base font-extrabold text-[#0f7a4f]">
             {product.priceOnRequest ? (
-              <span className="text-[#e0742f] text-xs font-bold">Liên hệ báo giá</span>
+              <span className="text-[#e0742f] text-xs font-bold">{t('Chờ sale báo giá')}</span>
             ) : (
               money(product.price)
             )}
             <span className="text-[11px] font-normal text-[#59665f] ml-1">
-              /{product.unit || 'Kg'}
+              /{productUnit(product.unit || 'Kg')}
             </span>
           </div>
 
           {isInCart && (
             <span className="text-[11px] font-bold text-[#0f7a4f] bg-[#0f7a4f]/10 px-2 py-0.5 rounded-full">
-              Đã chọn: {formatQuantityVN(quantityInCart)} {product.unit || 'Kg'}
+              {t('Đã chọn:')} {quantityInCart} {productUnit(product.unit || 'Kg')}
             </span>
           )}
         </div>
@@ -171,7 +132,7 @@ export default function ProductCard({
                 className="text-[11px] text-[#59665f] hover:text-[#0f7a4f] flex items-center gap-1 cursor-pointer font-medium"
               >
                 <MessageSquarePlus size={13} />
-                <span>+ Thêm quy cách / ghi chú sơ chế</span>
+                <span>+ {t('Thêm quy cách / ghi chú sơ chế')}</span>
               </button>
             ) : (
               <div className="flex items-center gap-1.5 mt-1">
@@ -183,7 +144,7 @@ export default function ProductCard({
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') handleNoteSave();
                   }}
-                  placeholder="Vd: Sơ chế sẵn, thái lát mỏng..."
+                  placeholder={t('Vd: Sơ chế sẵn, thái lát mỏng...')}
                   className="flex-1 text-xs py-1 px-2.5 bg-[#f8faf7] border border-[#17231d]/15 rounded-lg focus:outline-none focus:border-[#0f7a4f] focus:bg-white text-[#17231d]"
                 />
                 {tempNote !== itemNote && (
@@ -191,7 +152,7 @@ export default function ProductCard({
                     type="button"
                     onClick={handleNoteSave}
                     className="p-1 text-[#0f7a4f] bg-[#0f7a4f]/10 rounded hover:bg-[#0f7a4f]/20"
-                    title="Lưu ghi chú"
+                    title={t('Lưu ghi chú')}
                   >
                     <Check size={14} />
                   </button>
@@ -205,67 +166,55 @@ export default function ProductCard({
       {/* Phần dưới: Nút Thêm hoặc Bộ Stepper tăng giảm >= 44px */}
       <div className="p-2.5 sm:p-3 pt-0 border-t border-[#17231d]/5 mt-1 bg-white/60">
         {!isInCart ? (
-          <button
-            type="button"
-            onClick={() => onAdd(product, initialQty)}
-            className="w-full h-11 sm:h-10 rounded-xl bg-[#0f7a4f] hover:bg-[#0b4f34] active:scale-[0.98] text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-sm shadow-[#0f7a4f]/20 transition-all cursor-pointer touch-target"
-          >
-            <Plus size={16} strokeWidth={2.5} />
-            <span>Thêm vào đơn</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <div className="flex h-11 min-w-0 flex-1 items-center rounded-xl border border-[#17231d]/12 bg-[#f8faf7]">
+              <button type="button" onClick={() => setDraftQuantity(value => String(Math.max(0.1, (Number(value) || 1) - 1)))} aria-label={t('Giảm số lượng')} className="flex size-10 shrink-0 items-center justify-center text-[#466253]"><Minus size={16}/></button>
+              <input type="number" min="0.1" step="any" value={draftQuantity} onChange={e => setDraftQuantity(e.target.value)} aria-label={`Số lượng ${product.name}`} className="w-full min-w-0 bg-transparent text-center text-sm font-bold text-[#17382a] outline-none" />
+              <span className="pr-1 text-[11px] text-[#718579]">{productUnit(product.unit || 'Kg')}</span>
+              <button type="button" onClick={() => setDraftQuantity(value => String((Number(value) || 0) + 1))} aria-label={t('Tăng số lượng')} className="flex size-10 shrink-0 items-center justify-center text-[#0f7a4f]"><Plus size={16}/></button>
+            </div>
+            <button type="button" onClick={() => onAdd(product, Math.max(0.1, Number(draftQuantity) || 1))} aria-label={t('Thêm vào đơn')} className="flex h-11 w-12 shrink-0 items-center justify-center rounded-xl bg-[#0f7a4f] text-white shadow-sm"><Plus size={20}/></button>
+          </div>
         ) : (
-          <div>
-            <div className="flex items-center justify-between gap-1.5 bg-[#f5f7f3] p-1 rounded-xl border border-[#17231d]/10">
-              {/* Nút giảm */}
-              <button
-                type="button"
-                onClick={handleMinus}
-                className="w-10 h-10 sm:w-9 sm:h-9 rounded-lg bg-white border border-[#17231d]/10 text-[#17231d] hover:bg-rose-50 hover:text-rose-600 active:scale-95 flex items-center justify-center font-bold text-base transition-colors cursor-pointer select-none touch-target"
-                aria-label="Giảm số lượng"
-              >
-                <Minus size={15} strokeWidth={2.5} />
-              </button>
+          <div className="flex items-center justify-between gap-1.5 bg-[#f5f7f3] p-1 rounded-xl border border-[#17231d]/10">
+            {/* Nút giảm */}
+            <button
+              type="button"
+              onClick={() => onUpdateQty(product.id, Math.max(0, Number((quantityInCart - 1).toFixed(2))))}
+              className="w-10 h-10 sm:w-9 sm:h-9 rounded-lg bg-white border border-[#17231d]/10 text-[#17231d] hover:bg-rose-50 hover:text-rose-600 active:scale-95 flex items-center justify-center font-bold text-base transition-colors cursor-pointer select-none touch-target"
+              aria-label={t('Giảm số lượng')}
+            >
+              <Minus size={15} strokeWidth={2.5} />
+            </button>
 
-              {/* Ô nhập số lượng (cho phép số thập phân như 1.5, 2.25) */}
-              <div className="flex-1 flex items-center justify-center">
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={qtyDraft}
-                  onChange={(e) => {
-                    const raw = e.target.value;
-                    setQtyDraft(raw);
-                    const val = Number(raw.replace(',', '.'));
-                    if (Number.isFinite(val) && val > 0) onUpdateQty(product.id, val);
-                  }}
-                  onBlur={() => { const val = Number(qtyDraft.replace(',', '.')); if (Number.isFinite(val) && val > 0) onUpdateQty(product.id, val); onNormalizeQty(product.id); }}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); onNormalizeQty(product.id); } }}
-                  className="w-16 sm:w-20 text-center font-extrabold text-sm sm:text-base text-[#0b4f34] bg-transparent focus:outline-none"
-                  aria-label={`Số lượng ${product.name}`}
-                />
-                <span className="text-[11px] font-semibold text-[#59665f] -ml-1">
-                  {product.unit || 'Kg'}
-                </span>
-              </div>
-
-              {/* Nút tăng */}
-              <button
-                type="button"
-                onClick={handlePlus}
-                className="w-10 h-10 sm:w-9 sm:h-9 rounded-lg bg-white border border-[#17231d]/10 text-[#0f7a4f] hover:bg-[#0f7a4f] hover:text-white active:scale-95 flex items-center justify-center font-bold text-base transition-colors cursor-pointer select-none touch-target"
-                aria-label="Tăng số lượng"
-              >
-                <Plus size={15} strokeWidth={2.5} />
-              </button>
+            {/* Ô nhập số lượng (cho phép số thập phân như 1.5, 2.25) */}
+            <div className="flex-1 flex items-center justify-center">
+              <input
+                type="number"
+                min={0}
+                step="any"
+                value={quantityInCart}
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  onUpdateQty(product.id, isNaN(val) ? 0 : Math.max(0, val));
+                }}
+                className="w-16 sm:w-20 text-center font-extrabold text-sm sm:text-base text-[#0b4f34] bg-transparent focus:outline-none"
+                aria-label={`Số lượng ${product.name}`}
+              />
+              <span className="text-[11px] font-semibold text-[#59665f] -ml-1">
+                {productUnit(product.unit || 'Kg')}
+              </span>
             </div>
 
-            {/* Cảnh báo lỗi quy cách số lượng nếu nhập sai */}
-            {qtyError && (
-              <div className="mt-1.5 px-2 py-1 bg-rose-50 border border-rose-200 rounded-lg flex items-center gap-1.5 text-[11px] text-rose-700">
-                <AlertCircle size={13} className="shrink-0 text-rose-500" />
-                <span>{qtyError}</span>
-              </div>
-            )}
+            {/* Nút tăng */}
+            <button
+              type="button"
+              onClick={() => onUpdateQty(product.id, Number((quantityInCart + 1).toFixed(2)))}
+              className="w-10 h-10 sm:w-9 sm:h-9 rounded-lg bg-white border border-[#17231d]/10 text-[#0f7a4f] hover:bg-[#0f7a4f] hover:text-white active:scale-95 flex items-center justify-center font-bold text-base transition-colors cursor-pointer select-none touch-target"
+              aria-label={t('Tăng số lượng')}
+            >
+              <Plus size={15} strokeWidth={2.5} />
+            </button>
           </div>
         )}
       </div>

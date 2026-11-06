@@ -2,6 +2,7 @@ import { Search } from 'lucide-react';
 import type { Product } from '../../lib/api';
 import ProductCard from './ProductCard';
 import type { OrderItem } from './OrderTabsBar';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 interface ProductGridProps {
   products: Product[];
@@ -10,7 +11,6 @@ interface ProductGridProps {
   onToggleFavorite: (productId: string) => void;
   onAddProduct: (product: Product, qty: number) => void;
   onUpdateQty: (productId: string, qty: number) => void;
-  onNormalizeQty: (productId: string) => void;
   onUpdateNote: (productId: string, note: string) => void;
   searchQuery?: string;
   loading?: boolean;
@@ -23,11 +23,11 @@ export default function ProductGrid({
   onToggleFavorite,
   onAddProduct,
   onUpdateQty,
-  onNormalizeQty,
   onUpdateNote,
   searchQuery = '',
   loading = false,
 }: ProductGridProps) {
+  const { t } = useLanguage();
   // Tạo lookup map cho các mặt hàng đã có trong giỏ của tab hiện tại
   const cartMap = new Map<string, { quantity: number; note?: string }>();
   itemsInCart.forEach((item) => {
@@ -61,11 +61,11 @@ export default function ProductGrid({
           <Search size={26} />
         </div>
         <div>
-          <p className="font-bold text-base text-[#17231d]">Không tìm thấy mặt hàng phù hợp</p>
+          <p className="font-bold text-base text-[#17231d]">{t('Không tìm thấy mặt hàng phù hợp')}</p>
           <p className="text-xs text-[#59665f] mt-1 max-w-sm mx-auto">
             {searchQuery
               ? `Không có kết quả nào cho "${searchQuery}". Hãy thử tìm bằng từ khóa đơn giản hơn hoặc mã SKU.`
-              : 'Hãy chọn một nhóm hàng hoặc gõ từ khóa tìm kiếm để xem các sản phẩm có sẵn.'}
+              : t('Hãy chọn một nhóm hàng hoặc gõ từ khóa tìm kiếm để xem các sản phẩm có sẵn.')}
           </p>
         </div>
       </div>
@@ -90,7 +90,6 @@ export default function ProductGrid({
             onToggleFavorite={onToggleFavorite}
             onAdd={onAddProduct}
             onUpdateQty={onUpdateQty}
-            onNormalizeQty={onNormalizeQty}
             onUpdateNote={onUpdateNote}
           />
         );

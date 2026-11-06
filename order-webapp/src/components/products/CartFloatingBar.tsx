@@ -1,5 +1,6 @@
 import { ShoppingBag, ArrowRight } from 'lucide-react';
 import type { OrderTab } from './OrderTabsBar';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 function money(v: number) {
   return new Intl.NumberFormat('vi-VN').format(Number(v) || 0) + 'đ';
@@ -11,6 +12,7 @@ interface CartFloatingBarProps {
 }
 
 export default function CartFloatingBar({ activeTab, onOpenDrawer }: CartFloatingBarProps) {
+  const { t } = useLanguage();
   const count = activeTab.items.length;
   if (count === 0) return null;
 
@@ -38,7 +40,7 @@ export default function CartFloatingBar({ activeTab, onOpenDrawer }: CartFloatin
 
           <div className="min-w-0">
             <p className="font-bold text-sm leading-tight flex items-center gap-1.5">
-              <span>{activeTab.title}</span>
+              <span>{activeTab.title.startsWith('Đặt hàng ') ? `${t('Đặt hàng')} ${activeTab.title.slice('Đặt hàng '.length)}` : activeTab.title}</span>
               <span className="text-[11px] font-normal text-emerald-200/80">
                 ({totalQuantity.toFixed(1)} ĐVT)
               </span>
@@ -53,7 +55,7 @@ export default function CartFloatingBar({ activeTab, onOpenDrawer }: CartFloatin
           type="button"
           className="px-3.5 py-2 rounded-xl bg-white text-[#0b4f34] font-bold text-xs flex items-center gap-1.5 shrink-0 shadow-sm"
         >
-          <span>Xem &amp; Gửi đơn</span>
+          <span>{t('Xem & Gửi đơn')}</span>
           <ArrowRight size={14} />
         </button>
       </div>

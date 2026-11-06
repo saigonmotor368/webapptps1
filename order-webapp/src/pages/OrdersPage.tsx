@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { api, type Order, ApiError } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
+import { useLanguage } from '../contexts/LanguageContext';
 
 const STATUS_LABELS: Record<string, string> = {
   draft: 'Đơn nháp',
@@ -68,6 +69,7 @@ const FILTER_TABS = [
 ];
 
 export default function OrdersPage() {
+  const { t, errorText, productName } = useLanguage();
   const { session, logout } = useAuth();
   const navigate = useNavigate();
   const [orders, setOrders] = useState<Order[]>([]);
@@ -87,11 +89,11 @@ export default function OrdersPage() {
         navigate('/dang-nhap');
         return;
       }
-      setError(err instanceof ApiError ? err.message : 'Không tải được danh sách đơn hàng');
+      setError(err instanceof ApiError ? errorText(err) : t('Không tải được danh sách đơn hàng'));
     } finally {
       setLoading(false);
     }
-  }, [logout, navigate]);
+  }, [logout, navigate, errorText, t]);
 
   useEffect(() => {
     fetchOrders();
@@ -122,9 +124,10 @@ export default function OrdersPage() {
       {/* Header */}
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 sm:p-5 rounded-2xl border border-[#17231d]/10 shadow-xs">
         <div>
-          <h1 className="text-xl sm:text-2xl font-black text-[#17231d]">Đơn hàng của tôi</h1>
+          <h1 className="text-xl sm:text-2xl font-black text-[#17231d]">{t('Đơn hàng của tôi')}</h1>
           <p className="text-[#59665f] text-xs sm:text-sm mt-0.5">
-            {session?.name || session?.company} · Mã KH: <strong className="font-mono text-[#17231d]">{session?.code}</strong>
+            {session?.name || session?.company} · {t('Mã KH:')} <strong className="font-mono text-[#17231d]">{session?.code}</strong>{' '}
+            · {t('Đối tác TPS1')}
           </p>
         </div>
 
@@ -134,7 +137,7 @@ export default function OrdersPage() {
           title="Tải lại danh sách"
         >
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-          <span>Làm mới</span>
+          <span>{t('Làm mới')}</span>
         </button>
       </header>
 
@@ -157,7 +160,7 @@ export default function OrdersPage() {
                   : 'bg-white text-[#59665f] border-[#17231d]/10 hover:border-[#0f7a4f]/30 hover:text-[#17231d]'
               }`}
             >
-              <span>{label}</span>
+              <span>{t(label)}</span>
               <span
                 className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
                   isActive ? 'bg-white text-[#0f7a4f]' : 'bg-[#17231d]/5 text-[#59665f]'
@@ -180,18 +183,18 @@ export default function OrdersPage() {
       {loading ? (
         <div className="flex flex-col items-center justify-center py-20 text-[#59665f] space-y-2 bg-white rounded-2xl border border-[#17231d]/10">
           <RefreshCw className="animate-spin text-[#0f7a4f]" size={24} />
-          <span className="text-xs font-medium">Đang tải lịch sử đơn hàng...</span>
+          <span className="text-xs font-medium">{t('Đang tải lịch sử đơn hàng...')}</span>
         </div>
       ) : filteredOrders.length === 0 ? (
         <div className="bg-white rounded-2xl border border-[#17231d]/10 py-16 text-center text-[#59665f] space-y-2">
           <div className="w-16 h-16 rounded-2xl bg-[#f5f7f3] flex items-center justify-center mx-auto text-[#59665f]/40">
             <ShoppingBag size={28} />
           </div>
-          <p className="font-bold text-base text-[#17231d]">Không có đơn hàng nào</p>
+          <p className="font-bold text-base text-[#17231d]">{t('Không có đơn hàng nào')}</p>
           <p className="text-xs text-[#59665f] max-w-sm mx-auto">
             {selectedFilter !== 'all'
               ? `Chưa có đơn hàng nào ở trạng thái "${STATUS_LABELS[selectedFilter] || selectedFilter}".`
-              : 'Bạn chưa tạo đơn hàng nào. Hãy vào màn hình Đặt hàng để lên đơn cho bếp.'}
+              : t('Bạn chưa tạo đơn hàng nào. Hãy vào màn hình Đặt hàng để lên đơn cho bếp.')}
           </p>
         </div>
       ) : (
@@ -216,11 +219,11 @@ export default function OrdersPage() {
                     <span
                       className={`text-xs font-bold px-2.5 py-0.5 rounded-full border ${badgeClass}`}
                     >
-                      {STATUS_LABELS[order.status] || order.status}
+                      {t(STATUS_LABELS[order.status] || order.status)}
                     </span>
                     {order.status === 'completed' && order.invoice_document_id && (
                       <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200 flex items-center gap-1">
-                          <Receipt size={11} /> Hóa đơn bán hàng
+                          <Receipt size={11} /> {t('Hóa đơn bán hàng')}
                       </span>
                     )}
                   </div>
@@ -240,7 +243,7 @@ export default function OrdersPage() {
                       <span className="text-[#59665f] font-normal ml-1 line-clamp-1">
                         {order.items
                           ?.slice(0, 3)
-                          .map((it) => it.name)
+                          .map((it) => productName(it.name))
                           .join(', ')}
                         {itemsCount > 3 ? ` và ${itemsCount - 3} món khác...` : ''}
                       </span>

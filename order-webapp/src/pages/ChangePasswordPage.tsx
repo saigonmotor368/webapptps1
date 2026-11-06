@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { KeyRound, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { api, ApiError } from '../lib/api';
+import { useLanguage } from '../contexts/LanguageContext';
 
 // Dùng chung cho 2 trường hợp: (1) bắt buộc đổi ngay sau lần đăng nhập đầu
 // (session.mustChangePassword=true, mật khẩu do sale cấp) và (2) khách tự
@@ -11,6 +12,7 @@ import { api, ApiError } from '../lib/api';
 export default function ChangePasswordPage() {
   const { session, setSession } = useAuth();
   const navigate = useNavigate();
+  const { t, errorText } = useLanguage();
   const forced = Boolean(session?.mustChangePassword);
 
   const [oldPassword, setOldPassword] = useState('');
@@ -24,11 +26,11 @@ export default function ChangePasswordPage() {
     e.preventDefault();
     setError('');
     if (newPassword.length < 6) {
-      setError('Mật khẩu mới phải từ 6 ký tự trở lên');
+      setError(t('Mật khẩu mới phải từ 6 ký tự trở lên'));
       return;
     }
     if (newPassword !== confirmPassword) {
-      setError('Mật khẩu nhập lại không khớp');
+      setError(t('Mật khẩu nhập lại không khớp'));
       return;
     }
     setLoading(true);
@@ -38,7 +40,7 @@ export default function ChangePasswordPage() {
       setDone(true);
       setTimeout(() => navigate('/'), 1200);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Không đổi được mật khẩu, vui lòng thử lại');
+      setError(err instanceof ApiError ? errorText(err) : t('Không đổi được mật khẩu, vui lòng thử lại'));
     } finally {
       setLoading(false);
     }
@@ -52,11 +54,11 @@ export default function ChangePasswordPage() {
             <KeyRound size={26} />
           </div>
           <h1 className="text-xl font-bold text-[#17231d]">
-            {forced ? 'Đặt mật khẩu mới' : 'Đổi mật khẩu'}
+            {t(forced ? 'Đặt mật khẩu mới' : 'Đổi mật khẩu')}
           </h1>
           {forced && (
             <p className="text-sm text-[#59665f] mt-1">
-              Đây là lần đăng nhập đầu tiên — vui lòng đặt mật khẩu mới trước khi tiếp tục sử dụng.
+              {t('Đây là lần đăng nhập đầu tiên — vui lòng đặt mật khẩu mới trước khi tiếp tục sử dụng.')}
             </p>
           )}
         </div>
@@ -64,13 +66,13 @@ export default function ChangePasswordPage() {
         {done ? (
           <div className="text-center py-6 space-y-2">
             <CheckCircle2 className="mx-auto text-[#0f7a4f]" size={36} />
-            <p className="font-medium text-[#17231d]">Đổi mật khẩu thành công!</p>
+            <p className="font-medium text-[#17231d]">{t('Đổi mật khẩu thành công!')}</p>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-[#59665f] uppercase tracking-wider mb-1.5">
-                {forced ? 'Mật khẩu được cấp' : 'Mật khẩu hiện tại'}
+                {t(forced ? 'Mật khẩu được cấp' : 'Mật khẩu hiện tại')}
               </label>
               <input
                 type="password"
@@ -82,7 +84,7 @@ export default function ChangePasswordPage() {
             </div>
             <div>
               <label className="block text-xs font-semibold text-[#59665f] uppercase tracking-wider mb-1.5">
-                Mật khẩu mới (từ 6 ký tự)
+                {t('Mật khẩu mới (từ 6 ký tự)')}
               </label>
               <input
                 type="password"
@@ -94,7 +96,7 @@ export default function ChangePasswordPage() {
             </div>
             <div>
               <label className="block text-xs font-semibold text-[#59665f] uppercase tracking-wider mb-1.5">
-                Nhập lại mật khẩu mới
+                {t('Nhập lại mật khẩu mới')}
               </label>
               <input
                 type="password"
@@ -112,7 +114,7 @@ export default function ChangePasswordPage() {
               disabled={loading}
               className="w-full bg-[#0f7a4f] hover:bg-[#0b4f34] text-white font-semibold py-3 rounded-xl transition-colors disabled:opacity-50"
             >
-              {loading ? 'Đang lưu...' : 'Lưu mật khẩu mới'}
+              {t(loading ? 'Đang lưu...' : 'Lưu mật khẩu mới')}
             </button>
           </form>
         )}

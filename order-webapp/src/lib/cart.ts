@@ -5,30 +5,27 @@ export interface CartLine {
   product: Product;
   quantity: number;
   note?: string;
-  requestedQuantity?: number;
-  adjustmentAcknowledged?: boolean;
-  quantityAdjustmentMessage?: string;
 }
 
-const CART_KEY = 'tps1_order_cart_v1';
+const cartKey = (customerId: string) => `tps1_order_cart_v2_${customerId}`;
 
-function readCart(): Record<string, CartLine> {
+function readCart(customerId: string): Record<string, CartLine> {
   try {
-    const raw = sessionStorage.getItem(CART_KEY);
+    const raw = localStorage.getItem(cartKey(customerId));
     return raw ? JSON.parse(raw) : {};
   } catch {
     return {};
   }
 }
 
-export function useCart() {
-  const [cart, setCart] = useState<Record<string, CartLine>>(() => readCart());
+export function useCart(customerId: string) {
+  const [cart, setCart] = useState<Record<string, CartLine>>(() => readCart(customerId));
 
   useEffect(() => {
-    sessionStorage.setItem(CART_KEY, JSON.stringify(cart));
-  }, [cart]);
+    localStorage.setItem(cartKey(customerId), JSON.stringify(cart));
+  }, [cart, customerId]);
 
-  const addItem = useCallback((product: Product, qty = 1, note = '', adjustment?: { requestedQuantity: number; acknowledged: boolean; message?: string }) => {
+  const addItem = useCallback((product: Product, qty = 1, note = '') => {
     setCart((prev) => {
       const existing = prev[product.id];
       return {
@@ -37,22 +34,19 @@ export function useCart() {
           product,
           quantity: (existing?.quantity || 0) + qty,
           note: note || existing?.note || '',
-          requestedQuantity: (existing?.requestedQuantity ?? existing?.quantity ?? 0) + (adjustment?.requestedQuantity ?? qty),
-          adjustmentAcknowledged: adjustment?.acknowledged ?? existing?.adjustmentAcknowledged ?? false,
-          quantityAdjustmentMessage: adjustment?.message || existing?.quantityAdjustmentMessage,
         },
       };
     });
   }, []);
 
-  const setQty = useCallback((productId: string, qty: number, adjustment?: { requestedQuantity: number; acknowledged: boolean; message?: string }) => {
+  const setQty = useCallback((productId: string, qty: number) => {
     setCart((prev) => {
       if (qty <= 0) {
         const next = { ...prev };
         delete next[productId];
         return next;
       }
-      return { ...prev, [productId]: { ...prev[productId], quantity: qty, requestedQuantity: adjustment?.requestedQuantity ?? qty, adjustmentAcknowledged: adjustment?.acknowledged ?? false, quantityAdjustmentMessage: adjustment?.message } };
+      return { ...prev, [productId]: { ...prev[productId], quantity: qty } };
     });
   }, []);
 

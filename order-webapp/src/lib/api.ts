@@ -24,17 +24,19 @@ export function clearToken() {
 
 export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  code?: string;
+  constructor(message: string, status: number, code?: string) {
     super(message);
     this.status = status;
+    this.code = code;
   }
 }
 
 async function request<T = any>(
   path: string,
-  opts: { method?: string; body?: unknown; auth?: boolean; formData?: FormData; signal?: AbortSignal; cache?: RequestCache } = {}
+  opts: { method?: string; body?: unknown; auth?: boolean; formData?: FormData; signal?: AbortSignal } = {}
 ): Promise<T> {
-  const { method = 'GET', body, auth = true, formData, signal, cache } = opts;
+  const { method = 'GET', body, auth = true, formData, signal } = opts;
   const headers: Record<string, string> = {};
   if (!formData) headers['Content-Type'] = 'application/json';
   if (auth) {
@@ -46,7 +48,6 @@ async function request<T = any>(
     headers,
     body: formData ? formData : body !== undefined ? JSON.stringify(body) : undefined,
     signal,
-    cache,
   });
   let data: any = null;
   try {
@@ -55,7 +56,7 @@ async function request<T = any>(
     // vd tải file nhị phân (PDF) — để caller tự xử lý res gốc qua requestRaw
   }
   if (!res.ok || (data && data.ok === false)) {
-    throw new ApiError(data?.error || `Lỗi máy chủ (${res.status})`, res.status);
+    throw new ApiError(data?.error || `Lỗi máy chủ (${res.status})`, res.status, data?.code);
   }
   return data as T;
 }
@@ -63,8 +64,7 @@ async function request<T = any>(
 export async function requestFile(path: string): Promise<Blob> {
   const token = getToken();
   const url = new URL(`${API_BASE}${path}`, window.location.href);
-  if (token) url.searchParams.set('sessionToken', token);
-  const res = await fetch(url.toString());
+  const res = await fetch(url.toString(), { headers: token ? { Authorization: `Bearer ${token}` } : {} });
   if (!res.ok) {
     const data = await res.json().catch(() => null);
     throw new ApiError(data?.error || 'Không tải được tệp', res.status);
@@ -89,11 +89,19 @@ export interface CustomerSession {
   orderSessionToken?: string;
 }
 
+export interface AccountProfile { name: string; company: string; taxCode: string; username: string; usernameChangedAt: string | null; avatarUrl: string | null; request: { id: string; company: string; tax_code: string; status: string; note?: string } | null }
 export const api = {
-  login: (code: string, password: string) =>
+  account: () => request<{ ok: true; account: AccountProfile }>('/api/customer/account'),
+  saveAccount: (body: { name: string; company: string; taxCode: string }) => request<{ ok: true; account: AccountProfile }>('/api/customer/account', { method: 'PATCH', body }),
+  saveUsername: (username: string) => request<{ ok: true; username: string }>('/api/customer/username', { method: 'PATCH', body: { username } }),
+  uploadAvatar: (file: File) => { const formData = new FormData(); formData.set('avatar', file); return request<{ ok: true; account: AccountProfile }>('/api/customer/account', { method: 'POST', formData }); },
+  register: (payload: { name: string; company: string; phone: string; username: string; email: string; password: string }) =>
+    request<{ ok: true; account: { id: string; code: string; verificationStatus: 'pending' } }>(
+      '/api/customer/register', { method: 'POST', auth: false, body: { ...payload, confirmPassword: payload.password, source: 'website' } }),
+  login: (identifier: string, password: string) =>
     request<{ ok: true; session: CustomerSession }>('/api/customer/login', {
       method: 'POST',
-      body: { code, password },
+      body: { identifier, password },
       auth: false,
     }),
 
@@ -104,6 +112,10 @@ export const api = {
     }),
 
   session: () => request<{ ok: true; session: CustomerSession }>('/api/customer/session'),
+  addresses: () => request<{ok:true;addresses:{id:string;label:string;address:string;contactName:string;contactPhone:string;isDefault:boolean}[]}>('/api/customer/addresses'),
+  addAddress: (body:{label:string;address:string;contactName:string;contactPhone:string;isDefault:boolean}) => request<{ok:true}>('/api/customer/addresses',{method:'POST',body}),
+  setDefaultAddress: (id:string) => request<{ok:true}>('/api/customer/addresses',{method:'PATCH',body:{id,isDefault:true}}),
+  deleteAddress: (id:string) => request<{ok:true}>(`/api/customer/addresses?id=${encodeURIComponent(id)}`,{method:'DELETE'}),
 
   products: (params: { search?: string; category?: string; page?: number } = {}, signal?: AbortSignal) => {
     const qs = new URLSearchParams();
@@ -117,12 +129,8 @@ export const api = {
   },
   productCategories: () =>
     request<{ ok: true; categories: string[] }>('/api/customer/products?meta=1'),
-  // Không dùng HTTP cache của trình duyệt: ProductsPage tự cache theo phiên bản.
   productCatalog: (signal?: AbortSignal) =>
-    request<ProductCatalogResponse>('/api/customer/products?catalog=1', { signal, cache: 'no-cache' }),
-  // API cũ chưa có endpoint này sẽ trả danh sách phân trang, không có `version`.
-  productCatalogVersion: (signal?: AbortSignal) =>
-    request<{ ok: true; version?: string }>('/api/customer/products?catalogVersion=1', { signal, cache: 'no-store' }),
+    request<ProductCatalogResponse>('/api/customer/products?catalog=1', { signal }),
 
   orders: () => request<{ ok: true; orders: Order[] }>('/api/customer/orders'),
   orderConfig: () =>
@@ -138,7 +146,7 @@ export const api = {
   frequentItems: (signal?: AbortSignal) => request<{ ok: true; items: FrequentItem[] }>('/api/customer/frequent-items', { signal }),
 
   createOrder: (payload: {
-    items: { productId: string; name: string; quantity: number; requestedQuantity?: number; adjustmentAcknowledged?: boolean; note?: string; sourceImportLineId?: string }[];
+    items: { productId: string; name: string; quantity: number; note?: string; sourceImportLineId?: string }[];
     deliveryAlias?: string;
     deliveryAddress: string;
     deliveryName: string;
@@ -148,7 +156,7 @@ export const api = {
     idempotencyKey: string;
     sourceImportBatchId?: string;
   }) =>
-    request<{ ok: true; orderId: string; orderCode: string; total: number }>('/api/customer/order', {
+    request<{ ok: true; orderId: string; orderCode: string; total: number; pendingPriceCount: number }>('/api/customer/order', {
       method: 'POST',
       body: {
         source: 'website',
@@ -182,16 +190,6 @@ export const api = {
 
   pushUnsubscribe: (endpoint: string) =>
     request<{ ok: true }>('/api/customer/push-subscribe', { method: 'DELETE', body: { endpoint } }),
-
-  account: () => request<CustomerAccountResponse>('/api/customer/account'),
-  updateProfile: (body: { name: string; phone: string; email?: string; address?: string }) =>
-    request<{ ok: true; session: CustomerSession }>('/api/customer/profile', { method: 'PATCH', body }),
-  createAddress: (body: CustomerAddressInput) => request<{ ok: true; address: CustomerAddress }>('/api/customer/addresses', { method: 'POST', body }),
-  updateAddress: (id: string, body: CustomerAddressInput) => request<{ ok: true; address: CustomerAddress }>(`/api/customer/addresses/${id}`, { method: 'PATCH', body }),
-  deactivateAddress: (id: string) => request<{ ok: true }>(`/api/customer/addresses/${id}`, { method: 'DELETE' }),
-  setDefaultAddress: (id: string) => request<{ ok: true }>(`/api/customer/addresses/${id}/default`, { method: 'POST' }),
-  requestLegalProfileChange: (body: { company?: string; taxCode?: string; reason: string }) =>
-    request<{ ok: true }>('/api/customer/profile-change-requests', { method: 'POST', body }),
 };
 
 export interface Product {
@@ -206,13 +204,11 @@ export interface Product {
   priceOnRequest?: boolean;
   available: boolean;
   stockQty?: number;
+  minOrderQty?: number | null;
+  orderStep?: number | null;
+  enforceOrderStep?: boolean | null;
   packagingNote?: string | null;
-  minOrderQty?: number;
-  orderStep?: number;
-  enforceOrderStep?: boolean;
-  quantityPrecision?: number;
-  quantityAdjustmentMode?: 'reject' | 'ceil_to_step';
-  shortDescription?: string | null;
+  quantityPrecision?: number | null;
 }
 
 export type ProductCatalogTuple = [
@@ -224,37 +220,11 @@ export type ProductCatalogTuple = [
   price: number,
   priceOnRequest: boolean,
   hasImage: boolean,
-  packagingNote?: string | null,
-  minOrderQty?: number,
-  orderStep?: number,
-  enforceOrderStep?: boolean,
-  quantityPrecision?: number,
-  quantityAdjustmentMode?: 'reject' | 'ceil_to_step',
-  shortDescription?: string | null,
-  imageUrl?: string | null,
 ];
-
-export interface CustomerAddress {
-  id: string; label: string; address: string; contact_name: string; contact_phone: string;
-  is_default: boolean; is_active: boolean; created_at?: string; updated_at?: string;
-}
-
-export interface CustomerAddressInput { label: string; address: string; contactName: string; contactPhone: string; isDefault?: boolean }
-
-export interface CustomerAccountResponse {
-  ok: true;
-  profile: { id: string; code: string; contactName: string; company: string; phone: string; email?: string; address?: string; taxCode?: string; verificationStatus?: string; isActive?: boolean; priceBook: { id: string; name: string; version: number } | null };
-  orderSummary: { total: number; processing: number; shipping: number; completed: number };
-  recentOrders: Order[];
-  addresses: CustomerAddress[];
-  legalChangeRequests: { id: string; requested_company?: string; requested_tax_code?: string; reason: string; status: string; created_at: string }[];
-}
 
 export interface ProductCatalogResponse {
   ok: true;
   count: number;
-  /** Phiên bản danh mục trong DB; đổi khi sản phẩm được sửa ở bất kỳ đâu. */
-  version?: string;
   imageBaseUrl: string;
   items: ProductCatalogTuple[];
 }
@@ -287,7 +257,6 @@ export interface Order {
     productId: string;
     sku?: string;
     name: string;
-    shortDescription?: string | null;
     unit?: string;
     quantity: number;
     price: number;
@@ -316,11 +285,8 @@ export interface ExcelMatchResult {
   row: number;
   input: string;
   quantity: number;
-  requestedQuantity?: number;
-  adjustmentAcknowledged?: boolean;
-  adjustmentMessage?: string;
   note: string;
   status: 'matched' | 'ambiguous' | 'not_found' | 'invalid_quantity';
-  product?: { id: string; sku: string; name: string; unit: string; price: number; priceOnRequest: boolean; minOrderQty?: number; orderStep?: number; enforceOrderStep?: boolean; quantityPrecision?: number; quantityAdjustmentMode?: 'reject' | 'ceil_to_step' };
-  suggestions?: { id: string; sku: string; name: string; unit: string; price: number; priceOnRequest: boolean; minOrderQty?: number; orderStep?: number; enforceOrderStep?: boolean; quantityPrecision?: number; quantityAdjustmentMode?: 'reject' | 'ceil_to_step'; score: number }[];
+  product?: { id: string; sku: string; name: string; unit: string; price: number; priceOnRequest: boolean };
+  suggestions?: { id: string; sku: string; name: string; unit: string; price: number; priceOnRequest: boolean; score: number }[];
 }

@@ -20,6 +20,10 @@ import {
 } from 'lucide-react';
 import { api, requestFile, type Order, ApiError } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
+import { useLanguage } from '../contexts/LanguageContext';
+import { Capacitor } from '@capacitor/core';
+import { Directory, Filesystem } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
 
 const STATUS_LABELS: Record<string, string> = {
   draft: 'Đơn nháp',
@@ -82,6 +86,7 @@ export default function OrderDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { logout } = useAuth();
+  const { t, errorText, productName, productUnit } = useLanguage();
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -107,11 +112,11 @@ export default function OrderDetailPage() {
         navigate('/dang-nhap');
         return;
       }
-      setError(err instanceof ApiError ? err.message : 'Không tải được chi tiết đơn hàng');
+      setError(err instanceof ApiError ? errorText(err) : t('Không tải được chi tiết đơn hàng'));
     } finally {
       setLoading(false);
     }
-  }, [id, logout, navigate]);
+  }, [id, logout, navigate, errorText, t]);
 
   useEffect(() => {
     fetchOrder();
@@ -123,14 +128,26 @@ export default function OrderDetailPage() {
     try {
       const path = type === 'invoice' ? 'order-invoice' : 'order-confirmation';
       const blob = await requestFile(`/api/customer/${path}?orderId=${order.id}`);
+      const filename = `${type === 'invoice' ? 'HOA-DON' : 'XAC-NHAN-DON'}_${order.order_code}.pdf`;
+      if (Capacitor.isNativePlatform()) {
+        const data = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result).split(',')[1]);
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(blob);
+        });
+        const saved = await Filesystem.writeFile({ path: filename, data, directory: Directory.Cache });
+        await Share.share({ title: filename, url: saved.uri, dialogTitle: t('Mở hoặc lưu tài liệu') });
+        return;
+      }
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${type === 'invoice' ? 'HOA-DON' : 'XAC-NHAN-DON'}_${order.order_code}.pdf`;
+      a.download = filename;
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
-      alert('Lỗi tải tài liệu: ' + (err instanceof ApiError ? err.message : 'Vui lòng thử lại sau'));
+      alert(t('Lỗi tải tài liệu:') + ' ' + (err instanceof ApiError ? errorText(err) : t('Vui lòng thử lại sau')));
     } finally {
       setDownloading(null);
     }
@@ -139,7 +156,7 @@ export default function OrderDetailPage() {
   const handleCancelOrder = async () => {
     if (!order) return;
     if (!cancelReason.trim()) {
-      setCancelError('Vui lòng nhập lý do hủy đơn');
+      setCancelError(t('Vui lòng nhập lý do hủy đơn'));
       return;
     }
     setCanceling(true);
@@ -150,7 +167,7 @@ export default function OrderDetailPage() {
       setCancelReason('');
       fetchOrder();
     } catch (err) {
-      setCancelError(err instanceof ApiError ? err.message : 'Không thể hủy đơn, vui lòng thử lại');
+      setCancelError(err instanceof ApiError ? errorText(err) : t('Không thể hủy đơn, vui lòng thử lại'));
     } finally {
       setCanceling(false);
     }
@@ -160,7 +177,7 @@ export default function OrderDetailPage() {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-[#59665f] space-y-3">
         <RefreshCw className="animate-spin text-[#0f7a4f]" size={28} />
-        <span className="text-sm font-medium">Đang tải chi tiết đơn hàng...</span>
+        <span className="text-sm font-medium">{t('Đang tải chi tiết đơn hàng...')}</span>
       </div>
     );
   }
@@ -172,7 +189,7 @@ export default function OrderDetailPage() {
           onClick={() => navigate('/don-hang')}
           className="inline-flex items-center gap-1.5 text-xs font-bold text-[#59665f] hover:text-[#17231d] px-3 py-2 rounded-xl border border-[#17231d]/10 bg-white"
         >
-          <ArrowLeft size={16} /> Quay lại danh sách đơn
+          <ArrowLeft size={16} /> {t('Quay lại danh sách đơn')}
         </button>
         <div className="text-center py-16 px-6 bg-white rounded-2xl border border-red-200 text-red-600 text-sm">
           {error || `Không tìm thấy đơn hàng #${id}`}
@@ -214,12 +231,12 @@ export default function OrderDetailPage() {
                   STATUS_BADGES[order.status] || 'bg-slate-100 text-slate-700'
                 }`}
               >
-                {STATUS_LABELS[order.status] || order.status}
+                {t(STATUS_LABELS[order.status] || order.status)}
               </span>
             </div>
             <p className="text-xs text-[#59665f] mt-0.5 flex items-center gap-1 font-mono">
               <Clock size={12} />
-              <span>Đặt lúc: {dt(order.created_at)}</span>
+              <span>{t('Đặt lúc:')} {dt(order.created_at)}</span>
             </p>
           </div>
         </div>
@@ -233,7 +250,7 @@ export default function OrderDetailPage() {
               className="px-3.5 py-2 bg-[#f8faf7] border border-[#17231d]/15 text-[#17231d] rounded-xl text-xs font-bold hover:bg-[#eaece8] disabled:opacity-50 flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <ClipboardList size={14} className="text-[#0f7a4f]" />
-              <span>{downloading === 'confirmation' ? 'Đang tải...' : 'Phiếu xác nhận (PDF)'}</span>
+              <span>{t(downloading === 'confirmation' ? 'Đang tải...' : 'Phiếu xác nhận (PDF)')}</span>
             </button>
           )}
 
@@ -244,7 +261,7 @@ export default function OrderDetailPage() {
               className="px-3.5 py-2 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-bold hover:bg-emerald-100 disabled:opacity-50 flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <Receipt size={14} className="text-emerald-700" />
-              <span>{downloading === 'invoice' ? 'Đang tải...' : 'Hóa đơn bán hàng (PDF)'}</span>
+              <span>{t(downloading === 'invoice' ? 'Đang tải...' : 'Hóa đơn bán hàng (PDF)')}</span>
             </button>
           )}
 
@@ -253,7 +270,7 @@ export default function OrderDetailPage() {
               onClick={() => setShowCancelModal(true)}
               className="px-3 py-2 text-rose-600 bg-rose-50 border border-rose-200 rounded-xl text-xs font-bold hover:bg-rose-100 transition-colors cursor-pointer"
             >
-              Hủy đơn
+              {t('Hủy đơn')}
             </button>
           )}
 
@@ -270,14 +287,14 @@ export default function OrderDetailPage() {
       {/* Timeline Tiến Trình Đơn Hàng */}
       <div className="bg-white rounded-2xl border border-[#17231d]/10 shadow-xs p-4 sm:p-5">
         <h2 className="text-xs font-bold text-[#59665f] uppercase tracking-wider mb-4">
-          Tiến trình xử lý đơn
+          {t('Tiến trình xử lý đơn')}
         </h2>
 
         {isCanceled ? (
           <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 flex items-center gap-3 text-xs">
             <XCircle size={20} className="shrink-0 text-rose-600" />
             <div>
-              <p className="font-bold">Đơn hàng này đã bị hủy.</p>
+              <p className="font-bold">{t('Đơn hàng này đã bị hủy.')}</p>
               <p className="text-[#59665f] mt-0.5">
                 Nếu cần hỗ trợ thêm, vui lòng liên hệ hotline TPS1: <strong>089 890 2222</strong>.
               </p>
@@ -325,7 +342,7 @@ export default function OrderDetailPage() {
                           : 'text-[#59665f]/60'
                       }`}
                     >
-                      {step.label}
+                      {t(step.label)}
                     </span>
                   </div>
                 );
@@ -344,7 +361,7 @@ export default function OrderDetailPage() {
             <div className="p-4 border-b border-[#17231d]/10 flex items-center justify-between">
               <h2 className="font-bold text-sm sm:text-base text-[#17231d] flex items-center gap-2">
                 <Package size={17} className="text-[#0f7a4f]" />
-                <span>Mặt hàng trong đơn</span>
+                <span>{t('Mặt hàng trong đơn')}</span>
               </h2>
               <span className="text-xs font-semibold text-[#59665f]">
                 {items.length} mặt hàng
@@ -357,25 +374,25 @@ export default function OrderDetailPage() {
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
                       <p className="font-bold text-xs sm:text-sm text-[#17231d] leading-snug">
-                        {item.name}
+                        {productName(item.name)}
                       </p>
-                      {item.shortDescription && <p className="text-xs text-slate-500 mt-1">{item.shortDescription}</p>}
+                      {productName(item.name) !== item.name && <p className="text-[11px] text-[#59665f]">{item.name}</p>}
                       <div className="flex items-center gap-2 text-[11px] text-[#59665f] mt-0.5">
                         {item.sku && <span className="font-mono font-semibold">SKU: {item.sku}</span>}
                         <span>·</span>
-                        <span>ĐVT: {item.unit || 'Kg'}</span>
+                        <span>{t('ĐVT:')} {productUnit(item.unit || 'Kg')}</span>
                       </div>
                     </div>
 
                     <div className="text-right shrink-0">
                       <span className="font-mono font-bold text-xs sm:text-sm text-[#0f7a4f]">
-                        {money(lineTotal(item))}
+                        {Number(item.finalUnitPrice ?? item.price) > 0 ? money(lineTotal(item)) : t('Chờ sale báo giá')}
                       </span>
                       <p className="text-[10px] text-[#59665f]">
-                        {item.quantity} {item.unit || 'Kg'} ×{' '}
+                        {item.quantity} {productUnit(item.unit || 'Kg')} ×{' '}
                         {Number(item.finalUnitPrice ?? item.price) > 0
                           ? money(item.finalUnitPrice ?? item.price)
-                          : 'Báo giá'}
+                          : t('Chờ sale báo giá')}
                       </p>
                     </div>
                   </div>
@@ -383,12 +400,12 @@ export default function OrderDetailPage() {
                   {/* Ghi chú từng dòng */}
                   {item.customerNote && (
                     <div className="text-[11px] text-[#0f7a4f] bg-[#0f7a4f]/5 px-2.5 py-1 rounded-lg border border-[#0f7a4f]/15 italic">
-                      📝 Yêu cầu của khách: {item.customerNote}
+                      📝 {t('Yêu cầu của khách:')} {item.customerNote}
                     </div>
                   )}
                   {item.itemNote && (
                     <div className="text-[11px] text-[#59665f] bg-[#f8faf7] px-2.5 py-1 rounded-lg border border-[#17231d]/10 italic">
-                      Xác nhận của TPS1: {item.itemNote}
+                      {t('Xác nhận của TPS1:')} {item.itemNote}
                     </div>
                   )}
                 </div>
@@ -408,11 +425,11 @@ export default function OrderDetailPage() {
           <div className="bg-white rounded-2xl border border-[#17231d]/10 shadow-xs p-4 sm:p-5 space-y-2 text-xs">
             <h3 className="font-bold text-sm text-[#17231d] flex items-center gap-2 mb-2">
               <FileText size={16} className="text-[#0f7a4f]" />
-              <span>Tổng kết tiền hàng</span>
+              <span>{t('Tổng kết tiền hàng')}</span>
             </h3>
 
             <div className="flex justify-between text-[#59665f]">
-              <span>Tạm tính tiền hàng:</span>
+              <span>{t('Tạm tính tiền hàng:')}</span>
               <span className="font-mono font-semibold text-[#17231d]">
                 {money(order.subtotal || order.grand_total)}
               </span>
@@ -420,7 +437,7 @@ export default function OrderDetailPage() {
 
             {Number(order.discount_amount) > 0 && (
               <div className="flex justify-between text-[#59665f]">
-                <span>Chiết khấu đơn hàng:</span>
+                <span>Điều chỉnh giá:</span>
                 <span className="font-mono font-bold text-red-600">
                   -{money(order.discount_amount || 0)}
                 </span>
@@ -435,7 +452,7 @@ export default function OrderDetailPage() {
             </div>
 
             <div className="flex justify-between items-center pt-2.5 border-t border-[#17231d]/10">
-              <span className="text-sm font-black text-[#17231d]">Tổng thanh toán:</span>
+              <span className="text-sm font-black text-[#17231d]">{t('Tổng thanh toán:')}</span>
               <span className="text-xl font-black font-mono text-[#0f7a4f]">
                 {money(order.grand_total)}
               </span>
@@ -446,7 +463,7 @@ export default function OrderDetailPage() {
               <span>
                 {order.status === 'completed'
                   ? 'Giá đã chốt và hoàn tất thanh toán/công nợ.'
-                  : 'Giá tạm tính — Nhân viên bán hàng TPS1 sẽ xác nhận giá cuối cùng theo chứng từ xuất kho.'}
+                  : t('Giá tạm tính chưa gồm hàng chờ giá; TPS1 sẽ xác nhận giá cuối cùng.')}
               </span>
             </p>
           </div>

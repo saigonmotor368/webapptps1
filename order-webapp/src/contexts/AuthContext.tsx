@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { api, clearToken, getToken, setToken, type CustomerSession } from '../lib/api';
+import { api, ApiError, clearToken, getToken, setToken, type CustomerSession } from '../lib/api';
+
+const SESSION_CACHE = 'tps1_customer_session_snapshot';
 
 interface AuthContextType {
   session: CustomerSession | null;
@@ -41,9 +43,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const res = await api.session();
       setSessionState(res.session);
-    } catch {
-      clearToken();
-      setSessionState(null);
+      localStorage.setItem(SESSION_CACHE, JSON.stringify(res.session));
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        clearToken(); localStorage.removeItem(SESSION_CACHE); setSessionState(null);
+      } else {
+        try { setSessionState(JSON.parse(localStorage.getItem(SESSION_CACHE) || 'null')); }
+        catch { setSessionState(null); }
+      }
     } finally {
       setLoading(false);
     }
@@ -58,17 +65,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const res = await api.login(code, password);
     if (res.session.orderSessionToken) setToken(res.session.orderSessionToken);
     setSessionState(res.session);
+    localStorage.setItem(SESSION_CACHE, JSON.stringify(res.session));
     return res.session;
   };
 
   const logout = () => {
     clearToken();
+    localStorage.removeItem(SESSION_CACHE);
     setSessionState(null);
   };
 
   const setSession = (s: CustomerSession) => {
     if (s.orderSessionToken) setToken(s.orderSessionToken);
     setSessionState(s);
+    localStorage.setItem(SESSION_CACHE, JSON.stringify(s));
   };
 
   return (
