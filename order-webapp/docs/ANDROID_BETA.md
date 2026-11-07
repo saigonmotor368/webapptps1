@@ -8,6 +8,7 @@
 4. Trước khi tìm kiếm, khách có thể lướt hàng thường mua và danh mục. Nhập từ khóa rồi nhấn Tìm để xem kết quả; chọn số lượng (Kg có thể dùng số lẻ) trước khi nhấn dấu cộng để thêm hàng. Kiểm tra địa chỉ, ngày giao sớm nhất, giờ chốt và số tiền tạm tính trước khi gửi. Chỉ coi là gửi thành công khi màn hình hiện **mã đơn hàng**.
 5. Mặt hàng chưa có giá vẫn nằm trong đơn. Phần tạm tính chưa bao gồm các mặt hàng này; sale sẽ nhập giá hoặc bỏ dòng không có hàng trước khi xác nhận.
 6. Trong **Tài khoản → Sổ địa chỉ**, khách có thể lưu nhiều điểm giao, chọn địa chỉ mặc định hoặc xóa địa chỉ cũ. **Đơn hàng của tôi** vẫn nằm ở tab riêng.
+7. Trong **Đặt hàng Excel**, nhấn **Tải file mẫu**, chọn thư mục trên điện thoại trong hộp thoại Android rồi nhấn **Lưu**. Nếu hủy hộp thoại, ứng dụng không lưu tệp.
 
 Giỏ hàng được lưu trên thiết bị. Khi mất mạng, mở lại app sau khi có mạng để gửi. Nếu quên mật khẩu, liên hệ TPS1 để được hỗ trợ.
 
@@ -17,7 +18,7 @@ Sau khi web app đặt hàng được triển khai ở địa chỉ chính thứ
 
 ## Dành cho đội triển khai
 
-- Bản `0.1.0-beta.10` là **debug APK** để cài thử nội bộ, ký bằng khóa debug của máy build. Icon Android dùng chính bộ icon web app `public/pwa-512x512.png` và `public/pwa-maskable-512x512.png`, đầy đủ biểu tượng và chữ “Thực Phẩm SỐ MỘT”. Các bản cập nhật gửi cùng nhóm thử phải dùng cùng khóa; trước khi phát hành rộng cần khóa release do TPS1 quản lý. Nền thực phẩm ở màn đăng nhập là ảnh minh họa tạo riêng cho giao diện, không phải ảnh nguồn hàng TPS1.
+- Bản `0.1.0-beta.11` là **debug APK** để cài thử nội bộ, ký bằng khóa debug của máy build. Icon Android dùng chính bộ icon web app `public/pwa-512x512.png` và `public/pwa-maskable-512x512.png`, đầy đủ biểu tượng và chữ “Thực Phẩm SỐ MỘT”. Các bản cập nhật gửi cùng nhóm thử phải dùng cùng khóa; trước khi phát hành rộng cần khóa release do TPS1 quản lý. Nền thực phẩm ở màn đăng nhập là ảnh minh họa tạo riêng cho giao diện, không phải ảnh nguồn hàng TPS1.
 - Đăng nhập bằng SĐT hoặc tên đăng nhập; mã khách hàng cũ vẫn sử dụng được. Khách cũ đặt tên đăng nhập trong mục Tài khoản. Cần áp dụng migration `20261106_customer_username_login.sql` và cập nhật API trước khi thử bản APK này.
 - Hồ sơ và ảnh đại diện cần chạy migration `20261106_customer_profile_requests.sql` và triển khai API mới trước khi dùng. Tên công ty/MST do khách sửa sẽ chờ admin duyệt trong hồ sơ khách hàng.
 - API thay đổi ở web chính phải được triển khai trước khi thử đặt đơn chưa có giá và gắn sale. Không dùng đơn thật để thử trên backend production khi chưa có nhóm nghiệm thu.

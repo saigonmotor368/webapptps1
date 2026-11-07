@@ -5,7 +5,7 @@ import { api, ApiError, requestFile, type ExcelMatchResult } from '../lib/api';
 import { useCart } from '../contexts/CartContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Capacitor } from '@capacitor/core';
-import { Directory, Filesystem } from '@capacitor/filesystem';
+import { saveDocument } from '../lib/android-document';
 
 function money(v: number) {
   return new Intl.NumberFormat('vi-VN').format(Number(v) || 0) + 'đ';
@@ -25,9 +25,12 @@ export default function ExcelOrderPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [downloadMessage, setDownloadMessage] = useState('');
+  const [downloading, setDownloading] = useState(false);
   const [chosenSuggestion, setChosenSuggestion] = useState<Record<number, string>>({});
 
   const downloadTemplate = async () => {
+    if (downloading) return;
+    setDownloading(true);
     try {
       setError('');
       setDownloadMessage('');
@@ -35,15 +38,15 @@ export default function ExcelOrderPage() {
       if (blob.size < 100 || (blob.type && !blob.type.includes('spreadsheet') && !blob.type.includes('octet-stream'))) {
         throw new Error('Tệp mẫu trả về không đúng định dạng Excel');
       }
-      if (Capacitor.isNativePlatform()) {
+      if (Capacitor.getPlatform() === 'android') {
         const data = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
           reader.onload = () => resolve(String(reader.result).split(',')[1]);
           reader.onerror = () => reject(reader.error);
           reader.readAsDataURL(blob);
         });
-        await Filesystem.writeFile({ path: 'TPS1-mau-dat-hang.xlsx', data, directory: Directory.Documents, recursive: true });
-        setDownloadMessage(t('Đã tải file mẫu vào thư mục Tài liệu'));
+        const result = await saveDocument.save({ name: 'TPS1-mau-dat-hang.xlsx', data });
+        if (result.saved) setDownloadMessage(t('File mẫu đã được lưu trên điện thoại'));
         return;
       }
       const url = URL.createObjectURL(blob);
@@ -57,7 +60,9 @@ export default function ExcelOrderPage() {
       window.setTimeout(() => URL.revokeObjectURL(url), 1500);
       setDownloadMessage(t('File mẫu đã được tải xuống'));
     } catch (cause) {
-      setError(cause instanceof Error && cause.message ? cause.message : t('Không tải được file mẫu, vui lòng thử lại'));
+      setError(cause instanceof ApiError ? errorText(cause) : t('Không tải được file mẫu, vui lòng thử lại'));
+    } finally {
+      setDownloading(false);
     }
   };
 
@@ -109,9 +114,10 @@ export default function ExcelOrderPage() {
       <div className="flex flex-wrap gap-3">
         <button
           onClick={downloadTemplate}
-          className="flex items-center gap-2 px-4 py-2.5 border border-[#14231c]/15 rounded-xl font-medium text-[#14231c] hover:bg-white transition-colors"
+          disabled={downloading}
+          className="flex items-center gap-2 px-4 py-2.5 border border-[#14231c]/15 rounded-xl font-medium text-[#14231c] hover:bg-white transition-colors disabled:opacity-60"
         >
-          <Download size={18} /> {t('Tải file mẫu')}
+          <Download size={18} /> {t(downloading ? 'Đang tải file mẫu...' : 'Tải file mẫu')}
         </button>
         <button
           onClick={() => fileInputRef.current?.click()}

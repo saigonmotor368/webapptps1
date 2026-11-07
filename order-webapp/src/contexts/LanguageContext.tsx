@@ -51,6 +51,8 @@ const translations: Record<string, [string, string]> = {
   'Đang tải lịch giao': ['Loading delivery schedule', '正在加载配送时间'],
   'Xem thêm sản phẩm': ['Show more products', '查看更多商品'],
   'File mẫu đã được tải xuống': ['The template has been downloaded.', '模板已下载。'],
+  'Đang tải file mẫu...': ['Downloading template...', '正在下载模板…'],
+  'File mẫu đã được lưu trên điện thoại': ['The template was saved on your phone.', '模板已保存到手机。'],
   'Tải mẫu → điền hàng và số lượng → tải lên': ['Download template → fill items and quantities → upload', '下载模板 → 填写商品和数量 → 上传'],
   'Đã tải file mẫu vào thư mục Tài liệu': ['The template was saved to Documents.', '模板已保存到文档文件夹。'],
   'Tìm sản phẩm rồi thêm vào đơn hàng': ['Find products and add them to your order', '搜索商品并加入订单'],
